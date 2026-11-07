@@ -1,5 +1,16 @@
 # DataCenterOS: PLAN.md
 
+> **UPDATE, Sat 6 PM: the team plans in [`plans/`](plans/README.md) override this file.**
+> - **Lanes, ownership, interfaces and scope:** [`plans/CONTRACTS.md`](plans/CONTRACTS.md) is authoritative wherever it differs from §3 (physics constants, the cooling model, new reducers and columns).
+> - **Team:** 4 people, 5 lanes:
+>   - S (Suvan): physics, eval and merges
+>   - B: SpacetimeDB
+>   - C: agents and NVIDIA/Brev
+>   - D: frontend and pitch
+>   - A: hardware, shared by the whole team
+> - **Scope:** build **Tier 1 only** until it's tagged at 1:00 AM (see `plans/README.md`).
+> - **Live fan fault:** a tape flap first, the coin second.
+
 > **Build any data center. Break anything, including the real fan on our table. Watch AI keep it running.**
 
 HackUTD 2026 "Zero Day". Plan written **Sat Nov 7, 4:20 PM**. Submission is due **Sun 12:00 PM**. Judging runs **Sun 1–4 PM**.
