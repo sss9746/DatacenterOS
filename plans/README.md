@@ -17,16 +17,17 @@ Four people work at the same time across five lanes. **Each person owns their ow
 >
 > **Tier 1 (the version that wins):**
 > 1. **"Build any data center":** a Builder with **3 presets + a simple counts/capacities form** → `build_facility` → a live twin (the compiler is already in S's Phase 1). The default preset is the Pump A trap
-> 2. **"Break anything":** presenter controls that **stack several failures at once** (pump_fail, load_spike, ticket_lie, utility_loss). Physics handles lists of failures, and the agents' worker opens and handles one incident per symptom
+> 2. **"Break anything":** presenter controls that **stack several failures at once** (pump_fail, load_spike, ticket_lie; utility_loss is Tier 2). Physics handles lists of failures, and the agents' worker opens and handles one incident per symptom
 > 3. The real fan driving rack_3, using the RMS-threshold detector
 > 4. The safety engine blocking the Pump A shutdown
 > 5. Agents: diagnose the ticket lie, test 3 plans with `simulate_plan`, execute, verify
 > 6. Live dashboard: facility graph, agent steps, plan cards, fan panel
 > 7. A **20-scenario** eval, giving one real number
+> 8. **A verified shift handoff:** once an incident resolves, the agent writes a note containing only facts confirmed by telemetry, and flags false tickets. It's deterministic, takes about 45 min, and matches NMC²'s "unclear handoff" wording
 >
-> **Tier 2** (after 1 AM; each piece is independent and can be cut freely): Challenge mode (cancel the in-progress plan and **replan** when a new failure lands mid-response), frozen sensor, fan autoencoder, verified handoff, 50-scenario eval, Results page, drag-and-drop builder.
+> **Tier 2** (after 1 AM; each piece is independent and can be cut freely): Challenge mode (cancel the in-progress plan and **replan** when a new failure lands mid-response), frozen sensor, fan autoencoder, utility_loss + UPS scenarios, 50-scenario eval, Results page, drag-and-drop builder.
 >
-> **Cut outright:** UPS/power scenarios, inference on the ESP32 itself, the 2-vs-3-pump comparison, everything marked stretch.
+> **Cut outright:** cascading failures, inference on the ESP32 itself, the 2-vs-3-pump comparison, everything marked stretch.
 >
 > If a lane file says "Phase 2/3" for something that isn't in Tier 1, it's Tier 2.
 
