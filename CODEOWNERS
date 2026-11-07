@@ -1,0 +1,38 @@
+# CODEOWNERS: enforces plans/CONTRACTS.md §0 (lanes and file ownership).
+# Later rules win, so more specific paths come after broader ones.
+# Placeholders to replace with real GitHub handles: <B_GH> (Lane B), <C_GH> (Lane C), <D_GH> (Lane D).
+
+# Default: Lane S (Suvan) owns the repo root and everything not listed below.
+*                               @Suvan8806
+
+# Lane S: core engine, eval, contracts
+/packages/physics/              @Suvan8806
+/eval/                          @Suvan8806
+/plans/CONTRACTS.md             @Suvan8806
+/plans/LANE-S-core.md           @Suvan8806
+/scripts/sync-physics.mjs       @Suvan8806
+
+# Lane C: agents
+/agents/                        @<C_GH>
+
+# Lane D: frontend + pitch
+/apps/web/                      @<D_GH>
+/docs/pitch/                    @<D_GH>
+/docs/devpost.md                @<D_GH>
+
+# Lane B: SpacetimeDB (module_bindings MUST come after /apps/web/ so B wins there)
+/spacetime/                     @<B_GH>
+/scripts/gen-bindings.sh        @<B_GH>
+/apps/web/src/module_bindings/  @<B_GH>
+
+# Lane A: hardware + fan ML + QA, shared by the whole team
+/hardware/                      @Suvan8806 @<B_GH> @<C_GH> @<D_GH>
+/scripts/demo_check.py          @Suvan8806 @<B_GH> @<C_GH> @<D_GH>
+/qa/                            @Suvan8806 @<B_GH> @<C_GH> @<D_GH>
+
+# Status files: each lane edits only its own
+/plans/status/S.md              @Suvan8806
+/plans/status/B.md              @<B_GH>
+/plans/status/C.md              @<C_GH>
+/plans/status/D.md              @<D_GH>
+/plans/status/A.md              @Suvan8806 @<B_GH> @<C_GH> @<D_GH>
