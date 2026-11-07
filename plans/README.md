@@ -4,7 +4,7 @@ Four people work at the same time across five lanes. **Each person owns their ow
 
 | Lane | Person | Your plan file | You own |
 |---|---|---|---|
-| **S: Core engine + integrator** (run with many Claude agents) | **Suvan** | [`LANE-S-core.md`](LANE-S-core.md) | `packages/physics/`, `eval/`, root files, CONTRACTS.md, **merging everything** |
+| **S: Core engine + integrator** (run with many Claude agents) | **Suvan, building now on `lane/s-core`** | [`LANE-S-core.md`](LANE-S-core.md) | `packages/physics/`, `eval/`, root files, CONTRACTS.md, **merging everything** |
 | **B: SpacetimeDB** | Teammate B | [`LANE-B-spacetime.md`](LANE-B-spacetime.md) | `spacetime/module/`, bindings, publishing, tokens |
 | **C: AI agents** | Teammate C | [`LANE-C-agents.md`](LANE-C-agents.md) | `agents/` |
 | **D: Frontend + pitch** | Teammate D | [`LANE-D-frontend.md`](LANE-D-frontend.md) | `apps/web/`, `docs/pitch/`, Devpost |
