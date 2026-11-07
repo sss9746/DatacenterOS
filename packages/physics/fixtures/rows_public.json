@@ -1,0 +1,1220 @@
+{
+  "facility": [
+    {
+      "id": 1,
+      "name": "DC-1 Demo Hall",
+      "template": "enterprise",
+      "seed": 42,
+      "tick": 300,
+      "sim_time_s": 300,
+      "status": "normal"
+    }
+  ],
+  "component": [
+    {
+      "id": "util_1",
+      "kind": "utility",
+      "label": "Utility 1",
+      "status": "online",
+      "params_json": "{\"capacity_kw\":200}",
+      "is_real_hardware": false,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "ups_1",
+      "kind": "ups",
+      "label": "UPS 1",
+      "status": "online",
+      "params_json": "{\"energy_kwh\":20,\"max_output_kw\":120}",
+      "is_real_hardware": false,
+      "x": 220,
+      "y": 0
+    },
+    {
+      "id": "pump_A",
+      "kind": "pump",
+      "label": "Pump A",
+      "status": "online",
+      "params_json": "{\"capacity_kw\":50}",
+      "is_real_hardware": false,
+      "x": 440,
+      "y": 0
+    },
+    {
+      "id": "pump_B",
+      "kind": "pump",
+      "label": "Pump B",
+      "status": "offline",
+      "params_json": "{\"capacity_kw\":50}",
+      "is_real_hardware": false,
+      "x": 440,
+      "y": 130
+    },
+    {
+      "id": "rack_1",
+      "kind": "rack",
+      "label": "Rack 1",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 700,
+      "y": 0
+    },
+    {
+      "id": "rack_2",
+      "kind": "rack",
+      "label": "Rack 2",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 870,
+      "y": 0
+    },
+    {
+      "id": "rack_3",
+      "kind": "rack",
+      "label": "Rack 3 (real fan)",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": true,
+      "x": 1040,
+      "y": 0
+    },
+    {
+      "id": "rack_4",
+      "kind": "rack",
+      "label": "Rack 4",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 1210,
+      "y": 0
+    },
+    {
+      "id": "rack_5",
+      "kind": "rack",
+      "label": "Rack 5",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 700,
+      "y": 130
+    },
+    {
+      "id": "rack_6",
+      "kind": "rack",
+      "label": "Rack 6",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 870,
+      "y": 130
+    },
+    {
+      "id": "rack_7",
+      "kind": "rack",
+      "label": "Rack 7",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 1040,
+      "y": 130
+    },
+    {
+      "id": "rack_8",
+      "kind": "rack",
+      "label": "Rack 8",
+      "status": "online",
+      "params_json": "{\"base_load_kw\":6,\"thermal_mass_kj_per_c\":60}",
+      "is_real_hardware": false,
+      "x": 1210,
+      "y": 130
+    }
+  ],
+  "edge": [
+    {
+      "id": 1,
+      "from_id": "util_1",
+      "to_id": "ups_1",
+      "kind": "power"
+    },
+    {
+      "id": 2,
+      "from_id": "ups_1",
+      "to_id": "rack_1",
+      "kind": "power"
+    },
+    {
+      "id": 3,
+      "from_id": "ups_1",
+      "to_id": "rack_2",
+      "kind": "power"
+    },
+    {
+      "id": 4,
+      "from_id": "ups_1",
+      "to_id": "rack_3",
+      "kind": "power"
+    },
+    {
+      "id": 5,
+      "from_id": "ups_1",
+      "to_id": "rack_4",
+      "kind": "power"
+    },
+    {
+      "id": 6,
+      "from_id": "ups_1",
+      "to_id": "rack_5",
+      "kind": "power"
+    },
+    {
+      "id": 7,
+      "from_id": "ups_1",
+      "to_id": "rack_6",
+      "kind": "power"
+    },
+    {
+      "id": 8,
+      "from_id": "ups_1",
+      "to_id": "rack_7",
+      "kind": "power"
+    },
+    {
+      "id": 9,
+      "from_id": "ups_1",
+      "to_id": "rack_8",
+      "kind": "power"
+    },
+    {
+      "id": 10,
+      "from_id": "ups_1",
+      "to_id": "pump_A",
+      "kind": "power"
+    },
+    {
+      "id": 11,
+      "from_id": "ups_1",
+      "to_id": "pump_B",
+      "kind": "power"
+    },
+    {
+      "id": 12,
+      "from_id": "pump_A",
+      "to_id": "rack_1",
+      "kind": "cooling"
+    },
+    {
+      "id": 13,
+      "from_id": "pump_A",
+      "to_id": "rack_2",
+      "kind": "cooling"
+    },
+    {
+      "id": 14,
+      "from_id": "pump_A",
+      "to_id": "rack_3",
+      "kind": "cooling"
+    },
+    {
+      "id": 15,
+      "from_id": "pump_A",
+      "to_id": "rack_4",
+      "kind": "cooling"
+    },
+    {
+      "id": 16,
+      "from_id": "pump_A",
+      "to_id": "rack_5",
+      "kind": "cooling"
+    },
+    {
+      "id": 17,
+      "from_id": "pump_A",
+      "to_id": "rack_6",
+      "kind": "cooling"
+    },
+    {
+      "id": 18,
+      "from_id": "pump_A",
+      "to_id": "rack_7",
+      "kind": "cooling"
+    },
+    {
+      "id": 19,
+      "from_id": "pump_A",
+      "to_id": "rack_8",
+      "kind": "cooling"
+    },
+    {
+      "id": 20,
+      "from_id": "pump_B",
+      "to_id": "rack_1",
+      "kind": "cooling"
+    },
+    {
+      "id": 21,
+      "from_id": "pump_B",
+      "to_id": "rack_2",
+      "kind": "cooling"
+    },
+    {
+      "id": 22,
+      "from_id": "pump_B",
+      "to_id": "rack_3",
+      "kind": "cooling"
+    },
+    {
+      "id": 23,
+      "from_id": "pump_B",
+      "to_id": "rack_4",
+      "kind": "cooling"
+    },
+    {
+      "id": 24,
+      "from_id": "pump_B",
+      "to_id": "rack_5",
+      "kind": "cooling"
+    },
+    {
+      "id": 25,
+      "from_id": "pump_B",
+      "to_id": "rack_6",
+      "kind": "cooling"
+    },
+    {
+      "id": 26,
+      "from_id": "pump_B",
+      "to_id": "rack_7",
+      "kind": "cooling"
+    },
+    {
+      "id": 27,
+      "from_id": "pump_B",
+      "to_id": "rack_8",
+      "kind": "cooling"
+    }
+  ],
+  "telemetry_latest": [
+    {
+      "component_id": "util_1",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 50.5,
+      "cooling_kw": 0,
+      "load_kw": 0,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "ups_1",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "load_kw": 0,
+      "ups_energy_kwh": 20,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "pump_A",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 2.5,
+      "cooling_kw": 50,
+      "load_kw": 2.5,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "pump_B",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "load_kw": 0,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_1",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_2",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_3",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0.12,
+      "fan_online": true,
+      "fan_fault_class": "healthy",
+      "fan_rms": 0.031,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_4",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_5",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_6",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_7",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    },
+    {
+      "component_id": "rack_8",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "load_kw": 6,
+      "ups_energy_kwh": 0,
+      "fan_health": 1,
+      "fan_anomaly": 0,
+      "fan_online": true,
+      "fan_fault_class": "",
+      "fan_rms": 0,
+      "sensor_age_s": 0
+    }
+  ],
+  "telemetry_history": [
+    {
+      "id": 1,
+      "component_id": "rack_3",
+      "tick": 271,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 2,
+      "component_id": "rack_3",
+      "tick": 272,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 3,
+      "component_id": "rack_3",
+      "tick": 273,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 4,
+      "component_id": "rack_3",
+      "tick": 274,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 5,
+      "component_id": "rack_3",
+      "tick": 275,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 6,
+      "component_id": "rack_3",
+      "tick": 276,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 7,
+      "component_id": "rack_3",
+      "tick": 277,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 8,
+      "component_id": "rack_3",
+      "tick": 278,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 9,
+      "component_id": "rack_3",
+      "tick": 279,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 10,
+      "component_id": "rack_3",
+      "tick": 280,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 11,
+      "component_id": "rack_3",
+      "tick": 281,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 12,
+      "component_id": "rack_3",
+      "tick": 282,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 13,
+      "component_id": "rack_3",
+      "tick": 283,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 14,
+      "component_id": "rack_3",
+      "tick": 284,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 15,
+      "component_id": "rack_3",
+      "tick": 285,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 16,
+      "component_id": "rack_3",
+      "tick": 286,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 17,
+      "component_id": "rack_3",
+      "tick": 287,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 18,
+      "component_id": "rack_3",
+      "tick": 288,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 19,
+      "component_id": "rack_3",
+      "tick": 289,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 20,
+      "component_id": "rack_3",
+      "tick": 290,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 21,
+      "component_id": "rack_3",
+      "tick": 291,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 22,
+      "component_id": "rack_3",
+      "tick": 292,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 23,
+      "component_id": "rack_3",
+      "tick": 293,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 24,
+      "component_id": "rack_3",
+      "tick": 294,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 25,
+      "component_id": "rack_3",
+      "tick": 295,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 26,
+      "component_id": "rack_3",
+      "tick": 296,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 27,
+      "component_id": "rack_3",
+      "tick": 297,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 28,
+      "component_id": "rack_3",
+      "tick": 298,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.12
+    },
+    {
+      "id": 29,
+      "component_id": "rack_3",
+      "tick": 299,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.13
+    },
+    {
+      "id": 30,
+      "component_id": "rack_3",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 6,
+      "cooling_kw": 6,
+      "fan_anomaly": 0.11
+    },
+    {
+      "id": 31,
+      "component_id": "pump_B",
+      "tick": 271,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 32,
+      "component_id": "pump_B",
+      "tick": 272,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 33,
+      "component_id": "pump_B",
+      "tick": 273,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 34,
+      "component_id": "pump_B",
+      "tick": 274,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 35,
+      "component_id": "pump_B",
+      "tick": 275,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 36,
+      "component_id": "pump_B",
+      "tick": 276,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 37,
+      "component_id": "pump_B",
+      "tick": 277,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 38,
+      "component_id": "pump_B",
+      "tick": 278,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 39,
+      "component_id": "pump_B",
+      "tick": 279,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 40,
+      "component_id": "pump_B",
+      "tick": 280,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 41,
+      "component_id": "pump_B",
+      "tick": 281,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 42,
+      "component_id": "pump_B",
+      "tick": 282,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 43,
+      "component_id": "pump_B",
+      "tick": 283,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 44,
+      "component_id": "pump_B",
+      "tick": 284,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 45,
+      "component_id": "pump_B",
+      "tick": 285,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 46,
+      "component_id": "pump_B",
+      "tick": 286,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 47,
+      "component_id": "pump_B",
+      "tick": 287,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 48,
+      "component_id": "pump_B",
+      "tick": 288,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 49,
+      "component_id": "pump_B",
+      "tick": 289,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 50,
+      "component_id": "pump_B",
+      "tick": 290,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 51,
+      "component_id": "pump_B",
+      "tick": 291,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 52,
+      "component_id": "pump_B",
+      "tick": 292,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 53,
+      "component_id": "pump_B",
+      "tick": 293,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 54,
+      "component_id": "pump_B",
+      "tick": 294,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 55,
+      "component_id": "pump_B",
+      "tick": 295,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 56,
+      "component_id": "pump_B",
+      "tick": 296,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 57,
+      "component_id": "pump_B",
+      "tick": 297,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 58,
+      "component_id": "pump_B",
+      "tick": 298,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 59,
+      "component_id": "pump_B",
+      "tick": 299,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    },
+    {
+      "id": 60,
+      "component_id": "pump_B",
+      "tick": 300,
+      "temp_c": 22,
+      "power_kw": 0,
+      "cooling_kw": 0,
+      "fan_anomaly": 0
+    }
+  ],
+  "ticket": [
+    {
+      "id": 40,
+      "component_id": "pump_A",
+      "title": "Quarterly bearing check",
+      "status": "completed",
+      "notes": "Bearings inspected, OK",
+      "created_tick": 0
+    },
+    {
+      "id": 41,
+      "component_id": "pump_B",
+      "title": "Repair: pump_B",
+      "status": "completed",
+      "notes": "Replaced impeller, pump back online",
+      "created_tick": 125
+    }
+  ],
+  "shift_note": [
+    {
+      "id": 1,
+      "author": "human",
+      "body": "Night shift: Pump B work done, all good",
+      "verified": true,
+      "tick": 0
+    }
+  ],
+  "incident": [
+    {
+      "id": 12,
+      "opened_tick": 290,
+      "symptom": "operator_question",
+      "component_ids": "pump_A,pump_B",
+      "severity": "high",
+      "status": "awaiting_approval",
+      "hypothesis": "pump_B is still failed despite ticket #41; shutting down pump_A would leave 0 kW of cooling for 48 kW of IT load.",
+      "chosen_plan_json": "{\"name\":\"Migrate 3 kW off rack_3\",\"actions\":[{\"kind\":\"migrate_load\",\"target_id\":\"rack_3\",\"params\":{\"kw\":3,\"to\":\"rack_1\"}}],\"outcome\":{\"min_cooling_margin_kw\":1.5,\"peak_temp_c\":37.2,\"racks_degraded\":0,\"racks_shutdown\":0,\"downtime_rack_s\":0}}",
+      "resolved_tick": 0
+    }
+  ],
+  "action": [
+    {
+      "id": 7,
+      "request_key": "6f1c2b9e-4d3a-4f8e-9b1a-2c7d5e8f0a13",
+      "requested_by": "agent",
+      "kind": "shutdown_component",
+      "target_id": "pump_A",
+      "params_json": "{}",
+      "status": "blocked",
+      "safety_reason": "BLOCKED: cooling 0 kW < load 48 kW; projected: 8 racks shut down within 360 s",
+      "predicted_json": "{\"min_cooling_margin_kw\":-48,\"peak_temp_c\":33.6,\"racks_degraded\":0,\"racks_shutdown\":0,\"downtime_rack_s\":0}",
+      "incident_id": 12,
+      "tick": 297
+    }
+  ],
+  "agent_step": [
+    {
+      "id": 1,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 1,
+      "kind": "thought",
+      "tool": "",
+      "summary": "Operator asks whether pump_A can be shut down. Check both pumps and their maintenance history first.",
+      "payload_json": "{}",
+      "tick": 291
+    },
+    {
+      "id": 2,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 2,
+      "kind": "tool_call",
+      "tool": "get_component_status",
+      "summary": "get_component_status(pump_A)",
+      "payload_json": "{\"args\":{\"id\":\"pump_A\"}}",
+      "tick": 292
+    },
+    {
+      "id": 3,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 3,
+      "kind": "tool_result",
+      "tool": "get_component_status",
+      "summary": "pump_A online, 50 kW cooling",
+      "payload_json": "{\"result\":{\"id\":\"pump_A\",\"kind\":\"pump\",\"status\":\"online\",\"cooling_kw\":50,\"power_kw\":2.5}}",
+      "tick": 293
+    },
+    {
+      "id": 4,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 4,
+      "kind": "tool_call",
+      "tool": "get_maintenance_logs",
+      "summary": "get_maintenance_logs(pump_B)",
+      "payload_json": "{\"args\":{\"id\":\"pump_B\"}}",
+      "tick": 294
+    },
+    {
+      "id": 5,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 5,
+      "kind": "tool_result",
+      "tool": "get_maintenance_logs",
+      "summary": "Ticket #41 \"Repair: pump_B\" completed",
+      "payload_json": "{\"result\":[{\"id\":41,\"component_id\":\"pump_B\",\"title\":\"Repair: pump_B\",\"status\":\"completed\",\"notes\":\"Replaced impeller, pump back online\",\"created_tick\":125}]}",
+      "tick": 295
+    },
+    {
+      "id": 6,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 6,
+      "kind": "tool_call",
+      "tool": "get_component_status",
+      "summary": "get_component_status(pump_B)",
+      "payload_json": "{\"args\":{\"id\":\"pump_B\"}}",
+      "tick": 296
+    },
+    {
+      "id": 7,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 7,
+      "kind": "tool_result",
+      "tool": "get_component_status",
+      "summary": "pump_B offline, 0 kW cooling",
+      "payload_json": "{\"result\":{\"id\":\"pump_B\",\"kind\":\"pump\",\"status\":\"offline\",\"cooling_kw\":0,\"power_kw\":0}}",
+      "tick": 297
+    },
+    {
+      "id": 8,
+      "incident_id": 12,
+      "agent": "diagnose",
+      "step_no": 8,
+      "kind": "decision",
+      "tool": "",
+      "summary": "Contradiction: ticket #41 says repaired, pump_B is offline",
+      "payload_json": "{\"hypothesis\":\"pump_B is still failed; ticket #41 is wrong. pump_A is the only working pump (margin +2 kW).\",\"evidence\":[\"ticket #41 status=completed\",\"pump_B status=offline, cooling 0 kW\",\"cooling 50 kW vs IT load 48 kW\"]}",
+      "tick": 298
+    },
+    {
+      "id": 9,
+      "incident_id": 12,
+      "agent": "plan",
+      "step_no": 9,
+      "kind": "decision",
+      "tool": "",
+      "summary": "Chose \"Migrate 3 kW off rack_3\": lowest downtime with no shutdowns",
+      "payload_json": "{\"plans\":[{\"name\":\"Migrate 3 kW off rack_3\",\"actions\":[{\"kind\":\"migrate_load\",\"target_id\":\"rack_3\",\"params\":{\"kw\":3,\"to\":\"rack_1\"}}],\"outcome\":{\"min_cooling_margin_kw\":1.5,\"peak_temp_c\":37.2,\"racks_degraded\":0,\"racks_shutdown\":0,\"downtime_rack_s\":0}},{\"name\":\"Shed rack_8\",\"actions\":[{\"kind\":\"shed_load\",\"target_id\":\"rack_8\",\"params\":{\"kw\":6}}],\"outcome\":{\"min_cooling_margin_kw\":8,\"peak_temp_c\":41.8,\"racks_degraded\":0,\"racks_shutdown\":0,\"downtime_rack_s\":0}},{\"name\":\"Do nothing\",\"actions\":[],\"outcome\":{\"min_cooling_margin_kw\":2,\"peak_temp_c\":47.5,\"racks_degraded\":1,\"racks_shutdown\":0,\"downtime_rack_s\":165}}],\"chosen\":0,\"reason\":\"Lowest downtime with no shutdowns\"}",
+      "tick": 299
+    },
+    {
+      "id": 10,
+      "incident_id": 12,
+      "agent": "handoff",
+      "step_no": 10,
+      "kind": "thought",
+      "tool": "",
+      "summary": "Pump A must stay online until pump_B is physically repaired. Ticket #41 needs to be reopened; dispatch a tech to pump_B.",
+      "payload_json": "{}",
+      "tick": 300
+    }
+  ],
+  "metric": [
+    {
+      "key": "events_per_s",
+      "value": 14
+    },
+    {
+      "key": "subscribers",
+      "value": 3
+    },
+    {
+      "key": "agent_calls",
+      "value": 9
+    },
+    {
+      "key": "agent_tokens",
+      "value": 4120
+    },
+    {
+      "key": "downtime_rack_s",
+      "value": 0
+    },
+    {
+      "key": "unsafe_blocked",
+      "value": 1
+    },
+    {
+      "key": "unsafe_executed",
+      "value": 0
+    }
+  ]
+}

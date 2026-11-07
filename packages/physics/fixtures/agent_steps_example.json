@@ -1,0 +1,112 @@
+[
+  {
+    "id": 1,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 1,
+    "kind": "thought",
+    "tool": "",
+    "summary": "Operator asks whether pump_A can be shut down. Check both pumps and their maintenance history first.",
+    "payload_json": "{}",
+    "tick": 291
+  },
+  {
+    "id": 2,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 2,
+    "kind": "tool_call",
+    "tool": "get_component_status",
+    "summary": "get_component_status(pump_A)",
+    "payload_json": "{\"args\":{\"id\":\"pump_A\"}}",
+    "tick": 292
+  },
+  {
+    "id": 3,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 3,
+    "kind": "tool_result",
+    "tool": "get_component_status",
+    "summary": "pump_A online, 50 kW cooling",
+    "payload_json": "{\"result\":{\"id\":\"pump_A\",\"kind\":\"pump\",\"status\":\"online\",\"cooling_kw\":50,\"power_kw\":2.5}}",
+    "tick": 293
+  },
+  {
+    "id": 4,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 4,
+    "kind": "tool_call",
+    "tool": "get_maintenance_logs",
+    "summary": "get_maintenance_logs(pump_B)",
+    "payload_json": "{\"args\":{\"id\":\"pump_B\"}}",
+    "tick": 294
+  },
+  {
+    "id": 5,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 5,
+    "kind": "tool_result",
+    "tool": "get_maintenance_logs",
+    "summary": "Ticket #41 \"Repair: pump_B\" completed",
+    "payload_json": "{\"result\":[{\"id\":41,\"component_id\":\"pump_B\",\"title\":\"Repair: pump_B\",\"status\":\"completed\",\"notes\":\"Replaced impeller, pump back online\",\"created_tick\":125}]}",
+    "tick": 295
+  },
+  {
+    "id": 6,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 6,
+    "kind": "tool_call",
+    "tool": "get_component_status",
+    "summary": "get_component_status(pump_B)",
+    "payload_json": "{\"args\":{\"id\":\"pump_B\"}}",
+    "tick": 296
+  },
+  {
+    "id": 7,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 7,
+    "kind": "tool_result",
+    "tool": "get_component_status",
+    "summary": "pump_B offline, 0 kW cooling",
+    "payload_json": "{\"result\":{\"id\":\"pump_B\",\"kind\":\"pump\",\"status\":\"offline\",\"cooling_kw\":0,\"power_kw\":0}}",
+    "tick": 297
+  },
+  {
+    "id": 8,
+    "incident_id": 12,
+    "agent": "diagnose",
+    "step_no": 8,
+    "kind": "decision",
+    "tool": "",
+    "summary": "Contradiction: ticket #41 says repaired, pump_B is offline",
+    "payload_json": "{\"hypothesis\":\"pump_B is still failed; ticket #41 is wrong. pump_A is the only working pump (margin +2 kW).\",\"evidence\":[\"ticket #41 status=completed\",\"pump_B status=offline, cooling 0 kW\",\"cooling 50 kW vs IT load 48 kW\"]}",
+    "tick": 298
+  },
+  {
+    "id": 9,
+    "incident_id": 12,
+    "agent": "plan",
+    "step_no": 9,
+    "kind": "decision",
+    "tool": "",
+    "summary": "Chose \"Migrate 3 kW off rack_3\": lowest downtime with no shutdowns",
+    "payload_json": "{\"plans\":[{\"name\":\"Migrate 3 kW off rack_3\",\"actions\":[{\"kind\":\"migrate_load\",\"target_id\":\"rack_3\",\"params\":{\"kw\":3,\"to\":\"rack_1\"}}],\"outcome\":{\"min_cooling_margin_kw\":1.5,\"peak_temp_c\":37.2,\"racks_degraded\":0,\"racks_shutdown\":0,\"downtime_rack_s\":0}},{\"name\":\"Shed rack_8\",\"actions\":[{\"kind\":\"shed_load\",\"target_id\":\"rack_8\",\"params\":{\"kw\":6}}],\"outcome\":{\"min_cooling_margin_kw\":8,\"peak_temp_c\":41.8,\"racks_degraded\":0,\"racks_shutdown\":0,\"downtime_rack_s\":0}},{\"name\":\"Do nothing\",\"actions\":[],\"outcome\":{\"min_cooling_margin_kw\":2,\"peak_temp_c\":47.5,\"racks_degraded\":1,\"racks_shutdown\":0,\"downtime_rack_s\":165}}],\"chosen\":0,\"reason\":\"Lowest downtime with no shutdowns\"}",
+    "tick": 299
+  },
+  {
+    "id": 10,
+    "incident_id": 12,
+    "agent": "handoff",
+    "step_no": 10,
+    "kind": "thought",
+    "tool": "",
+    "summary": "Pump A must stay online until pump_B is physically repaired. Ticket #41 needs to be reopened; dispatch a tech to pump_B.",
+    "payload_json": "{}",
+    "tick": 300
+  }
+]
