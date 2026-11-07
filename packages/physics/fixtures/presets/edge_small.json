@@ -1,0 +1,28 @@
+{
+  "name": "Edge Site",
+  "template": "edge",
+  "seed": 42,
+  "components": {
+    "utility": {
+      "count": 1,
+      "capacity_kw": 60
+    },
+    "ups": {
+      "count": 1,
+      "energy_kwh": 5,
+      "max_output_kw": 40
+    },
+    "pump": {
+      "count": 1,
+      "capacity_kw": 30
+    },
+    "rack": {
+      "count": 4,
+      "load_kw": 5,
+      "real_fan_rack": 3
+    }
+  },
+  "redundancy": {
+    "cooling": "N"
+  }
+}

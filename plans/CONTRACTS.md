@@ -175,7 +175,7 @@ export function makeRng(seed: number): Rng;          // mulberry32, for eval/tes
 - **E1:** S may merge the fixtures to `main` at 6:15 PM.
 - **E2:** S may tag `hard-piece` at the 3:00 AM S+B+C check.
 
-**Demo note for D:** the default facility (2 × 50 kW pumps, 48 kW of racks) **meets** N+1, so it produces no warning. To show the compiler's warning in the Builder, use the preset "AI Hall B, 2 × 30 kW pumps". The Pump A trap still uses the default facility.
+**Demo note for D:** the default facility (2 × 50 kW pumps, 48 kW of racks) **meets** N+1, so it produces no warning. To show the compiler's warning in the Builder, load the "AI Hall B" preset (`ai_hall_3pump`, 3 × 30 kW, which shows the ✔ N+1 line), then **change the pump count to 2**. That produces "N+1 NOT met: 2×30 kW minus 30 = 30 kW < 48 kW. Suggest pump capacity ≥ 48 kW." The Pump A trap still uses the default facility.
 
 **`checkAction` reason strings** (C's agents parse these, so keep the prefixes):
 - `OK: ...`
@@ -227,7 +227,7 @@ Arguments are given in order. Python sends them as a **JSON array** in exactly t
 
 | Name | Args | Allowed roles | Behavior |
 |---|---|---|---|
-| `seed_demo_facility` | `()` | admin, presenter | `compileTopology(defaultDemoConfig())`. Writes all tables, inserts ticket #40 (`pump_A`, "Quarterly bearing check", `completed`, true) and shift note (author `human`): "Night shift: Pump B work done, all good". Clears incidents, actions and agent_steps. Starts the tick |
+| `seed_demo_facility` | `()` | admin, presenter | `compileTopology(defaultDemoConfig())`. Writes all tables, inserts ticket #40 (`pump_A`, "Quarterly bearing check", `completed`; this ticket is accurate) and the shift note (author `human`, `verified=false`): "Night shift: Pump B work done, all good". Clears incidents, actions and agent_steps. Starts the tick |
 | `build_facility` | `(config_json: string)` | admin, presenter | Like seed, but with the given config. Writes each compiler warning as a `shift_note` (author `system`) |
 | `tick` | scheduled | system | ×`speed` steps per call: `step`, then write `ground_truth`, `telemetry_latest` and `telemetry_history` (prune to 120 per component), then `detect` (open new incidents for symptoms that have no open incident), then metrics |
 | `inject_failure` | `(kind: string, target_id: string, params_json: string)` — params per kind: `pump_fail` `{}` (target = pump), `utility_loss` `{}` (target = utility), `sensor_freeze` `{}` (target = rack), `load_spike` `{"extra_kw": 4, "tenant": "Vision team · training job"}` (target = rack; `tenant` is an optional display label, which the UI shows as the noisy neighbor), `ticket_lie` `{}` (target = the component the false ticket claims was repaired) | admin, presenter | Inserts a `failure` and calls `applyFailure`. `ticket_lie` also inserts **ticket #41** (`target_id`, "Repair: <target>", `completed`, notes "Replaced impeller, pump back online"). The physical state is unchanged |
