@@ -66,6 +66,23 @@ function observe(t: Tracker, s: FacilityState, racks: string[], elapsedS: number
   return down;
 }
 
+/**
+ * A counterfactual has no bridge feeding it, so without this the fan timeout (step §3.1 item 4) would reset
+ * fan_health to 1 after 5 ticks and make "do nothing" look harmless. The last live fan reading is assumed to persist
+ * over the horizon: refresh fan_last_seen_tick on live real-fan racks. Returns a new state (copy-on-write).
+ */
+function holdFanReadings(s: FacilityState): FacilityState {
+  let comps: FacilityState['components'] | null = null;
+  for (const id of Object.keys(s.components)) {
+    const c = s.components[id];
+    if (c.is_real_hardware && c.fan_online && c.fan_last_seen_tick > 0 && c.fan_last_seen_tick !== s.tick) {
+      comps = comps ?? { ...s.components };
+      comps[id] = { ...c, fan_last_seen_tick: s.tick };
+    }
+  }
+  return comps === null ? s : { ...s, components: comps };
+}
+
 /** simulate() with extra trace detail. Throws (via applyAction) on an invalid action. */
 export function simulateTrace(s: FacilityState, actions: Action[], ticks: number, rng: Rng): SimTrace {
   if (!Number.isFinite(ticks) || ticks < 0) {
@@ -91,7 +108,7 @@ export function simulateTrace(s: FacilityState, actions: Action[], ticks: number
   observe(t, cur, racks, 0);
 
   for (let k = 1; k <= n; k++) {
-    cur = step(cur, SIM_DT_S, rng);
+    cur = step(holdFanReadings(cur), SIM_DT_S, rng);
     t.downtime += SIM_DT_S * observe(t, cur, racks, k * SIM_DT_S);
   }
 
