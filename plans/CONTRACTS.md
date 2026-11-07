@@ -171,6 +171,9 @@ export function makeRng(seed: number): Rng;          // mulberry32, for eval/tes
 - **Lead-time CSV** goes in `hardware/bridge/results/fan_leadtime.csv`. Lane S copies it into `eval/results/`.
 - **The eval reads true state** from the scenario files and physics replays, *not* from private tables (only the module owner can read those). If B's owner token is needed, it's used only on the local `dcos-eval`.
 
+- **`simulate` and `checkAction` hold the last live fan reading** for the whole horizon, because no bridge readings arrive in a counterfactual run. Without this, the fan timeout would "heal" the fan and hide the fault.
+- **`effectiveRackLoad(s, id, view)`** (from `balance.ts`) includes an active `load_spike`'s `extra_kw` in both views. **B uses it for each rack's `telemetry_latest.power_kw`.**
+
 **Merge exceptions** (in addition to §11):
 - **E1:** S may merge the fixtures to `main` at 6:15 PM.
 - **E2:** S may tag `hard-piece` at the 3:00 AM S+B+C check.
