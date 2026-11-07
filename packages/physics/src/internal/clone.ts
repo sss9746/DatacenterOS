@@ -1,4 +1,4 @@
-// Hand-written deep clone of FacilityState (LANE-S §3: no structuredClone, no JSON round-trip).
+// Hand-written deep clone of FacilityState (LANE-S §3: no built-in structured clone, no JSON round-trip).
 import type { ComponentState, Edge, FacilityState, Failure } from '../types.js';
 
 export function cloneComponent(c: ComponentState): ComponentState {
