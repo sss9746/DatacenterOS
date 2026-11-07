@@ -25,7 +25,16 @@ Four people work at the same time across five lanes. **Each person owns their ow
 > 7. A **20-scenario** eval, giving one real number
 > 8. **A verified shift handoff:** once an incident resolves, the agent writes a note containing only facts confirmed by telemetry, and flags false tickets. It's deterministic, takes about 45 min, and matches NMC²'s "unclear handoff" wording
 >
-> **Tier 2** (after 1 AM; each piece is independent and can be cut freely): Challenge mode (cancel the in-progress plan and **replan** when a new failure lands mid-response), frozen sensor, fan autoencoder, utility_loss + UPS scenarios, 50-scenario eval, Results page, drag-and-drop builder.
+> **Tier 2 is a ranked queue** (after 1 AM; expect to finish about 3–5 items). Whoever frees up claims the **top unclaimed** item in their status file:
+> 1. Challenge mode: cancel the in-progress plan and **replan** when a new failure lands mid-response (C, ~1.25 h)
+> 2. Frozen sensor (S + C, ~1.5 h)
+> 3. 50-scenario eval (S, ~1 h)
+> 4. Fan autoencoder (the team, ~2 h)
+> 5. Results page (D, ~45 min)
+> 6. utility_loss + UPS scenarios (S + B, ~1–2 h)
+> 7. Drag-and-drop builder (D, ~2 h)
+>
+> **Stop starting new Tier 2 items at 8:30 AM.** After that it's only polish, the video and rehearsal.
 >
 > **Cut outright:** cascading failures, inference on the ESP32 itself, the 2-vs-3-pump comparison, everything marked stretch.
 >
