@@ -1,0 +1,28 @@
+{
+  "name": "AI Hall B",
+  "template": "ai_compute",
+  "seed": 42,
+  "components": {
+    "utility": {
+      "count": 1,
+      "capacity_kw": 200
+    },
+    "ups": {
+      "count": 1,
+      "energy_kwh": 20,
+      "max_output_kw": 120
+    },
+    "pump": {
+      "count": 3,
+      "capacity_kw": 30
+    },
+    "rack": {
+      "count": 8,
+      "load_kw": 6,
+      "real_fan_rack": 3
+    }
+  },
+  "redundancy": {
+    "cooling": "N+1"
+  }
+}

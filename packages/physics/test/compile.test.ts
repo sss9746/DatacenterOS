@@ -204,3 +204,27 @@ describe('fixtures', () => {
     expect(typeof payload.reason).toBe('string');
   });
 });
+
+describe('PRESET_CONFIGS', () => {
+  it('every preset compiles and matches its fixture JSON', async () => {
+    const { PRESET_CONFIGS } = await import('../src/presets.js');
+    const warnings = readFixture('presets/warnings.json') as Record<string, string[]>;
+    expect(Object.keys(PRESET_CONFIGS).sort()).toEqual(['ai_hall_3pump', 'edge_small', 'enterprise_2pump']);
+    for (const [key, cfg] of Object.entries(PRESET_CONFIGS)) {
+      const out = compileTopology(cfg);
+      expect(readFixture(`presets/${key}.json`)).toEqual(cfg);
+      expect(warnings[key]).toEqual(out.warnings);
+    }
+    expect(PRESET_CONFIGS.enterprise_2pump.name).toBe('Enterprise DC-1');
+  });
+
+  it('ai_hall_3pump yields the ✔ N+1 warning; dropping to 2 pumps yields NOT met', async () => {
+    const { PRESET_CONFIGS } = await import('../src/presets.js');
+    const ai = PRESET_CONFIGS.ai_hall_3pump;
+    expect(compileTopology(ai).warnings[0]).toBe(
+      'Requested N+1 cooling: 3×30 kW = 90 kW, minus the largest pump = 60 kW ≥ 48 kW IT load ✔',
+    );
+    const two = { ...ai, components: { ...ai.components, pump: { count: 2, capacity_kw: 30 } } };
+    expect(compileTopology(two).warnings[0]).toBe('N+1 NOT met: 2×30 kW minus 30 = 30 kW < 48 kW. Suggest pump capacity ≥ 48 kW.');
+  });
+});
