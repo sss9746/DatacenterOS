@@ -15,21 +15,6 @@ import {
   type FailureKind,
 } from '../src/index.js';
 
-// S-4 step 1: these need S-2 (step/balance/actions/failures) and S-3 (compile). Skipped until they land.
-const READY = (() => {
-  try {
-    const s = compileTopology(defaultDemoConfig()).state;
-    step(s, 1, makeRng(1));
-    computeBalance(s, 'true');
-    applyAction(s, { kind: 'dispatch_tech', target_id: 'pump_A', params: {} });
-    applyFailure(s, fail('pump_fail', 'pump_B'));
-    setFanReading(s, 'rack_3', 0.5, 1);
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 function fail(kind: FailureKind, target_id: string, params: Failure['params'] = {}, id = 1): Failure {
   return { id, kind, target_id, params, start_tick: 0, active: true };
 }
@@ -44,7 +29,7 @@ function deepFreeze<T>(o: T): T {
   return o;
 }
 
-describe.skipIf(!READY)('simulate: Outcome definitions (LANE-S §3.2/§3.3)', () => {
+describe('simulate: Outcome definitions (LANE-S §3.2/§3.3)', () => {
   it('healthy facility: margin +52, racks stay at 22 °C, no downtime', () => {
     const o = simulate(def(), [], 600, rng());
     expect(o.min_cooling_margin_kw).toBeCloseTo(52, 5);
@@ -121,11 +106,5 @@ describe.skipIf(!READY)('simulate: Outcome definitions (LANE-S §3.2/§3.3)', ()
     expect(fixed.peak_temp_c).toBeLessThan(none.peak_temp_c);
     expect(fixed.downtime_rack_s).toBeLessThanOrEqual(none.downtime_rack_s);
     expect(fixed.min_cooling_margin_kw).toBeGreaterThanOrEqual(none.min_cooling_margin_kw);
-  });
-});
-
-describe('simulate: gating', () => {
-  it.skipIf(READY)('real simulate tests are skipped until S-2 + S-3 land (remove this gate in S-4 step 5)', () => {
-    expect(READY).toBe(false);
   });
 });

@@ -18,21 +18,6 @@ import {
   type TelemetryPoint,
 } from '../src/index.js';
 
-// S-4 step 1: these need S-2 (step/balance/actions/failures) and S-3 (compile). Skipped until they land.
-const READY = (() => {
-  try {
-    const s = compileTopology(defaultDemoConfig()).state;
-    step(s, 1, makeRng(1));
-    computeBalance(s, 'observed');
-    applyAction(s, { kind: 'dispatch_tech', target_id: 'pump_A', params: {} });
-    applyFailure(s, fail('pump_fail', 'pump_B'));
-    setFanReading(s, 'rack_3', 0.5, 1);
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 function fail(kind: FailureKind, target_id: string, params: Failure['params'] = {}, id = 1): Failure {
   return { id, kind, target_id, params, start_tick: 0, active: true };
 }
@@ -48,7 +33,7 @@ const syms = (ds: IncidentDraft[]) => ds.map((d) => d.symptom);
 /** Test-only copy (JSON round trip is fine outside src/). */
 const copy = (s: FacilityState): FacilityState => JSON.parse(JSON.stringify(s)) as FacilityState;
 
-describe.skipIf(!READY)('detect (LANE-S §3.2 symptom table)', () => {
+describe('detect (LANE-S §3.2 symptom table)', () => {
   it('a healthy facility emits nothing', () => {
     expect(detect(run(def(), 30), [], [])).toEqual([]);
   });
@@ -166,11 +151,5 @@ describe.skipIf(!READY)('detect (LANE-S §3.2 symptom table)', () => {
     for (const sym of syms(ds)) expect(SYMPTOMS as readonly string[]).toContain(sym);
     expect(new Set(syms(ds)).size).toBe(ds.length);
     expect(detect(s, [], [...SYMPTOMS])).toEqual([]);
-  });
-});
-
-describe('detect: gating', () => {
-  it.skipIf(READY)('real monitor tests are skipped until S-2 + S-3 land (remove this gate in S-4 step 5)', () => {
-    expect(READY).toBe(false);
   });
 });

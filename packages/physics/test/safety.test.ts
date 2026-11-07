@@ -16,21 +16,6 @@ import {
   type FailureKind,
 } from '../src/index.js';
 
-// S-4 step 1: these need S-2 (step/balance/actions/failures) and S-3 (compile). Skipped until they land.
-const READY = (() => {
-  try {
-    const s = compileTopology(defaultDemoConfig()).state;
-    step(s, 1, makeRng(1));
-    computeBalance(s, 'true');
-    applyAction(s, { kind: 'dispatch_tech', target_id: 'pump_A', params: {} });
-    applyFailure(s, fail('pump_fail', 'pump_B'));
-    setFanReading(s, 'rack_3', 0.5, 1);
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 function fail(kind: FailureKind, target_id: string, params: Failure['params'] = {}, id = 1): Failure {
   return { id, kind, target_id, params, start_tick: 0, active: true };
 }
@@ -40,7 +25,7 @@ const pumpBFailed = () => applyFailure(def(), fail('pump_fail', 'pump_B'));
 const SHUT_PUMP_A: Action = { kind: 'shutdown_component', target_id: 'pump_A', params: {} };
 const PREFIX = /^(OK: |BLOCKED: )/;
 
-describe.skipIf(!READY)('checkAction (LANE-S §3.2, CONTRACTS §2 reason prefixes)', () => {
+describe('checkAction (LANE-S §3.2, CONTRACTS §2 reason prefixes)', () => {
   it('the Pump A trap is BLOCKED with the cooling reason and an 8-rack projection', () => {
     const r = checkAction(pumpBFailed(), SHUT_PUMP_A, rng());
     console.log('[pump A trap]', r.reason);
@@ -99,11 +84,5 @@ describe.skipIf(!READY)('checkAction (LANE-S §3.2, CONTRACTS §2 reason prefixe
       expect(r.reason).toMatch(PREFIX);
       expect(JSON.parse(JSON.stringify(r))).toEqual(r);
     }
-  });
-});
-
-describe('checkAction: gating', () => {
-  it.skipIf(READY)('real safety tests are skipped until S-2 + S-3 land (remove this gate in S-4 step 5)', () => {
-    expect(READY).toBe(false);
   });
 });

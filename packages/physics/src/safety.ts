@@ -1,5 +1,6 @@
 // Owned by S-4: LANE-S §3.2 checkAction. Reason prefixes are frozen by CONTRACTS §2 (C's agents parse them).
 import { SAFETY_HORIZON_TICKS, T_DEGRADED_C } from './constants.js';
+import { fmt } from './internal/format.js';
 import { simulateTrace, type SimTrace } from './simulate.js';
 import type { Action, FacilityState, Rng, SafetyResult } from './types.js';
 
@@ -8,8 +9,6 @@ const PROJECTION_TICKS = 600;
 const PEAK_TOLERANCE_C = 0.5;
 const MARGIN_TOLERANCE_KW = 1;
 
-// LANE-S §3.2 fmt. TODO(S-2 merge): switch to `import { fmt } from './internal/format.js'` once S-2 lands it.
-const fmt = (x: number): string => String(Math.round(x * 10) / 10);
 
 function shutdownPhrase(tr: SimTrace): string {
   return `${tr.outcome.racks_shutdown} racks shut down within ${fmt(tr.shutdown_reached_s)} s`;

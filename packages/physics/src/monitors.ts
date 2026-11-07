@@ -1,6 +1,7 @@
 // Owned by S-4: LANE-S §3.2 detect. Reads OBSERVED fields only (observed_status, observed_temp_c, sensor_age_s,
 // load_kw, cooling_kw, fan_*, ups_energy_kwh) plus history. Never reads true_* or sensor_frozen.
 import { computeBalance } from './balance.js';
+import { SENSOR_STALE_S } from './internal/params.js';
 import { T_DEGRADED_C, T_WARNING_C } from './constants.js';
 import type {
   ComponentState,
@@ -11,8 +12,6 @@ import type {
   UpsParams,
 } from './types.js';
 
-// LANE-S §3 internal constant. TODO(S-2 merge): import SENSOR_STALE_S from './internal/params.js' once S-2 lands it.
-const SENSOR_STALE_S = 15;
 const MARGIN_CRITICAL_KW = -10;
 const UPS_CRITICAL_FRAC = 0.25;
 const FAN_FAULT_ANOMALY = 0.5;
