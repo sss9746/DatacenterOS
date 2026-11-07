@@ -1,0 +1,20 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Python
+__pycache__/
+.venv/
+
+# Secrets: every .env file except the template
+.env
+.env.*
+!.env.example
+
+# SpacetimeDB local identities and state (Lane B)
+spacetime/module/scripts/.identities.env
+.spacetime/
+
+# NOTE: hardware/bridge/data/ is deliberately NOT ignored.
+# CONTRACTS §7: the real fan recordings (< 10 MB) are committed so replay mode works from any clone.
