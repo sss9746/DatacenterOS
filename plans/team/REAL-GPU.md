@@ -9,6 +9,19 @@
 
 **Branch:** `r/o1-real-gpu`, cut from `main`, merged into `int/r-sprint`.
 
+## Status (2026-11-08 05:14 CST; Kaushik now owns this track)
+
+| # | State | Evidence |
+|---|---|---|
+| G0 | Done | `dcos-gpu`, NVIDIA L40S, driver 580.173.02. Keep it running through judging |
+| G1 | Done | Dry-run gives valid events every second; 14 collector tests pass |
+| G2 | Done | 60 s load reaches about 55°C and 325 W. The box has no system `pip`, so use `~/dcos-venv/bin/python ~/load.py` |
+| G3 | Done on dev | `ingest_observations` is in module `c1ac94d` on `dcos-dev`; prod at K7 |
+| G4 | Done on dev | Dev gateway token in `.env.local`; prod gateway role and token at K7 |
+| G5 | Passed on dev | About 2 minutes live with zero rejected batches; the tile went live in a browser on dev. Recording is `hardware/recordings/brev-l40s.jsonl` |
+
+**Differences from the plan below:** omit the `--` after `start` in `pnpm` commands. A stopped collector shows "collector offline", not "stale". The recording is named `brev-l40s.jsonl`, and the tile labels a replay `REPLAY OF REAL RECORDING`.
+
 ## Already in place (don't rebuild)
 
 | Piece | Where |

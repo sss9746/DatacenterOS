@@ -28,7 +28,7 @@ Split: [`plans/team/KAUSHIK.md`](../../../plans/team/KAUSHIK.md). If this board 
 | 6 | [Workflow + incidents](P2-6-workflow-incidents.md) ‖ | 1:15 AM | — | P2-3 | ☑ |
 | 7 | [Gate 2 script](P2-7-gate2-script.md) | 1:30 AM | **Gate 2** | P2-5, P2-6 | ☑ (dev + prod; integrator ticks plans/README) |
 | 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ◐ (prod live, P3 verified; P4 open) |
-| 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ☐ next |
+| 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ◐ (proven on `dcos-dev`; prod at K7) |
 
 **Historical report (2026-11-08 ~00:40):** completed P2 work merged to `main` (`08f39d3`; reported suite 697 tests green). Prod `dcos` is live on Maincloud with role tokens. P3's agent + real Nemotron handled the pump-a incident end to end on both `dcos-dev` and `dcos`. Open: P4 dashboard live check, optional P2-9, and the follow-up safety/recovery proof above.
 
