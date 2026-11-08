@@ -1,0 +1,281 @@
+import { validatePayload, type Incident, type IncidentLink } from '@dcos/contracts';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  DETERMINISTIC_EXPLANATION,
+  LLM_PAYLOAD_MAX_BYTES,
+  PLANNER_HORIZON_ASSUMPTION,
+  planIncidents,
+  type PlanResult,
+} from '../src/planner.js';
+import type { LlmChatRequest } from '../src/ports.js';
+import { CHOOSE_OPTIONS_TOOL_NAME } from '../src/prompts/planner.js';
+import { FakeDb, FakeLlm, FakePhysics } from './fakes/index.js';
+import { RUN_ID, loadPumpDegradedSnapshot } from './fixtures/index.js';
+
+const WF = 'wf-1';
+const COOL_RACKS = new Set(['rack-r1', 'rack-r5', 'rack-r7', 'rack-r8']);
+
+const incident = (id: string, title: string): Incident => ({
+  schema_version: '1.1.0',
+  run_id: RUN_ID,
+  incident_id: id,
+  state: 'open',
+  severity: 'high',
+  title,
+  hypothesis: null,
+  confidence: 0.7,
+  opened_sim_time_ms: 430_000,
+  updated_sim_time_ms: 540_000,
+  version: 1,
+});
+
+const link = (incidentId: string, linked: string): IncidentLink => ({
+  schema_version: '1.1.0',
+  run_id: RUN_ID,
+  incident_id: incidentId,
+  linked_id: linked,
+  link_kind: 'resource',
+  reason: 'test',
+});
+
+const PUMP = incident('inc-pump-a', 'pump-a degraded, loop-a racks r2-r4 throttling');
+const R6 = incident('inc-r6', 'rack r6 thermal margin low');
+
+interface PlanningInput {
+  jobs: { job_id: string; options: { option_id: string }[]; excluded: { option_id: string }[] }[];
+}
+
+const parseInput = (req: LlmChatRequest): PlanningInput => {
+  const user = req.messages.find((m) => m.role === 'user');
+  const text = user && 'content' in user ? String(user.content) : '';
+  return JSON.parse(text.slice(text.indexOf('PLANNING_INPUT=') + 'PLANNING_INPUT='.length)) as PlanningInput;
+};
+
+/** Nemotron stand-in that picks the listed rank-1 option for every job (overrides by job_id). */
+const pickTop = (overrides: Record<string, string> = {}) => (req: LlmChatRequest) =>
+  FakeLlm.toolCall(CHOOSE_OPTIONS_TOOL_NAME, {
+    choices: parseInput(req).jobs.map((j) => ({
+      job_id: j.job_id,
+      option_id: overrides[j.job_id] ?? j.options[0]!.option_id,
+      needs_approval: false,
+      explanation: `picked by test for ${j.job_id}`,
+    })),
+  });
+
+let physics: FakePhysics;
+let db: FakeDb;
+
+const setup = async (incidents: [Incident, string[]][]) => {
+  for (const [inc, resources] of incidents) await db.upsertIncident(inc, resources.map((r) => link(inc.incident_id, r)));
+};
+
+const run = (llm: FakeLlm, incidents: Incident[] = [PUMP], attempt?: number): Promise<PlanResult> =>
+  planIncidents({ db, physics, llm, workflowId: WF, runId: RUN_ID, attempt }, { incidents });
+
+const jobPlan = (r: PlanResult, jobId: string) => {
+  const p = r.job_plans.find((j) => j.job_id === jobId);
+  if (!p) throw new Error(`no plan for ${jobId}`);
+  return p;
+};
+
+const destRacks = (r: PlanResult, jobId: string): string[] => {
+  const snap = loadPumpDegradedSnapshot();
+  const rackOf = (gpu: string) => snap.nodes.find((n) => n.resource_id === snap.gpus.find((g) => g.resource_id === gpu)?.node_id)?.rack_id;
+  return jobPlan(r, jobId)
+    .chosen.commands.filter((c) => c.operation === 'migrate_restart')
+    .flatMap((c) => (c.arguments.destination_gpu_ids as string[]).map((g) => rackOf(g) ?? '?'));
+};
+
+beforeEach(async () => {
+  physics = new FakePhysics();
+  db = new FakeDb({ snapshot: loadPumpDegradedSnapshot(), physics });
+  await setup([[PUMP, ['pump-a', 'loop-a', 'rack-r2', 'rack-r3', 'rack-r4']]]);
+});
+
+describe('planIncidents on the pump-degraded fixture', () => {
+  it('moves job-a (checkpoint then migrate) onto cool loop-b racks, never r6', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    const a = jobPlan(r, 'job-a');
+    expect(a.chosen.commands.map((c) => c.operation)).toEqual(['checkpoint', 'migrate_restart']);
+    expect(a.chosen.rank).toBe(1);
+    expect(a.decided_by).toBe('nemotron');
+    const racks = destRacks(r, 'job-a');
+    expect(racks).toHaveLength(16);
+    for (const rack of racks) expect(COOL_RACKS.has(rack)).toBe(true);
+    expect(racks).not.toContain('rack-r6');
+    // no option of any job ever targets r6 (job-c holds it)
+    for (const o of [a.chosen, ...a.alternatives]) {
+      for (const c of o.commands) expect(JSON.stringify(c.arguments)).not.toContain('gpu-r6');
+    }
+  });
+
+  it('keeps or power-caps job-b, whose checkpoint is fresh', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    const b = jobPlan(r, 'job-b');
+    expect(['job-b:keep', 'job-b:cap']).toContain(b.chosen.option_id);
+    expect(b.chosen.commands.every((c) => c.operation === 'power_cap')).toBe(true);
+  });
+
+  it('does not touch job-c for the pump incident (it is not on loop-a)', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    expect(r.job_plans.map((j) => j.job_id).sort()).toEqual(['job-a', 'job-b']);
+  });
+
+  it('gives non-preemptible job-c no eligible migrate or pause option', async () => {
+    await setup([[R6, ['rack-r6']]]);
+    const r = await run(new FakeLlm([pickTop()]), [PUMP, R6]);
+    const c = jobPlan(r, 'job-c');
+    const all = [c.chosen, ...c.alternatives];
+    const eligible = all.filter((o) => !o.excluded_reason);
+    expect(eligible.some((o) => o.commands.some((x) => x.operation === 'migrate_restart' || x.operation === 'pause_job'))).toBe(false);
+    expect(all.find((o) => o.option_id === 'job-c:pause')?.excluded_reason).toContain('JOB_NOT_PREEMPTIBLE');
+    expect(c.chosen.excluded_reason).toBeUndefined();
+    for (const cmd of c.chosen.commands) expect(cmd.incident_ids).toEqual(['inc-r6']);
+  });
+
+  it('orders commands so migrate depends on its checkpoint', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    const ck = r.commands.findIndex((c) => c.operation === 'checkpoint' && c.job_id === 'job-a');
+    const mv = r.commands.findIndex((c) => c.operation === 'migrate_restart' && c.job_id === 'job-a');
+    expect(ck).toBeGreaterThanOrEqual(0);
+    expect(mv).toBeGreaterThan(ck);
+    expect(r.commands[mv]!.depends_on_command_keys).toEqual([r.commands[ck]!.command_key]);
+    expect(r.commands[ck]!.command_key).toBe(`${WF}:checkpoint:job-a:1`);
+  });
+
+  it('submits a schema-valid PlanCandidate', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    expect(validatePayload('PlanCandidate', r.plan).ok).toBe(true);
+    expect(db.plans.get(r.plan.plan_id)).toEqual(r.plan);
+    expect(r.plan.based_on_decision_epoch).toBe(2);
+    expect(r.plan.incident_ids).toEqual(['inc-pump-a']);
+    expect(r.plan.command_keys).toEqual(r.commands.map((c) => c.command_key));
+    expect(r.plan.assumptions).toContain(PLANNER_HORIZON_ASSUMPTION);
+    for (const c of r.commands) {
+      expect(validatePayload('ActionCommand', c).ok).toBe(true);
+      expect(c.plan_id).toBe(r.plan.plan_id);
+      expect(c.expected_decision_epoch).toBe(2);
+    }
+  });
+
+  it('uses new command keys on attempt 2', async () => {
+    const first = await run(new FakeLlm([pickTop()]));
+    const second = await run(new FakeLlm([pickTop()]), [PUMP], 2);
+    const k1 = new Set(first.commands.map((c) => c.command_key));
+    expect(second.commands.length).toBeGreaterThan(0);
+    for (const c of second.commands) {
+      expect(k1.has(c.command_key)).toBe(false);
+      expect(c.command_key.endsWith(':2')).toBe(true);
+    }
+    expect(second.plan.plan_id).not.toBe(first.plan.plan_id);
+  });
+
+  it('ranks deterministically', async () => {
+    const shape = (r: PlanResult) =>
+      r.job_plans.map((j) => ({
+        job: j.job_id,
+        chosen: j.chosen.option_id,
+        options: [j.chosen, ...j.alternatives].sort((a, b) => a.rank - b.rank).map((o) => `${o.rank}:${o.option_id}`),
+      }));
+    const a = await run(new FakeLlm([new Error('down')]));
+    const b = await run(new FakeLlm([new Error('down')]));
+    expect(shape(b)).toEqual(shape(a));
+    expect(b.commands).toEqual(a.commands);
+  });
+
+  it('records simulate_plan, evaluate_safety and choose_options tool calls', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    const tools = new Set(r.tool_calls.map((t) => t.tool));
+    expect(tools).toEqual(new Set(['simulate_plan', 'evaluate_safety', CHOOSE_OPTIONS_TOOL_NAME]));
+    expect(r.used_llm).toBe(true);
+  });
+
+  it('sends Nemotron a bounded payload with only eligible options and requires the tool', async () => {
+    const llm = new FakeLlm([pickTop()]);
+    await run(llm);
+    const req = llm.requests[0]!;
+    expect(req.toolChoice).toBe('required');
+    expect(req.tools?.map((t) => t.name)).toEqual([CHOOSE_OPTIONS_TOOL_NAME]);
+    const user = req.messages.find((m) => m.role === 'user');
+    expect(String(user && 'content' in user ? user.content : '').length).toBeLessThanOrEqual(LLM_PAYLOAD_MAX_BYTES + 200);
+    for (const j of parseInput(req).jobs) expect(j.options.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('safety enforcement and fallbacks', () => {
+  const coolOffLoopB = () =>
+    db.mutateSnapshot((s) => {
+      for (const n of s.nodes) if (['rack-r1', 'rack-r5', 'rack-r7'].includes(n.rack_id)) n.thermal_headroom_c = 3;
+    });
+
+  it('excludes migrations to racks without thermal headroom', async () => {
+    coolOffLoopB();
+    const r = await run(new FakeLlm([pickTop()]));
+    const a = jobPlan(r, 'job-a');
+    const moves = [a.chosen, ...a.alternatives].filter((o) => o.option_id.includes('move'));
+    expect(moves.length).toBeGreaterThan(0);
+    for (const m of moves) expect(m.excluded_reason).toContain('DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT');
+    expect(a.chosen.excluded_reason).toBeUndefined();
+    expect(a.chosen.commands.some((c) => c.operation === 'migrate_restart')).toBe(false);
+  });
+
+  it('overrides a Nemotron choice of an excluded option to rank 1', async () => {
+    coolOffLoopB();
+    const llm = new FakeLlm([pickTop({ 'job-a': 'job-a:ckpt+move:r1+r5' })]);
+    const r = await run(llm);
+    const listed = parseInput(llm.requests[0]!).jobs.find((j) => j.job_id === 'job-a')!;
+    expect(listed.options.map((o) => o.option_id)).not.toContain('job-a:ckpt+move:r1+r5');
+    const a = jobPlan(r, 'job-a');
+    expect(a.chosen.option_id).not.toBe('job-a:ckpt+move:r1+r5');
+    expect(a.chosen.rank).toBe(1);
+    expect(a.decided_by).toBe('deterministic');
+    expect(a.explanation).toMatch(/overridden to rank-1/);
+    expect(a.explanation).toMatch(/excluded by safety/);
+    expect(r.commands.some((c) => c.operation === 'migrate_restart')).toBe(false);
+  });
+
+  it('overrides an unknown option id too', async () => {
+    const r = await run(new FakeLlm([pickTop({ 'job-b': 'job-b:reboot-everything' })]));
+    const b = jobPlan(r, 'job-b');
+    expect(b.chosen.rank).toBe(1);
+    expect(b.explanation).toMatch(/not a listed option/);
+  });
+
+  it('falls back to deterministic rank 1 when the LLM is down', async () => {
+    const r = await run(new FakeLlm([new Error('LLM unavailable')]));
+    expect(r.used_llm).toBe(false);
+    for (const p of r.job_plans) {
+      expect(p.decided_by).toBe('deterministic');
+      expect(p.chosen.rank).toBe(1);
+      expect(p.explanation).toContain(DETERMINISTIC_EXPLANATION);
+    }
+    expect(jobPlan(r, 'job-a').needs_approval).toBe(true);
+    expect(destRacks(r, 'job-a').every((x) => COOL_RACKS.has(x))).toBe(true);
+    expect(r.plan.assumptions).toContain(DETERMINISTIC_EXPLANATION);
+  });
+
+  it('falls back when the tool-call arguments are invalid', async () => {
+    const r = await run(new FakeLlm([FakeLlm.toolCall(CHOOSE_OPTIONS_TOOL_NAME, '{"choices": "nope"')]));
+    expect(r.used_llm).toBe(false);
+    expect(r.job_plans.every((p) => p.decided_by === 'deterministic')).toBe(true);
+  });
+
+  it('passes Nemotron needs_approval through', async () => {
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) =>
+        FakeLlm.toolCall(CHOOSE_OPTIONS_TOOL_NAME, {
+          choices: parseInput(req).jobs.map((j) => ({ job_id: j.job_id, option_id: j.options[0]!.option_id, needs_approval: true, explanation: 'unsure' })),
+        }),
+    ]);
+    const r = await run(llm);
+    expect(r.job_plans.every((p) => p.needs_approval)).toBe(true);
+  });
+
+  it('never lets two jobs move onto the same GPUs', async () => {
+    const r = await run(new FakeLlm([pickTop({ 'job-a': 'job-a:ckpt+move:r1+r5', 'job-b': 'job-b:ckpt+move:r1' })]));
+    const dests = r.commands.filter((c) => c.operation === 'migrate_restart').flatMap((c) => c.arguments.destination_gpu_ids as string[]);
+    expect(new Set(dests).size).toBe(dests.length);
+    expect(jobPlan(r, 'job-a').chosen.option_id).toBe('job-a:ckpt+move:r1+r5');
+    expect(jobPlan(r, 'job-b').chosen.option_id).not.toBe('job-b:ckpt+move:r1');
+  });
+});
