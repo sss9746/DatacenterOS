@@ -13,18 +13,22 @@
 #jobs .job-b { --job-color: var(--job-b, #8A6A2F); }
 #jobs .job-c { --job-color: var(--job-c, #5A6E8C); }
 #jobs .job.is-failed { box-shadow: inset 3px 0 var(--orange, #FF6F3D); }
-#jobs .job-heading { display: flex; align-items: center; gap: 10px; }
+#jobs .job-heading { display: flex; align-items: center; gap: 12px; }
+#jobs .job-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+#jobs .job-ring-wrap { position: relative; width: 56px; height: 56px; flex: 0 0 auto; display: grid; place-items: center; }
+#jobs .job-ring-value { position: absolute; font-family: var(--jb-display); font-size: 15px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+#jobs .job-ring-value small { font-size: 10px; font-weight: 600; color: var(--jb-muted); }
 #jobs .job-heading .badge { margin-left: auto; }
 #jobs .job h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 600; font-family: var(--jb-mono); }
 #jobs .job h3 i { width: 8px; height: 8px; border-radius: 2px; background: var(--job-color); }
-#jobs .job-ring { width: 36px; height: 36px; flex: 0 0 auto; transform: rotate(-90deg); }
-#jobs .job-ring circle { fill: none; stroke-width: 4; stroke-linecap: butt; }
+#jobs .job-ring { width: 56px; height: 56px; transform: rotate(-90deg); }
+#jobs .job-ring circle { fill: none; stroke-width: 3.5; stroke-linecap: butt; }
 #jobs .job-ring-track { stroke: var(--jb-inset); }
 #jobs .job-ring-work { stroke: color-mix(in srgb, var(--job-color) 35%, var(--jb-paper)); transition: stroke-dashoffset var(--jb-slow) var(--jb-ease); }
 #jobs .job-ring-durable { stroke: var(--job-color); transition: stroke-dashoffset var(--jb-slow) var(--jb-ease); }
 #jobs .job-ring.is-bumping { animation: job-ring-bump 700ms var(--jb-ease) 1; }
 @keyframes job-ring-bump { 0% { transform: rotate(-90deg) scale(1); } 40% { transform: rotate(-90deg) scale(1.18); } 100% { transform: rotate(-90deg) scale(1); } }
-#jobs .job-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; margin-top: 8px; color: var(--jb-muted); font-size: 12.5px; }
+#jobs .job-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin: 0; color: var(--jb-muted); font-size: 12.5px; }
 #jobs .job-meta > span { display: inline-flex; gap: 4px; align-items: center; }
 #jobs .progress-label { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin: 12px 0 7px; }
 #jobs .progress-label strong { font-family: var(--jb-display); font-size: 24px; font-weight: 700; line-height: 1; letter-spacing: -.02em; }
@@ -35,7 +39,7 @@
 #jobs .work-progress { background: color-mix(in srgb, var(--job-color) 35%, var(--jb-paper)); }
 #jobs .durable-progress { background: var(--job-color); }
 #jobs .checkpoint-marker { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--jb-ink); transform: translateX(-50%); transition: left var(--jb-slow) var(--jb-ease); }
-#jobs .checkpoint-line { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--jb-muted); font-size: 12.5px; }
+#jobs .checkpoint-line { display: flex; gap: 10px; margin: 0; color: var(--jb-muted); font-size: 12.5px; }
 #jobs .checkpoint-line > span:first-child { display: flex; align-items: center; gap: 4px; }
 #jobs .job-loss { margin: 8px 0 0; font-size: 12.5px; font-weight: 600; color: var(--jb-orange-ink); }
 #jobs .job-notice { margin: 8px 0 0; font-size: 12.5px; color: var(--jb-amber-ink); }
