@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ObservedSnapshot, SignalEvent } from '@dcos/contracts';
+import type { ActionCommand, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
 import { loadConfig } from './config.js';
 import { createNimLlm } from './llm.js';
 import { planIncidents } from './planner.js';
@@ -24,7 +24,24 @@ export interface PolicyStats {
   llmFailures: number;
   /** Requests that reached the (cached or live) LLM port; cacheHits <= llmRequests. */
   llmRequests: number;
+  /** Event-driven cadence: invocations answered [] because nothing material changed (no triage, no LLM). */
+  unchangedSkips: number;
+  /** Invocations that ran triage + planning. */
+  replans: number;
 }
+
+/**
+ * `event-driven` (default): the policy is still called on every harness tick, but it re-runs triage + planning only
+ * when the observation fingerprint changes (decision_epoch, sorted observation_event_ids, GPU availability / XID,
+ * node availability, cooling operating state, job status, signal ids); otherwise it returns [] (no NEW commands;
+ * everything it already issued stays queued in the harness / ledger). `every-tick`: CONTRACTS §0.6 literal.
+ */
+export type PolicyCadence = 'event-driven' | 'every-tick';
+
+export const EVENT_DRIVEN_CADENCE =
+  'event-driven cadence: called every tick on the same ObservedSnapshot as the baselines; re-plans only when decision_epoch, ' +
+  'observation_event_ids, GPU availability/XID, node availability, cooling state, job status or signals change, else returns [] ' +
+  '(no new commands, no LLM call)';
 
 export interface NemotronPolicyDeps {
   llm: LlmPort | null;
@@ -38,9 +55,33 @@ export interface NemotronPolicyDeps {
   model?: string;
   /** Recent signals for triage (the snapshot carries none). */
   signals?: SignalEvent[] | ((obs: ObservedSnapshot) => SignalEvent[]);
+  /** Default 'event-driven'. */
+  cadence?: PolicyCadence;
 }
 
-export type NemotronPolicy = Policy & { stats(): PolicyStats };
+export type NemotronPolicy = Policy & {
+  stats(): PolicyStats;
+  /** Forget the event-driven memo (call between scenarios; sim time going backwards also resets it). */
+  reset(): void;
+};
+
+/**
+ * Material-change fingerprint of what the policy observes. The open incident set is a pure function of
+ * (snapshot, signals) through deterministic triage, so an unchanged fingerprint means an unchanged incident set.
+ */
+export function observationFingerprint(obs: ObservedSnapshot, signals: SignalEvent[]): string {
+  const sorted = (xs: string[]) => [...xs].sort().join(',');
+  return [
+    obs.run_id,
+    obs.clock.decision_epoch,
+    sorted(obs.observation_event_ids),
+    sorted(obs.gpus.map((g) => `${g.resource_id}=${g.availability}/${g.last_xid_code ?? '-'}`)),
+    sorted(obs.nodes.map((n) => `${n.resource_id}=${n.availability}`)),
+    sorted(obs.cooling.map((c) => `${c.resource_id}=${c.operating_state}`)),
+    sorted(obs.job_states.map((j) => `${j.job_id}=${j.status}`)),
+    sorted(signals.map((s) => s.event_id)),
+  ].join('|');
+}
 
 export const DEFAULT_CACHE_DIR = resolve(fileURLToPath(new URL('..', import.meta.url)), '.cache', 'llm');
 
@@ -92,8 +133,40 @@ function withDiskCache(inner: LlmPort, dir: string, model: string): CachedLlm {
   return { port, counts };
 }
 
+/**
+ * Observable reasons the commands we already issued are superseded (each reported once, by id): a job we acted on
+ * is now `failed`, or a migrate destination GPU we chose is no longer ready / reported an XID.
+ */
+export function newSupersedeTriggers(obs: ObservedSnapshot, issued: readonly ActionCommand[], handled: ReadonlySet<string>): string[] {
+  const out = new Set<string>();
+  for (const c of issued) {
+    if (c.job_id && obs.job_states.find((j) => j.job_id === c.job_id)?.status === 'failed') out.add(`failed:${c.job_id}`);
+    const dest = c.operation === 'migrate_restart' && Array.isArray(c.arguments.destination_gpu_ids) ? (c.arguments.destination_gpu_ids as string[]) : [];
+    for (const g of dest) {
+      const gpu = obs.gpus.find((x) => x.resource_id === g);
+      if (!gpu || gpu.availability !== 'ready' || gpu.last_xid_code !== null) out.add(`dest:${g}`);
+    }
+  }
+  return [...out].filter((t) => !handled.has(t)).sort();
+}
+
 export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
-  const stats = { calls: 0, llmFailures: 0, uncachedRequests: 0 };
+  const stats = { calls: 0, llmFailures: 0, uncachedRequests: 0, unchangedSkips: 0, replans: 0 };
+  const eventDriven = (deps.cadence ?? 'event-driven') === 'event-driven';
+  let memo: { fingerprint: string; simTimeMs: number; incidentIds: string[] } | null = null;
+  // Per-run key state. Command keys are (workflow bucket, op, job, attempt): re-proposing the same step keeps its key,
+  // so the harness / ledger treats it as a retry (no second effect). The attempt only moves on when something we
+  // issued is invalidated (see newSupersedeTriggers), exactly like runReplan's new attempt in the agent loop.
+  let lastSimTimeMs: number | null = null;
+  let issued: ActionCommand[] = [];
+  let handled = new Set<string>();
+  let attempt = 1;
+  const resetRun = (): void => {
+    memo = null;
+    issued = [];
+    handled = new Set();
+    attempt = 1;
+  };
   const cached =
     deps.llm && (deps.cache ?? true) ? withDiskCache(deps.llm, deps.cacheDir ?? DEFAULT_CACHE_DIR, deps.model ?? 'unknown') : null;
   const inner = deps.llm;
@@ -112,9 +185,28 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
     stats.calls += 1;
     const runId = deps.runId ?? obs.run_id;
     const signals = typeof deps.signals === 'function' ? deps.signals(obs) : (deps.signals ?? []);
+    if (lastSimTimeMs !== null && ctx.sim_time_ms < lastSimTimeMs) resetRun(); // a new run / scenario
+    lastSimTimeMs = ctx.sim_time_ms;
+    if (eventDriven) {
+      const fingerprint = observationFingerprint(obs, signals);
+      if (memo && memo.fingerprint === fingerprint) {
+        stats.unchangedSkips += 1;
+        memo = { ...memo, simTimeMs: ctx.sim_time_ms };
+        return [];
+      }
+      memo = { fingerprint, simTimeMs: ctx.sim_time_ms, incidentIds: [] };
+    }
+    stats.replans += 1;
     const db = createSnapshotDb(obs, signals);
     const triage = await runTriage({ db, llm, now: () => ctx.sim_time_ms }, { signals });
+    if (memo) memo = { ...memo, incidentIds: triage.incidents.map((i) => i.incident_id).sort() };
     if (triage.incidents.length === 0) return [];
+    const fresh = newSupersedeTriggers(obs, issued, handled);
+    if (fresh.length > 0) {
+      // like runReplan's new attempt: what we issued before is invalidated, so the new plan needs new keys
+      handled = new Set([...handled, ...fresh]);
+      attempt += 1;
+    }
     const result = await planIncidents(
       {
         db,
@@ -122,11 +214,12 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
         llm: llm ?? unavailableLlm,
         workflowId: policyWorkflowId(runId, ctx.sim_time_ms),
         runId,
-        attempt: 1,
+        attempt,
       },
       { incidents: triage.incidents },
     );
     if (!result.used_llm) stats.llmFailures += 1;
+    issued = [...issued, ...result.commands.filter((c) => !issued.some((x) => x.command_key === c.command_key))];
     return result.commands;
   };
 
@@ -136,7 +229,13 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
       cacheHits: cached?.counts.hits ?? 0,
       llmFailures: stats.llmFailures,
       llmRequests: cached ? cached.counts.requests : stats.uncachedRequests,
+      unchangedSkips: stats.unchangedSkips,
+      replans: stats.replans,
     }),
+    reset: (): void => {
+      resetRun();
+      lastSimTimeMs = null;
+    },
   });
 }
 
@@ -157,7 +256,7 @@ export function configureDefaultNemotronPolicy(physics: PhysicsPort): NemotronPo
   return defaultPolicy;
 }
 
-const EMPTY_STATS: PolicyStats = { calls: 0, cacheHits: 0, llmFailures: 0, llmRequests: 0 };
+const EMPTY_STATS: PolicyStats = { calls: 0, cacheHits: 0, llmFailures: 0, llmRequests: 0, unchangedSkips: 0, replans: 0 };
 
 /** Default policy; call `configureDefaultNemotronPolicy(physics)` once before use. */
 export const nemotronPolicy: NemotronPolicy = Object.assign(
@@ -165,10 +264,11 @@ export const nemotronPolicy: NemotronPolicy = Object.assign(
     if (!defaultPolicy) throw new Error('nemotronPolicy: call configureDefaultNemotronPolicy(physics) first');
     return defaultPolicy(obs, ctx);
   }) as Policy,
-  { stats: (): PolicyStats => defaultPolicy?.stats() ?? EMPTY_STATS },
+  { stats: (): PolicyStats => defaultPolicy?.stats() ?? EMPTY_STATS, reset: (): void => defaultPolicy?.reset() },
 );
 
+/** Scoreboard disclosure (ARCHITECTURE §9): model, fallback, cache and the event-driven cadence. */
 export function describePolicy(): string {
   const model = defaultModel ?? loadConfig().NIM_MODEL ?? 'unconfigured';
-  return `Nemotron (model ${model}) via NIM; deterministic fallback when unavailable; cache hits disclosed`;
+  return `Nemotron (model ${model}) via NIM; deterministic fallback when unavailable; cache hits disclosed; ${EVENT_DRIVEN_CADENCE}`;
 }

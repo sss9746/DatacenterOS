@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validatePayload } from '@dcos/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createNemotronPolicy, policyWorkflowId } from '../src/policy.js';
+import { createNemotronPolicy, describePolicy, newSupersedeTriggers, observationFingerprint, policyWorkflowId } from '../src/policy.js';
 import type { LlmChatRequest, LlmChatResponse, LlmPort } from '../src/ports.js';
 import { CHOOSE_OPTIONS_TOOL_NAME } from '../src/prompts/planner.js';
 import { SNAPSHOT_DB_READ_ONLY_MESSAGE, createSnapshotDb } from '../src/snapshot-db.js';
@@ -59,10 +59,69 @@ describe('nemotron policy', () => {
     expect(await policy(obs, ctx(obs))).toEqual([]);
   });
 
-  it('second identical call is a cache hit and makes no live LLM call', async () => {
+  it('event-driven cadence: an unchanged observation returns [] without triage or LLM; a material change re-plans', async () => {
     const obs = loadPumpDegradedSnapshot();
     const llm = new CountingLlm();
-    const policy = createNemotronPolicy({ llm, physics: new FakePhysics(), cacheDir: dir });
+    const physics = new FakePhysics();
+    const policy = createNemotronPolicy({ llm, physics, cacheDir: dir });
+    const first = await policy(obs, ctx(obs));
+    expect(first.length).toBeGreaterThan(0);
+    const llmCalls = llm.calls;
+    const simCalls = physics.calls.length;
+    // same epoch / observations, only sim time moved on: nothing new
+    const later = { ...obs, clock: { ...obs.clock, sim_time_ms: obs.clock.sim_time_ms + 1_000 } };
+    expect(await policy(later, ctx(later))).toEqual([]);
+    expect(llm.calls).toBe(llmCalls);
+    expect(physics.calls.length).toBe(simCalls);
+    expect(policy.stats()).toMatchObject({ calls: 2, unchangedSkips: 1, replans: 1 });
+    // decision_epoch advanced: re-plan (same keys within the same sim-time bucket)
+    const bumped = { ...later, clock: { ...later.clock, decision_epoch: later.clock.decision_epoch + 1 } };
+    expect((await policy(bumped, ctx(bumped))).length).toBeGreaterThan(0);
+    expect(policy.stats()).toMatchObject({ calls: 3, unchangedSkips: 1, replans: 2 });
+    // an XID on a GPU is material even at the same epoch
+    const xid = { ...bumped, gpus: bumped.gpus.map((g, i) => (i === 0 ? { ...g, last_xid_code: 79 } : g)) };
+    await policy(xid, ctx(xid));
+    expect(policy.stats().replans).toBe(3);
+    // sim time going backwards (next scenario) resets the memo; so does reset()
+    await policy(obs, ctx(obs));
+    expect(policy.stats().replans).toBe(4);
+    policy.reset();
+    await policy(obs, ctx(obs));
+    expect(policy.stats().replans).toBe(5);
+  });
+
+  it('supersede triggers (new command keys): a job we acted on failed, or a chosen destination GPU went bad; each once', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const policy = createNemotronPolicy({ llm: null, physics: new FakePhysics(), cacheDir: dir });
+    const cmds = await policy(obs, ctx(obs));
+    const mig = cmds.find((c) => c.operation === 'migrate_restart')!;
+    expect(mig.command_key.endsWith(':1')).toBe(true);
+    expect(newSupersedeTriggers(obs, cmds, new Set())).toEqual([]);
+    const dest = (mig.arguments.destination_gpu_ids as string[])[0]!;
+    const bad = { ...obs, gpus: obs.gpus.map((g) => (g.resource_id === dest ? { ...g, last_xid_code: 79 } : g)) };
+    expect(newSupersedeTriggers(bad, cmds, new Set())).toEqual([`dest:${dest}`]);
+    expect(newSupersedeTriggers(bad, cmds, new Set([`dest:${dest}`]))).toEqual([]);
+    const failed = { ...obs, job_states: obs.job_states.map((j) => (j.job_id === 'job-a' ? { ...j, status: 'failed' as const } : j)) };
+    expect(newSupersedeTriggers(failed, cmds, new Set())).toEqual(['failed:job-a']);
+    // the policy re-plans the bad-destination snapshot with attempt 2 keys
+    const bumped = { ...bad, clock: { ...bad.clock, decision_epoch: bad.clock.decision_epoch + 1 } };
+    const again = await policy(bumped, ctx(bumped));
+    expect(again.filter((c) => c.job_id === 'job-a').every((c) => c.command_key.endsWith(':2'))).toBe(true);
+  });
+
+  it('the fingerprint ignores ordering and routine telemetry, and covers availability', () => {
+    const obs = loadPumpDegradedSnapshot();
+    const base = observationFingerprint(obs, []);
+    expect(observationFingerprint({ ...obs, gpus: [...obs.gpus].reverse() }, [])).toBe(base);
+    expect(observationFingerprint({ ...obs, gpus: obs.gpus.map((g) => ({ ...g, temp_c: g.temp_c + 3 })) }, [])).toBe(base);
+    expect(observationFingerprint({ ...obs, gpus: obs.gpus.map((g, i) => (i === 0 ? { ...g, availability: 'unreachable' as const } : g)) }, [])).not.toBe(base);
+    expect(describePolicy()).toContain('event-driven cadence');
+  });
+
+  it('second identical call is a cache hit and makes no live LLM call (every-tick cadence)', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const llm = new CountingLlm();
+    const policy = createNemotronPolicy({ llm, physics: new FakePhysics(), cacheDir: dir, cadence: 'every-tick' });
     const first = await policy(obs, ctx(obs));
     const callsAfterFirst = llm.calls;
     expect(callsAfterFirst).toBeGreaterThan(0);

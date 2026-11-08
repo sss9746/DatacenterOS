@@ -1,12 +1,19 @@
 // Planner (LANE-P3 P3-4). "How the agent decides":
 //   1. deterministic code enumerates concrete options per affected job
-//   2. every option is scored with physics.simulatePlan and every command checked with physics.evaluateSafety
+//   2. jobs are planned SEQUENTIALLY in priority order (conditional / marginal planning): job 1's options are
+//      scored with every other job left in place; job 2's options are scored with job 1's chosen commands already
+//      applied (simulatePlan on the combined command list), and so on. Every command is checked with
+//      physics.evaluateSafety on the observed snapshot.
 //   3. options are ranked per ARCHITECTURE §5 (no unsafe -> least irreversible work loss -> lower failure-risk
-//      tier -> least completion delay -> least GPU-busy waste -> fewest preemptions; ties -> fewer commands ->
-//      option_id). The risk tier is the job's own risk (job-scoped simulatePlan), so a power cap that leaves a
-//      job on a degraded cooling loop does not beat a move to a healthy loop just because it is quicker.
-//   4. Nemotron chooses among the top eligible options and explains (one choose_options call for all jobs);
-//      code rejects any choice that is not an eligible option and falls back to rank 1
+//      tier -> no needless preemption -> least completion delay -> least GPU-busy waste -> fewest preemptions;
+//      ties -> fewer commands -> option_id). The risk tier is the job's own (marginal) risk, so a power cap that
+//      leaves a job on a degraded cooling loop does not beat a move to a healthy loop just because it is quicker,
+//      and a move whose gain over keep_running (under the higher-priority jobs' plan) is within tolerance loses
+//      to keep / cap: a job is never moved just because a hotter neighbour was still in place.
+//   4. Nemotron chooses among the top eligible options and explains (one choose_options call for all jobs; it
+//      sees the conditional metrics plus the marginal deltas vs keep_running); code rejects any choice that is not
+//      an eligible option and falls back to rank 1. If Nemotron departs from the rank-1 option a lower-priority
+//      job was conditioned on, every later job is re-scored under the real context before its choice is applied.
 //   5. the result is persisted as a PlanCandidate proposal (db.submitPlan). Nothing is executed here.
 
 import { validatePayload, type ActionCommand, type Checkpoint, type Incident, type PlanCandidate, type SafetyDecision } from '@dcos/contracts';
@@ -92,9 +99,12 @@ export const riskTolerance = (priority: number): number => Math.min(1, Math.max(
 export const EVIDENCE_WINDOW_MS = 600_000;
 export const DETERMINISTIC_EXPLANATION = 'deterministic ranking (LLM unavailable)';
 export const RANKING_ASSUMPTION =
-  'ranking: unsafe excluded; lost work within max(one restart of the job, 5% of avoidable loss) of the best counts as a tie; ' +
-  `then the job's own failure risk in ${RISK_TIER_WIDTH} tiers, risk up to (100 - priority)% tolerated (staying on a degraded ` +
-  'cooling loop or hot GPUs is riskier than moving to a healthy one), then completion delay, GPU-busy waste, preemptions, command count';
+  'ranking: jobs planned sequentially in priority order, each scored with the higher-priority jobs’ chosen commands already ' +
+  'applied (conditional/marginal, not every-other-job-in-place); unsafe excluded; lost work within max(one restart of the job, ' +
+  `5% of avoidable loss) of the best counts as a tie; then the job's own marginal failure risk in ${RISK_TIER_WIDTH} tiers, risk up ` +
+  'to (100 - priority)% tolerated (staying on a degraded cooling loop or hot GPUs is riskier than moving to a healthy one); a ' +
+  'migrate/pause that beats keep_running on neither lost work nor risk tier is a needless preemption and ranks below keep/cap; ' +
+  'then completion delay, GPU-busy waste, preemptions, command count';
 
 const MAX_EXPLANATION_CHARS = 200;
 const PLAN_EXPLANATION_MAX = 2_000;
@@ -102,7 +112,7 @@ const MAX_ASSUMPTIONS = 50;
 
 // ---------------------------------------------------------------------------------------------- affected jobs
 
-interface AffectedJob {
+export interface AffectedJob {
   job_id: string;
   incident_ids: [string, ...string[]];
   priority: number;
@@ -155,6 +165,12 @@ export function findAffectedJobs(ix: SnapshotIndex, incidents: Incident[], evide
   const allIds = incidents.map((i) => i.incident_id) as [string, ...string[]];
   const out: AffectedJob[] = [];
   for (const state of ix.snap.job_states) {
+    if (state.status === 'failed') {
+      // A failed job (it lost its GPUs) during an open incident is always affected: its options are a recovery
+      // restart from durable work vs staying failed / escalating.
+      out.push({ job_id: state.job_id, incident_ids: allIds, priority: ix.jobSpec.get(state.job_id)?.priority ?? 0 });
+      continue;
+    }
     if (state.status === 'completed' || state.allocated_gpu_ids.length === 0) continue;
     const reach = new Set<string>([state.job_id]);
     for (const g of state.allocated_gpu_ids) for (const p of providerClosure(ix, g)) reach.add(p);
@@ -203,6 +219,17 @@ export function freshCheckpointOf(ix: SnapshotIndex, jobId: string, maxAgeS: num
   return best !== null && (ix.snap.clock.sim_time_ms - best.complete_sim_time_ms!) / 1000 < maxAgeS ? best : null;
 }
 
+/**
+ * The checkpoint the job is writing right now (job `checkpointing`, row `writing`/`requested`), newest first, or
+ * null. Its command_key is what a migrate / pause must depend on (real safety tolerates exactly that).
+ */
+export function inFlightCheckpointOf(ix: SnapshotIndex, jobId: string): Checkpoint | null {
+  if (ix.jobState.get(jobId)?.status !== 'checkpointing') return null;
+  const rows = ix.snap.checkpoints.filter((c) => c.job_id === jobId && (c.status === 'writing' || c.status === 'requested'));
+  rows.sort((a, b) => b.requested_sim_time_ms - a.requested_sim_time_ms || b.checkpoint_id.localeCompare(a.checkpoint_id));
+  return rows[0] ?? null;
+}
+
 export function enumerateOptions(
   ix: SnapshotIndex,
   job: AffectedJob,
@@ -216,6 +243,28 @@ export function enumerateOptions(
     buildCommand({ ...p, target_resource_id: job.job_id, job_id: job.job_id }, ix.snap, cmdCtx);
   const id = (suffix: string) => `${job.job_id}:${suffix}`;
   const out: DraftOption[] = [{ option_id: id('keep'), label: `${job.job_id} keep running`, job_id: job.job_id, commands: [] }];
+  const escalate = (): DraftOption => ({
+    option_id: id('escalate'),
+    label: `${job.job_id} escalate to operator`,
+    job_id: job.job_id,
+    commands: [build({ operation: 'escalate', arguments: { reason: `no automatic mitigation chosen for ${job.job_id}` } })],
+  });
+
+  if (state.status === 'failed') {
+    // Recovery: restart from durable work on healthy GPUs (a failed job needs no new checkpoint; it can't take one).
+    out[0] = { ...out[0]!, label: `${job.job_id} leave failed` };
+    for (const cand of placementCandidates(ix, job.job_id).slice(0, TOP_PLACEMENTS)) {
+      const racks = [...new Set(cand.destination_gpu_ids.map((g) => rackShort(ix, g)))].join('+');
+      out.push({
+        option_id: id(`restart:${racks}`),
+        label: `${job.job_id} restart from its last checkpoint on ${racks}`,
+        job_id: job.job_id,
+        commands: [build({ operation: 'migrate_restart', arguments: { destination_gpu_ids: cand.destination_gpu_ids } })],
+      });
+    }
+    out.push(escalate());
+    return out;
+  }
 
   if (jobRunsHot(ix, state.allocated_gpu_ids)) {
     out.push({
@@ -225,9 +274,19 @@ export function enumerateOptions(
       commands: [build({ operation: 'power_cap', arguments: { power_limit_w: POWER_CAP_W } })],
     });
   }
-  const fresh = spec.checkpoint_supported ? freshCheckpointOf(ix, job.job_id, ctx.freshCheckpointMaxAgeS ?? FRESH_CHECKPOINT_MAX_AGE_S) : null;
-  const ckpt = spec.checkpoint_supported && !fresh ? build({ operation: 'checkpoint' }) : null;
-  const reuse = fresh ? ` (reusing fresh checkpoint ${fresh.checkpoint_id})` : '';
+  // A checkpoint already writing counts as the pending checkpoint step: never propose a second one (real safety
+  // rejects it with CONFLICTING_ACTION); moves / pause wait for the in-flight one instead.
+  const inflight = spec.checkpoint_supported ? inFlightCheckpointOf(ix, job.job_id) : null;
+  const fresh =
+    spec.checkpoint_supported && !inflight ? freshCheckpointOf(ix, job.job_id, ctx.freshCheckpointMaxAgeS ?? FRESH_CHECKPOINT_MAX_AGE_S) : null;
+  const ckpt = spec.checkpoint_supported && !fresh && !inflight ? build({ operation: 'checkpoint' }) : null;
+  const reuse = inflight
+    ? ` (after in-flight checkpoint ${inflight.command_key})`
+    : fresh
+      ? ` (reusing fresh checkpoint ${fresh.checkpoint_id})`
+      : '';
+  const prefix = ckpt ? 'ckpt+' : inflight ? 'ckpt-inflight+' : fresh ? 'ckpt-reuse+' : '';
+  const deps = ckpt ? [ckpt.command_key] : inflight ? [inflight.command_key] : [];
   if (ckpt) out.push({ option_id: id('ckpt'), label: `${job.job_id} checkpoint`, job_id: job.job_id, commands: [ckpt] });
 
   if (spec.preemptible) {
@@ -236,29 +295,24 @@ export function enumerateOptions(
       const move = build({
         operation: 'migrate_restart',
         arguments: { destination_gpu_ids: cand.destination_gpu_ids },
-        depends_on_command_keys: ckpt ? [ckpt.command_key] : [],
+        depends_on_command_keys: deps,
       });
       out.push({
-        option_id: id(`${ckpt ? 'ckpt+' : fresh ? 'ckpt-reuse+' : ''}move:${racks}`),
+        option_id: id(`${prefix}move:${racks}`),
         label: `${job.job_id} ${ckpt ? 'checkpoint then ' : ''}move to ${racks}${reuse}`,
         job_id: job.job_id,
         commands: ckpt ? [ckpt, move] : [move],
       });
     }
   }
-  const pause = build({ operation: 'pause_job', depends_on_command_keys: ckpt ? [ckpt.command_key] : [] });
+  const pause = build({ operation: 'pause_job', depends_on_command_keys: deps });
   out.push({
-    option_id: id(ckpt ? 'ckpt+pause' : fresh ? 'ckpt-reuse+pause' : 'pause'),
+    option_id: id(`${prefix}pause`),
     label: `${job.job_id} ${ckpt ? 'checkpoint then ' : ''}pause${reuse}`,
     job_id: job.job_id,
     commands: ckpt ? [ckpt, pause] : [pause],
   });
-  out.push({
-    option_id: id('escalate'),
-    label: `${job.job_id} escalate to operator`,
-    job_id: job.job_id,
-    commands: [build({ operation: 'escalate', arguments: { reason: `no automatic mitigation chosen for ${job.job_id}` } })],
-  });
+  out.push(escalate());
   return out;
 }
 
@@ -272,47 +326,119 @@ interface Scored extends DraftOption {
 }
 
 /**
- * The cluster-wide failure_risk_estimate is dominated by the riskiest job anywhere, so it cannot tell two
- * options of ONE job apart. Score the same commands on a job-scoped view (only this job's spec/state) to get
- * the risk this option leaves on its own job. Approximation: other jobs' load is still in the observed telemetry.
+ * Planning context for one job (sequential conditional planning): the commands already chosen for the
+ * higher-priority jobs. Every option of this job is simulated AFTER them, on the combined command list.
  */
-function jobScopedRisk(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption): number {
-  const snap = ix.snap;
-  const view = {
+export interface PlanContext {
+  commands: ActionCommand[];
+  /** Jobs those commands belong to (kept in the job-scoped risk view). */
+  job_ids: string[];
+  /** GPUs claimed as migrate destinations by those commands (no later job may target them). */
+  claimed_gpu_ids: string[];
+  /** option_ids chosen so far, in priority order (tool-call trace / LLM payload). */
+  option_ids: string[];
+}
+
+export const EMPTY_CONTEXT: PlanContext = { commands: [], job_ids: [], claimed_gpu_ids: [], option_ids: [] };
+
+export const extendContext = (ctx: PlanContext, chosen: RankedOption): PlanContext => ({
+  commands: [...ctx.commands, ...chosen.commands],
+  job_ids: [...ctx.job_ids, chosen.job_id],
+  claimed_gpu_ids: [...new Set([...ctx.claimed_gpu_ids, ...destinations(chosen)])],
+  option_ids: [...ctx.option_ids, chosen.option_id],
+});
+
+/** What the context alone does (computed once per job): its whole-cluster metrics and its own jobs' risk. */
+interface ContextBaseline {
+  metrics: PlanMetrics | null;
+  risk: number;
+}
+
+const NO_BASELINE: ContextBaseline = { metrics: null, risk: 0 };
+const clamp01 = (r: number): number => (Number.isFinite(r) ? Math.min(1, Math.max(0, r)) : 0);
+
+/** The snapshot restricted to `jobIds` (specs + states). Other jobs' load is still in the observed telemetry. */
+function jobView(snap: SnapshotIndex['snap'], jobIds: Set<string>): SnapshotIndex['snap'] {
+  return {
     ...snap,
-    job_states: snap.job_states.filter((j) => j.job_id === d.job_id),
-    job_specs: snap.job_specs.filter((j) => j.job_id === d.job_id),
+    job_states: snap.job_states.filter((j) => jobIds.has(j.job_id)),
+    job_specs: snap.job_specs.filter((j) => jobIds.has(j.job_id)),
   };
+}
+
+function viewRisk(physics: PhysicsPort, snap: SnapshotIndex['snap'], jobIds: Set<string>, commands: ActionCommand[]): number | null {
   try {
-    const r = physics.simulatePlan(view, { commands: d.commands }, { horizon_s: PLANNER_HORIZON_S }).failure_risk_estimate;
-    return Number.isFinite(r) ? Math.min(1, Math.max(0, r)) : 0;
+    return clamp01(physics.simulatePlan(jobView(snap, jobIds), { commands }, { horizon_s: PLANNER_HORIZON_S }).failure_risk_estimate);
   } catch {
-    return 0; // no job-scoped estimate: the risk tier then ties and delay decides
+    return null;
   }
 }
 
-function scoreOption(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption, calls: ToolCallSummary[]): Scored {
+function contextBaseline(physics: PhysicsPort, ix: SnapshotIndex, ctx: PlanContext): ContextBaseline {
+  if (ctx.job_ids.length === 0) return NO_BASELINE;
+  const metrics = physics.simulatePlan(ix.snap, { commands: ctx.commands }, { horizon_s: PLANNER_HORIZON_S });
+  return { metrics, risk: viewRisk(physics, ix.snap, new Set(ctx.job_ids), ctx.commands) ?? 0 };
+}
+
+/**
+ * The cluster-wide failure_risk_estimate is dominated by the riskiest job anywhere, so it cannot tell two
+ * options of ONE job apart. Score the option on a view holding only this job plus the already-planned
+ * (higher-priority) jobs with their chosen commands applied, and factor the context's own risk out:
+ * job_risk = 1 - (1 - r_view) / (1 - r_context). Approximation: other jobs' load is still in the observed telemetry.
+ */
+function jobScopedRisk(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption, ctx: PlanContext, base: ContextBaseline): number {
+  const r = viewRisk(physics, ix.snap, new Set([...ctx.job_ids, d.job_id]), [...ctx.commands, ...d.commands]);
+  if (r === null) return 0; // no job-scoped estimate: the risk tier then ties and delay decides
+  if (ctx.job_ids.length === 0 || base.risk >= 1 - 1e-9) return r;
+  return clamp01(1 - (1 - r) / (1 - base.risk));
+}
+
+/** Multiset difference: the combined run's violations minus those the context alone already produces. */
+function ownViolations(all: string[], context: string[]): string[] {
+  const left = new Map<string, number>();
+  for (const v of context) left.set(v, (left.get(v) ?? 0) + 1);
+  return all.filter((v) => {
+    const n = left.get(v) ?? 0;
+    if (n === 0) return true;
+    left.set(v, n - 1);
+    return false;
+  });
+}
+
+function scoreOption(
+  physics: PhysicsPort,
+  ix: SnapshotIndex,
+  d: DraftOption,
+  calls: ToolCallSummary[],
+  ctx: PlanContext = EMPTY_CONTEXT,
+  base: ContextBaseline = NO_BASELINE,
+): Scored {
   const snap = ix.snap;
-  const metrics = physics.simulatePlan(snap, { commands: d.commands }, { horizon_s: PLANNER_HORIZON_S });
-  const job_risk = jobScopedRisk(physics, ix, d);
+  const combined =
+    d.commands.length === 0 && base.metrics
+      ? base.metrics // keep_running in context = the context alone
+      : physics.simulatePlan(snap, { commands: [...ctx.commands, ...d.commands] }, { horizon_s: PLANNER_HORIZON_S });
+  const metrics: PlanMetrics = { ...combined, violations: ownViolations(combined.violations, base.metrics?.violations ?? []) };
+  const job_risk = jobScopedRisk(physics, ix, d, ctx, base);
   const safety = d.commands.map((c) =>
     physics.evaluateSafety(snap, c, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] }),
   );
   const violations = [
     ...new Set([...safety.filter((s) => s.decision === 'deny').flatMap((s) => (s.violations.length ? s.violations : ['SAFETY_DENIED'])), ...metrics.violations]),
   ];
-  const argsSummary = {
-    commands: d.commands.length
-      ? d.commands.map((c) => ({
-          operation: c.operation,
-          job_id: c.job_id,
-          dest_rack_id:
-            c.operation === 'migrate_restart'
-              ? [...new Set((c.arguments.destination_gpu_ids as string[]).map((g) => rackShort(ix, g)))].join('+')
-              : '',
-        }))
-      : [{ operation: 'keep_running', job_id: d.job_id }],
-  };
+  // Conditional context first (summarized as "after <option ids>→job: op ..." in the event trace).
+  const after = ctx.option_ids.length > 0 ? [{ operation: `after ${ctx.option_ids.join(',')}` }] : [];
+  const own = d.commands.length
+    ? d.commands.map((c) => ({
+        operation: c.operation,
+        job_id: c.job_id,
+        dest_rack_id:
+          c.operation === 'migrate_restart'
+            ? [...new Set((c.arguments.destination_gpu_ids as string[]).map((g) => rackShort(ix, g)))].join('+')
+            : '',
+      }))
+    : [{ operation: 'keep_running', job_id: d.job_id }];
+  const argsSummary = { commands: [...after, ...own] };
   calls.push(summarizeToolCall('simulate_plan', argsSummary, metrics, 'code'));
   calls.push(summarizeToolCall('evaluate_safety', { option_id: d.option_id }, { allowed: violations.length === 0, violations }, 'code'));
   return { ...d, metrics, safety, violations, job_risk };
@@ -324,22 +450,35 @@ export const riskTier = (risk: number, tolerance = 0): number => (risk <= tolera
 const preemptions = (o: Scored): number =>
   o.commands.filter((c) => c.operation === 'migrate_restart' || c.operation === 'pause_job').length;
 
-/** Rank per ARCHITECTURE §5. Eligible options get ranks 1..k, excluded ones k+1.. with `excluded_reason`. */
+/**
+ * Rank per ARCHITECTURE §5. Eligible options get ranks 1..k, excluded ones k+1.. with `excluded_reason`.
+ * Metrics are conditional on the context the options were scored in, so comparing with keep_running measures
+ * the marginal gain of acting on THIS job given the higher-priority jobs' plan.
+ */
 export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]): RankedOption[] {
   const eligible = scored.filter((o) => o.violations.length === 0);
   const excluded = scored.filter((o) => o.violations.length > 0);
   const spec = ix.jobSpec.get(jobId);
   const restartCost = spec ? spec.gpus_required * spec.work_rate_per_gpu_per_sim_s * (spec.restart_duration_ms / 1000) : 0;
+  const keep = eligible.find((o) => o.commands.length === 0);
   const keepLost = scored.find((o) => o.commands.length === 0)?.metrics.expected_lost_work_units;
   const bestLost = Math.min(...eligible.map((o) => o.metrics.expected_lost_work_units));
   const avoidable = keepLost !== undefined ? Math.max(0, keepLost - bestLost) : 0;
   const tol = Math.max(restartCost, LOSS_TIE_FRACTION * avoidable);
   const tolerance = riskTolerance(spec?.priority ?? 0);
   const lossTier = (o: Scored) => (o.metrics.expected_lost_work_units <= bestLost + tol ? -1 : o.metrics.expected_lost_work_units);
+  const rTier = (o: Scored) => riskTier(o.job_risk, tolerance);
+  // A migrate / pause must buy something over keep_running in this context: less lost work (beyond the tie
+  // tolerance) or a lower risk tier. Otherwise it is a needless preemption and ranks below keep / cap.
+  // Restarting a FAILED job is a recovery, not a preemption (delay then decides).
+  const failed = ix.jobState.get(jobId)?.status === 'failed';
+  const needless = (o: Scored): number =>
+    !failed && keep !== undefined && preemptions(o) > 0 && lossTier(o) >= lossTier(keep) && rTier(o) >= rTier(keep) ? 1 : 0;
   eligible.sort(
     (a, b) =>
       lossTier(a) - lossTier(b) ||
-      riskTier(a.job_risk, tolerance) - riskTier(b.job_risk, tolerance) ||
+      rTier(a) - rTier(b) ||
+      needless(a) - needless(b) ||
       a.metrics.expected_completion_delay_sim_s - b.metrics.expected_completion_delay_sim_s ||
       a.metrics.expected_gpu_busy_waste_s - b.metrics.expected_gpu_busy_waste_s ||
       preemptions(a) - preemptions(b) ||
@@ -353,6 +492,28 @@ export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]):
     ...excluded.map((o, i) => ({ ...strip(o), rank: eligible.length + i + 1, excluded_reason: o.violations.join(',') })),
   ];
 }
+
+type EnumerateCtx = Parameters<typeof enumerateOptions>[2];
+
+/** Enumerate, score (conditional on `ctx`) and rank one job's options. GPUs claimed by `ctx` are never offered. */
+export function rankJobInContext(
+  physics: PhysicsPort,
+  ix: SnapshotIndex,
+  job: AffectedJob,
+  ctx: PlanContext,
+  enumCtx: EnumerateCtx,
+  calls: ToolCallSummary[],
+): RankedOption[] {
+  const jix: SnapshotIndex =
+    ctx.claimed_gpu_ids.length > 0 ? { ...ix, allocatedGpus: new Set([...ix.allocatedGpus, ...ctx.claimed_gpu_ids]) } : ix;
+  const base = contextBaseline(physics, ix, ctx);
+  const drafts = enumerateOptions(jix, job, enumCtx);
+  return rankOptions(jix, job.job_id, drafts.map((d) => scoreOption(physics, jix, d, calls, ctx, base)));
+}
+
+/** The option deterministic planning takes: rank 1, else keep_running (no commands), else anything. */
+export const deterministicTop = (opts: RankedOption[]): RankedOption =>
+  opts.find((o) => !o.excluded_reason) ?? opts.find((o) => o.commands.length === 0) ?? opts[0]!;
 
 // ---------------------------------------------------------------------------------------------- Nemotron choice
 
@@ -394,11 +555,23 @@ const round = (n: number) => Math.round(n * 10) / 10;
 const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 1)}…`);
 
 function buildLlmPayload(ix: SnapshotIndex, incidents: Incident[], ranked: Map<string, RankedOption[]>, topN: number): string {
-  const jobs = [...ranked].map(([jobId, opts]) => {
+  const order = [...ranked.keys()];
+  const jobs = [...ranked].map(([jobId, opts], i) => {
     const spec = ix.jobSpec.get(jobId);
     const st = ix.jobState.get(jobId);
+    const keep = opts.find((o) => o.commands.length === 0);
+    const vs = (o: RankedOption) =>
+      keep
+        ? {
+            lost_wu: round(o.metrics.expected_lost_work_units - keep.metrics.expected_lost_work_units),
+            delay_s: round(o.metrics.expected_completion_delay_sim_s - keep.metrics.expected_completion_delay_sim_s),
+            risk: Math.round((o.job_risk - keep.job_risk) * 100) / 100,
+          }
+        : undefined;
     return {
       job_id: jobId,
+      // metrics below assume these higher-priority jobs take their rank-1 option first (sequential planning)
+      after_jobs: order.slice(0, i),
       priority: spec?.priority,
       risk_tolerance: spec ? riskTolerance(spec.priority) : undefined,
       preemptible: spec?.preemptible,
@@ -415,6 +588,7 @@ function buildLlmPayload(ix: SnapshotIndex, incidents: Incident[], ranked: Map<s
           delay_s: round(o.metrics.expected_completion_delay_sim_s),
           waste_s: round(o.metrics.expected_gpu_busy_waste_s),
           risk: Math.round(o.job_risk * 100) / 100,
+          ...(o.commands.length > 0 && keep ? { vs_keep: vs(o) } : {}),
         })),
       excluded: opts.filter((o) => o.excluded_reason).slice(0, 4).map((o) => ({ option_id: o.option_id, reason: o.excluded_reason })),
     };
@@ -581,16 +755,42 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   }
 
   const toolCalls: ToolCallSummary[] = [];
+  const enumCtx: EnumerateCtx = { runId, workflowId, attempt, planId, freshCheckpointMaxAgeS: deps.freshCheckpointMaxAgeS };
+  const jobs = findAffectedJobs(ix, incidents, evidence);
+
+  // Pass 1 (sequential conditional planning, priority order): each job is scored with the higher-priority jobs'
+  // rank-1 commands already applied. `assumed` records the option each later job was conditioned on.
   const ranked = new Map<string, RankedOption[]>();
-  for (const job of findAffectedJobs(ix, incidents, evidence)) {
-    const drafts = enumerateOptions(ix, job, { runId, workflowId, attempt, planId, freshCheckpointMaxAgeS: deps.freshCheckpointMaxAgeS });
-    ranked.set(job.job_id, rankOptions(ix, job.job_id, drafts.map((d) => scoreOption(physics, ix, d, toolCalls))));
+  const assumed = new Map<string, string>();
+  let ctx = EMPTY_CONTEXT;
+  for (const job of jobs) {
+    const opts = rankJobInContext(physics, ix, job, ctx, enumCtx, toolCalls);
+    ranked.set(job.job_id, opts);
+    const top = deterministicTop(opts);
+    assumed.set(job.job_id, top.option_id);
+    ctx = extendContext(ctx, top);
   }
 
   const choices = ranked.size > 0 ? await askNemotron(llm, ix, incidents, ranked, toolCalls) : null;
   const llmUp = choices !== null;
   const byJob = new Map((choices ?? []).map((c) => [c.job_id, c]));
-  const decided = [...ranked].map(([jobId, opts]) => ({ ...decideJob(opts, byJob.get(jobId), llmUp), alternatives: [] }));
+
+  // Pass 2: apply the choices in priority order. Once a job's final option departs from the one later jobs were
+  // conditioned on, every later job is re-scored under the real context (its choice is re-validated there).
+  const decided: JobPlan[] = [];
+  let finalCtx = EMPTY_CONTEXT;
+  let diverged = false;
+  for (const job of jobs) {
+    let opts = ranked.get(job.job_id)!;
+    if (diverged) {
+      opts = rankJobInContext(physics, ix, job, finalCtx, enumCtx, toolCalls);
+      ranked.set(job.job_id, opts);
+    }
+    const d = decideJob(opts, byJob.get(job.job_id), llmUp);
+    if (d.chosen.option_id !== assumed.get(job.job_id)) diverged = true;
+    finalCtx = extendContext(finalCtx, d.chosen);
+    decided.push({ ...d, alternatives: [] });
+  }
   const jobPlans = resolveConflicts(decided, ranked);
 
   const commands = jobPlans.flatMap((p) => p.chosen.commands);

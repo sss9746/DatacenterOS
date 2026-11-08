@@ -171,27 +171,33 @@ describe('(ii) pump-a degraded at 610000, observed 120 sim-s later', () => {
     expect(aOnly.failure_risk_estimate).toBe(0);
   });
 
-  // DIVERGENCE (reported, not hidden): CONTRACTS §0.3 / PLAN.md expect job-b (fresh-ish ckpt, rack r4) to keep
-  // running or power-cap. With real physics P3's planner chooses checkpoint + move for job-b, because each job's
-  // options are scored against "every other job keeps running" — job-b:keep then inherits job-a's heat on loop-a
-  // (risk 1.0, lost 21194.7). Jointly (job-a moved), job-b keep is risk 0 and cheaper. `it.fails` flips red when
-  // P3 fixes this, so the expectation is restored rather than silently dropped.
-  it.fails('spec: job-b keeps running or power-caps (P3 per-job scoring currently moves it)', () => {
+  // Formerly an `it.fails` divergence: each job was scored against "every other job keeps running", so job-b:keep
+  // inherited job-a's heat on loop-a (risk 1.0, lost 21194.7) and job-b was moved needlessly. Sequential
+  // conditional planning scores job-b with job-a's checkpoint + move already applied.
+  it('spec: job-b keeps running or power-caps (scored after job-a is moved; no needless preemption)', () => {
     const b = jobPlan(plan, 'job-b');
     expect(['job-b:keep', 'job-b:cap']).toContain(b.chosen.option_id);
+    expect(plan.commands.filter((c) => c.job_id === 'job-b' && (c.operation === 'migrate_restart' || c.operation === 'pause_job'))).toEqual([]);
   });
 
-  it('observed today: job-b checkpoint + move to a loop-b rack (documents the divergence above)', () => {
+  it('job-b options are conditional on job-a\'s plan: keep is no longer charged job-a\'s failure', () => {
     const b = jobPlan(plan, 'job-b');
-    expect(b.chosen.option_id).toMatch(/^job-b:ckpt\+move:/);
-    const keep = [b.chosen, ...b.alternatives].find((o) => o.option_id === 'job-b:keep')!;
-    expect(keep.metrics.failure_risk_estimate).toBe(1);
-    expect([b.chosen, ...b.alternatives].some((o) => o.option_id === 'job-b:cap')).toBe(false); // r4 not "hot" yet
+    const opts = [b.chosen, ...b.alternatives];
+    const keep = opts.find((o) => o.option_id === 'job-b:keep')!;
+    expect(keep.metrics.expected_lost_work_units).toBeLessThan(1_000); // was 21194.7 with job-a left in place
+    expect(keep.metrics.failure_risk_estimate).toBeLessThan(0.5); // was 1.0
+    const move = opts.find((o) => o.commands.some((c) => c.operation === 'migrate_restart') && !o.excluded_reason);
+    if (move) expect(move.rank).toBeGreaterThan(keep.rank);
+    // job-b's moves never target the GPUs job-a's chosen move claims
+    const aDest = new Set(plan.commands.filter((c) => c.job_id === 'job-a').flatMap(destOf));
+    for (const o of opts) for (const c of o.commands) for (const g of destOf(c)) expect(aDest.has(g)).toBe(false);
   });
 
   it('a move onto a low-headroom / busy rack is DENIED with §0.7 codes', () => {
     const job = obs.job_states.find((j) => j.job_id === 'job-b')!;
-    const base = plan.commands.find((c) => c.job_id === 'job-b' && c.operation === 'migrate_restart')!;
+    const b = jobPlan(plan, 'job-b');
+    const base = [b.chosen, ...b.alternatives].flatMap((o) => o.commands).find((c) => c.operation === 'migrate_restart')!;
+    expect(base).toBeDefined();
     const r6 = obs.gpus.filter((g) => rackOf(g.resource_id) === 'r6').map((g) => g.resource_id);
     const r2 = obs.gpus.filter((g) => rackOf(g.resource_id) === 'r2').map((g) => g.resource_id);
     for (const dest of [r6, r2]) {
@@ -238,17 +244,18 @@ describe('(iii) XID 79 on job-a\'s chosen destination mid-checkpoint -> replan a
     expect(obs.gpus.find((g) => g.resource_id === dead)!.availability).toBe('unreachable');
     expect(d.signals.some((s) => s.resource_id === dead && s.event_type === 'xid_error')).toBe(true);
 
-    // Offline planner DURING the checkpoint: it re-enumerates checkpoint options for a job that is already
-    // checkpointing; the real safety check rejects all of them (CONFLICTING_ACTION; with a new attempt number also
-    // JOB_STATE_INVALID, a §0.12 #4 physics-only code) and job-a falls back to keep. The agent loop avoids this via runReplan; reported.
+    // Planner DURING the checkpoint: the in-flight checkpoint counts as the pending checkpoint step (no second
+    // checkpoint, which real safety would reject as CONFLICTING_ACTION); the move depends on its command_key.
     const during = await triageAndPlan(obs, d.signals, 'wf-xid');
     expect(during.triage.incidents.length).toBe(2);
     expect(obs.job_states.find((j) => j.job_id === 'job-a')!.status).toBe('checkpointing');
     const duringA = jobPlan(during.plan!, 'job-a');
-    expect(duringA.chosen.option_id).toBe('job-a:keep');
-    const ckptOpt = duringA.alternatives.find((o) => o.option_id === 'job-a:ckpt')!;
-    expect(ckptOpt.excluded_reason).toContain('CONFLICTING_ACTION');
-    expect(ckptOpt.safety.flatMap((s) => s.violations)).toContain('CONFLICTING_ACTION');
+    expect([duringA.chosen, ...duringA.alternatives].some((o) => o.commands.some((c) => c.operation === 'checkpoint'))).toBe(false);
+    expect(duringA.chosen.option_id).toMatch(/^job-a:ckpt-inflight\+move:/);
+    expect(duringA.chosen.label).toContain(`(after in-flight checkpoint ${aCmds[0]!.command_key})`);
+    expect(duringA.chosen.commands.map((c) => c.operation)).toEqual(['migrate_restart']);
+    expect(duringA.chosen.commands[0]!.depends_on_command_keys).toEqual([aCmds[0]!.command_key]);
+    expect(destOf(duringA.chosen.commands[0]!)).not.toContain(dead);
 
     // Let the real checkpoint finish (XID was not on job-a's GPUs), then replan: fresh checkpoint is reused.
     runUntil(d, simNow(d) + 25_000);
@@ -270,5 +277,49 @@ describe('(iii) XID 79 on job-a\'s chosen destination mid-checkpoint -> replan a
     const stale = physics.evaluateSafety(after, aCmds[1]!, { decision_epoch: after.clock.decision_epoch, leased_resource_ids: [] });
     expect(stale.decision).toBe('deny');
     expect(stale.violations).toEqual(expect.arrayContaining(['DEST_GPU_UNHEALTHY']));
+  });
+});
+
+describe('(iv) replan while job-a\'s checkpoint is RUNNING (real physics, llm = null)', () => {
+  it('migrate waits on the in-flight checkpoint key, passes real safety, and completes once the checkpoint lands', async () => {
+    const d = newDriver(117, [demoPumpFault()]);
+    runUntil(d, 730_000);
+    const first = await triageAndPlan(observe(d), d.signals, 'wf-inflight');
+    const ck = first.plan!.commands.find((c) => c.job_id === 'job-a' && c.operation === 'checkpoint')!;
+    startCommands(d, [ck]);
+    runUntil(d, simNow(d) + 5_000); // the checkpoint (30 s) is still writing
+    const mid = observe(d);
+    expect(mid.job_states.find((j) => j.job_id === 'job-a')!.status).toBe('checkpointing');
+    expect(mid.checkpoints.find((c) => c.command_key === ck.command_key)!.status).toBe('writing');
+
+    // attempt 2 = runReplan's new command keys
+    const db = createSnapshotDb(mid, d.signals);
+    const triage = await runTriage({ db, llm: null, now: () => 0 }, { signals: d.signals });
+    const re = await planIncidents(
+      { db, physics, llm: NO_LLM, workflowId: 'wf-inflight', runId: mid.run_id, attempt: 2 },
+      { incidents: triage.incidents },
+    );
+    const a = jobPlan(re, 'job-a');
+    expect(a.chosen.option_id).toMatch(/^job-a:ckpt-inflight\+move:/);
+    expect(a.chosen.label).toContain(`(after in-flight checkpoint ${ck.command_key})`);
+    const [mv, ...rest] = re.commands.filter((c) => c.job_id === 'job-a');
+    expect(rest).toEqual([]);
+    expect(mv!.operation).toBe('migrate_restart');
+    expect(mv!.depends_on_command_keys).toEqual([ck.command_key]);
+    for (const g of destOf(mv!)) expect(LOOP_A_RACKS.has(rackOf(g)) || rackOf(g) === 'r6').toBe(false);
+    const dec = physics.evaluateSafety(mid, mv!, { decision_epoch: mid.clock.decision_epoch, leased_resource_ids: [] });
+    expect(dec.decision, dec.violations.join(',')).toBe('allow');
+    // job-b is still not preempted on the replan
+    expect(re.commands.some((c) => c.job_id === 'job-b' && (c.operation === 'migrate_restart' || c.operation === 'pause_job'))).toBe(false);
+
+    // execute for real: the checkpoint finishes, then the dependent move starts and completes
+    runUntil(d, simNow(d) + 30_000);
+    expect(d.completed).toContain(ck.command_key);
+    startCommands(d, [mv!]);
+    runUntil(d, simNow(d) + 120_000);
+    expect(d.completed).toContain(mv!.command_key);
+    const after = observe(d).job_states.find((j) => j.job_id === 'job-a')!;
+    expect(after.status).not.toBe('failed');
+    expect([...after.allocated_gpu_ids].sort()).toEqual([...destOf(mv!)].sort());
   });
 });

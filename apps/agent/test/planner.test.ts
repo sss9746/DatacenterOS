@@ -540,3 +540,146 @@ describe('resolveConflicts never falls back to a clashing choice (review P3 #7)'
     expect(b.needs_approval).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------------- sequential conditional planning
+
+/**
+ * FakePhysics plus a cross-job coupling like real physics' shared cooling loop: while job-a stays on loop-a,
+ * job-b inherits its heat (big lost work, risk 1) unless job-b itself moves. Per-job scoring (every other job in
+ * place) would therefore move job-b; conditional scoring (job-a's move applied first) must not.
+ */
+class CoupledPhysics extends FakePhysics {
+  override simulatePlan(...args: Parameters<FakePhysics['simulatePlan']>): ReturnType<FakePhysics['simulatePlan']> {
+    const [obs, plan] = args;
+    const m = super.simulatePlan(...args);
+    const moved = (j: string) => plan.commands.some((c) => c.job_id === j && (c.operation === 'migrate_restart' || c.operation === 'pause_job'));
+    const inView = (j: string) => obs.job_states.some((s) => s.job_id === j);
+    if (inView('job-a') && inView('job-b') && !moved('job-a') && !moved('job-b')) {
+      return { ...m, expected_lost_work_units: m.expected_lost_work_units + 50_000, failure_risk_estimate: 1 };
+    }
+    return m;
+  }
+}
+
+describe('sequential conditional planning (no needless preemption)', () => {
+  const allOpts = (r: PlanResult, jobId: string) => [jobPlan(r, jobId).chosen, ...jobPlan(r, jobId).alternatives];
+  const isPreempt = (o: RankedOption) => o.commands.some((c) => c.operation === 'migrate_restart' || c.operation === 'pause_job');
+
+  beforeEach(async () => {
+    physics = new CoupledPhysics();
+    db = new FakeDb({ snapshot: loadPumpDegradedSnapshot(), physics });
+    await setup([[PUMP, ['pump-a', 'loop-a', 'rack-r2', 'rack-r3', 'rack-r4']]]);
+  });
+
+  it("scores job-b with job-a's chosen move applied: job-b keeps / caps, its moves rank below keep", async () => {
+    const r = await run(new FakeLlm([new Error('down')]));
+    expect(jobPlan(r, 'job-a').chosen.commands.map((c) => c.operation)).toEqual(['checkpoint', 'migrate_restart']);
+    const b = jobPlan(r, 'job-b');
+    expect(['job-b:keep', 'job-b:cap']).toContain(b.chosen.option_id);
+    const keep = allOpts(r, 'job-b').find((o) => o.option_id === 'job-b:keep')!;
+    expect(keep.metrics.expected_lost_work_units).toBeLessThan(50_000); // not charged job-a's heat
+    // (the toy model keeps job-b's own degraded-loop risk at 0.5 > its 0.4 tolerance, so the cap ranks first there)
+    expect(isPreempt(b.chosen)).toBe(false);
+    for (const o of allOpts(r, 'job-b').filter((x) => isPreempt(x) && !x.excluded_reason)) expect(o.rank).toBeGreaterThan(b.chosen.rank);
+    // job-b's options were simulated after job-a's commands (combined list) and the trace says so
+    const aKeys = jobPlan(r, 'job-a').chosen.commands.map((c) => c.command_key);
+    type SimArg = { commands: { command_key: string; job_id: string }[] };
+    const bSims = physics.calls.filter((c) => c.method === 'simulatePlan' && (c.args[0] as SimArg).commands.some((x) => x.job_id === 'job-b'));
+    expect(bSims.length).toBeGreaterThan(0);
+    for (const s of bSims) expect((s.args[0] as SimArg).commands.map((x) => x.command_key).slice(0, aKeys.length)).toEqual(aKeys);
+    const aId = jobPlan(r, 'job-a').chosen.option_id;
+    expect(r.tool_calls.some((t) => t.tool === 'simulate_plan' && t.args_summary.includes(aId) && t.args_summary.includes('after'))).toBe(true);
+    expect(RANKING_ASSUMPTION).toMatch(/sequentially in priority order/);
+    expect(RANKING_ASSUMPTION).toMatch(/needless preemption/);
+  });
+
+  it('shows Nemotron the conditional context and vs_keep deltas', async () => {
+    const llm = new FakeLlm([pickTop()]);
+    await run(llm);
+    const input = parseInput(llm.requests[0]!) as unknown as {
+      jobs: { job_id: string; after_jobs: string[]; options: { option_id: string; vs_keep?: { lost_wu: number } }[] }[];
+    };
+    const a = input.jobs.find((j) => j.job_id === 'job-a')!;
+    const b = input.jobs.find((j) => j.job_id === 'job-b')!;
+    expect(a.after_jobs).toEqual([]);
+    expect(b.after_jobs).toEqual(['job-a']);
+    expect(a.options[0]!.vs_keep!.lost_wu).toBeLessThan(0); // moving job-a helps
+    for (const o of b.options) if (o.option_id !== 'job-b:keep') expect(o.vs_keep).toBeDefined();
+  });
+
+  it('re-scores later jobs when Nemotron departs from the rank-1 option they were conditioned on', async () => {
+    const r = await run(new FakeLlm([pickTop({ 'job-a': 'job-a:keep' })]));
+    const a = jobPlan(r, 'job-a');
+    expect(a.chosen.option_id).toBe('job-a:keep');
+    expect(a.decided_by).toBe('nemotron');
+    // job-b now sees job-a staying in place: its keep carries the coupled loss
+    const keep = allOpts(r, 'job-b').find((o) => o.option_id === 'job-b:keep')!;
+    expect(keep.metrics.expected_lost_work_units).toBeGreaterThanOrEqual(50_000);
+    expect(r.tool_calls.some((t) => t.tool === 'simulate_plan' && t.args_summary.includes('job-a:keep'))).toBe(true);
+    // Nemotron's job-b choice is re-validated against the re-scored list (still a listed eligible option)
+    const b = jobPlan(r, 'job-b');
+    expect(allOpts(r, 'job-b').some((o) => o.option_id === b.chosen.option_id && !o.excluded_reason)).toBe(true);
+  });
+});
+
+describe('failed job recovery', () => {
+  beforeEach(async () => {
+    physics = new FakePhysics();
+    const snap = loadPumpDegradedSnapshot();
+    const a = snap.job_states.find((j) => j.job_id === 'job-a')!;
+    a.status = 'failed';
+    a.allocated_gpu_ids = [];
+    snap.allocations = snap.allocations.filter((x) => x.job_id !== 'job-a');
+    db = new FakeDb({ snapshot: snap, physics });
+    await setup([[PUMP, ['pump-a', 'loop-a', 'rack-r2', 'rack-r3', 'rack-r4']]]);
+  });
+
+  it('plans a restart (no checkpoint, no dependency) for a failed job; a recovery is never a needless preemption', async () => {
+    const r = await run(new FakeLlm([new Error('down')]));
+    const a = jobPlan(r, 'job-a');
+    const opts = [a.chosen, ...a.alternatives];
+    expect(opts.map((o) => o.option_id)).toContain('job-a:keep');
+    expect(opts.some((o) => o.commands.some((c) => c.operation === 'checkpoint' || c.operation === 'pause_job'))).toBe(false);
+    const restarts = opts.filter((o) => o.option_id.startsWith('job-a:restart:'));
+    expect(restarts.length).toBeGreaterThan(0);
+    for (const o of restarts) expect(o.commands[0]!.depends_on_command_keys).toEqual([]);
+    // (ranking vs leave-failed is physics-driven: the toy model charges a failed job no delay; real physics
+    // charges the whole horizon, so the restart wins there -- see the sc17 eval row)
+  });
+});
+
+describe('in-flight checkpoint (job checkpointing right now)', () => {
+  const INFLIGHT_KEY = 'wf-0:checkpoint:job-a:1';
+  beforeEach(async () => {
+    physics = new FakePhysics();
+    const snap = loadPumpDegradedSnapshot();
+    snap.job_states.find((j) => j.job_id === 'job-a')!.status = 'checkpointing';
+    snap.checkpoints.push({
+      ...snap.checkpoints[0]!,
+      checkpoint_id: 'ckpt-job-a-inflight',
+      job_id: 'job-a',
+      status: 'writing',
+      complete_sim_time_ms: null,
+      requested_sim_time_ms: snap.clock.sim_time_ms - 5_000,
+      command_key: INFLIGHT_KEY,
+    });
+    db = new FakeDb({ snapshot: snap, physics });
+    await setup([[PUMP, ['pump-a', 'loop-a', 'rack-r2', 'rack-r3', 'rack-r4']]]);
+  });
+
+  it('never proposes a second checkpoint; moves and pause depend on the in-flight checkpoint key', async () => {
+    const r = await run(new FakeLlm([new Error('down')]), [PUMP], 2);
+    const opts = [jobPlan(r, 'job-a').chosen, ...jobPlan(r, 'job-a').alternatives];
+    for (const o of opts) expect(o.commands.map((c) => c.operation)).not.toContain('checkpoint');
+    const moves = opts.filter((o) => o.commands.some((c) => c.operation === 'migrate_restart'));
+    expect(moves.length).toBeGreaterThan(0);
+    for (const o of moves) {
+      expect(o.option_id).toMatch(/^job-a:ckpt-inflight\+move:/);
+      expect(o.label).toContain(`(after in-flight checkpoint ${INFLIGHT_KEY})`);
+      expect(o.commands).toHaveLength(1);
+      expect(o.commands[0]!.depends_on_command_keys).toEqual([INFLIGHT_KEY]);
+    }
+    const pause = opts.find((o) => o.option_id === 'job-a:ckpt-inflight+pause')!;
+    expect(pause.commands[0]!.depends_on_command_keys).toEqual([INFLIGHT_KEY]);
+  });
+});

@@ -1,69 +1,107 @@
-// Gate 4 rehearsal: P1's runScenario harness with reactive / threshold (P1) and nemotronPolicy (P3, llm = null by
-// default) on the SAME scenarios + seeds. Prints EvaluationResults side by side and writes them as JSON.
+// Gate 4 rehearsal: P1's runScenario harness (REAL physics) with reactive / threshold (P1) and nemotronPolicy (P3) on
+// the SAME scenarios + seeds. Every policy gets the identical ObservedSnapshot on every tick (ARCHITECTURE §9).
+// Prints one row per scenario x policy, then a totals table, and optionally writes the rows as JSON.
 //
-//   pnpm --filter agent exec tsx scripts/eval-side-by-side.ts [--out <file>] [--only sc03,sc17] [--policies reactive,threshold,nemotron]
+//   pnpm --filter agent exec tsx scripts/eval-side-by-side.ts [--out <file>] [--only sc03,sc17]
+//        [--policies reactive,threshold,nemotron] [--live] [--max-live-calls 30] [--every-tick]
 //
-// Deterministic: the nemotron policy is created with llm = null (no NIM key is read).
-//
-// --every-tick: call nemotronPolicy on every harness tick (CONTRACTS 0.6 literal). Measured ~4 s per call while an
-//   incident is open (triage + planner + ~30 simulatePlan runs), i.e. ~40 min per scenario.
-// default (event-driven): nemotronPolicy is re-invoked only when decision_epoch or the observation_event_ids change,
-//   and returns [] otherwise -- the same "act on change" cadence P3's agent loop uses. Rows are labelled in the log.
+// default: deterministic Nemotron path (llm = null; no NIM key is read).
+// --live: Nemotron via NIM (NIM_API_KEY + NIM_MODEL from env / repo-root .env.local; the key is never printed).
+//   Responses are disk-cached (apps/agent/.cache/llm); at most --max-live-calls requests reach the LLM port, after that
+//   the policy falls back to the deterministic path (counted in llmFailures).
+// cadence: event-driven (built into createNemotronPolicy, see EVENT_DRIVEN_CADENCE); --every-tick re-plans on every
+//   harness tick (CONTRACTS §0.6 literal; ~4 s per call while an incident is open, ~40 min per scenario).
 import { writeFileSync } from 'node:fs';
 import type { EvaluationResult } from '@dcos/contracts';
 import { loadScenarios, reactivePolicy, runScenario, summarizeResults, thresholdPolicy } from '@dcos/physics';
 import { createPhysicsPort } from '../src/adapters/physics.js';
-import { createNemotronPolicy } from '../src/policy.js';
-import type { Policy } from '../src/ports.js';
+import { loadConfig } from '../src/config.js';
+import { createNimLlm } from '../src/llm.js';
+import { EVENT_DRIVEN_CADENCE, createNemotronPolicy } from '../src/policy.js';
+import type { LlmPort, Policy } from '../src/ports.js';
 
 const arg = (name: string): string | undefined => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
+const flag = (name: string): boolean => process.argv.includes(`--${name}`);
+
+/** Hard cap on LIVE requests (it sits under the disk cache, so cache hits are free); beyond it every call fails -> deterministic. */
+function capped(inner: LlmPort, max: number): LlmPort & { used: () => number } {
+  let used = 0;
+  return {
+    used: () => used,
+    async chat(req) {
+      if (used >= max) throw new Error('live LLM call budget exhausted');
+      used += 1;
+      return inner.chat(req);
+    },
+  };
+}
+
+const COLS = ['lost_work_units', 'job_completion_delay_s', 'gpu_busy_waste_s', 'unnecessary_preemptions', 'unsafe_actions_executed',
+  'unsafe_actions_blocked', 'successful_recoveries', 'failed_recoveries'] as const;
+const SHORT: Record<(typeof COLS)[number], string> = {
+  lost_work_units: 'lost_wu', job_completion_delay_s: 'delay_s', gpu_busy_waste_s: 'waste_s', unnecessary_preemptions: 'unnec',
+  unsafe_actions_executed: 'unsafeX', unsafe_actions_blocked: 'unsafeB', successful_recoveries: 'rec_ok', failed_recoveries: 'rec_fail',
+};
+const fmt = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 async function main(): Promise<void> {
   const only = arg('only')?.split(',');
   const names = (arg('policies') ?? 'reactive,threshold,nemotron').split(',') as EvaluationResult['policy'][];
   const scenarios = loadScenarios().filter((s) => !only || only.some((p) => s.scenario_id.startsWith(p)));
   const physics = await createPhysicsPort();
-  const nemotron = createNemotronPolicy({ llm: null, physics, cache: false });
-  const everyTick = process.argv.includes('--every-tick');
-  let lastKey: string | null = null;
-  const eventDriven: Policy = async (obs, ctx) => {
-    const key = `${obs.run_id}|${obs.clock.decision_epoch}|${obs.observation_event_ids.join(',')}`;
-    if (key === lastKey) return [];
-    lastKey = key;
-    return nemotron(obs, ctx);
-  };
-  const policies: Record<EvaluationResult['policy'], Policy> = {
-    reactive: reactivePolicy,
-    threshold: thresholdPolicy,
-    nemotron: everyTick ? nemotron : eventDriven,
-  };
-  console.log(`nemotron cadence: ${everyTick ? 'every tick' : 'event-driven (decision_epoch / observation ids change)'}`);
+  const live = flag('live');
+  const everyTick = flag('every-tick');
+  const maxLive = Number(arg('max-live-calls') ?? 30);
+
+  let llm: (LlmPort & { used: () => number }) | null = null;
+  let model = 'none';
+  if (live) {
+    const cfg = loadConfig();
+    if (!cfg.NIM_API_KEY || !cfg.NIM_MODEL) throw new Error('--live needs NIM_API_KEY and NIM_MODEL');
+    model = cfg.NIM_MODEL;
+    llm = capped(createNimLlm(cfg), maxLive);
+  }
+  const nemotron = createNemotronPolicy({
+    llm,
+    physics,
+    model,
+    cache: live,
+    cadence: everyTick ? 'every-tick' : 'event-driven',
+  });
+  const policies: Record<EvaluationResult['policy'], Policy> = { reactive: reactivePolicy, threshold: thresholdPolicy, nemotron };
+  const label = `real physics; Nemotron ${live ? `live (${model}, <= ${maxLive} LLM requests)` : 'deterministic (llm = null)'}; ${everyTick ? 'every-tick cadence' : 'event-driven cadence'}`;
+  console.log(`# ${label}`);
+  if (!everyTick) console.log(`# ${EVENT_DRIVEN_CADENCE}`);
+  console.log(`# ${scenarios.length} scenario(s) x ${names.join(', ')}`);
+  console.log(['scenario'.padEnd(38), 'policy'.padEnd(9), ...COLS.map((c) => SHORT[c].padStart(9)), 'secs'.padStart(7)].join(' '));
 
   const rows: EvaluationResult[] = [];
   for (const s of scenarios) {
     for (const name of names) {
-      lastKey = null;
+      nemotron.reset();
       const t0 = Date.now();
       const r = await runScenario(s, policies[name], { policy_name: name });
       rows.push(r);
       console.log(
-        [s.scenario_id.padEnd(38), name.padEnd(9), `lost=${r.lost_work_units}`, `delay=${r.job_completion_delay_s}`, `waste=${r.gpu_busy_waste_s}`,
-          `unnec=${r.unnecessary_preemptions}`, `unsafeX=${r.unsafe_actions_executed}`, `unsafeB=${r.unsafe_actions_blocked}`,
-          `ok=${r.successful_recoveries}`, `fail=${r.failed_recoveries}`, `${((Date.now() - t0) / 1000).toFixed(1)}s`].join(' '),
+        [s.scenario_id.padEnd(38), name.padEnd(9), ...COLS.map((c) => fmt(r[c]).padStart(9)), ((Date.now() - t0) / 1000).toFixed(1).padStart(7)].join(' '),
       );
     }
   }
-  console.log('\nSUMMARY');
-  for (const p of summarizeResults(rows)) console.log(JSON.stringify(p));
+
+  console.log(`\nTOTALS (${label})`);
+  console.log(['policy'.padEnd(9), 'scen'.padStart(5), ...COLS.map((c) => SHORT[c].padStart(10))].join(' '));
+  for (const p of summarizeResults(rows)) {
+    console.log([p.policy.padEnd(9), String(p.scenarios).padStart(5), ...COLS.map((c) => fmt(p[c]).padStart(10))].join(' '));
+  }
   const out = arg('out');
-  if (out) writeFileSync(out, JSON.stringify(rows, null, 2));
-  console.log(`nemotron stats: ${JSON.stringify(nemotron.stats())}`);
+  if (out) writeFileSync(out, JSON.stringify({ label, rows }, null, 2));
+  console.log(`nemotron stats: ${JSON.stringify({ ...nemotron.stats(), liveRequestsUsed: llm?.used() ?? 0 })}`);
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 });
