@@ -294,7 +294,7 @@ td small { display: block; color: var(--muted); font-size: 9px; margin-top: 5px;
   .sidebar-note { display: none; }
   .main { margin-left: 64px; padding: 28px 24px 0; }
   .clocks { gap: 20px; }
-  .connection { display: none; }
+  .clocks { flex-wrap: wrap; }
   .matrix { padding: 0 16px; }
   .matrix-labels, .matrix-row { grid-template-columns: 49px repeat(8, minmax(0, 1fr)); gap: 4px; }
   .gpu-cell { font-size: 11px; }
@@ -368,7 +368,7 @@ td small { display: block; color: var(--muted); font-size: 9px; margin-top: 5px;
 @media (max-width: 380px) {
   .sidebar nav a { padding: 8px 6px; }
   .sidebar nav a svg { display: none; }
-  .connection { display: none; }
+  .connection { flex-basis: 100%; }
   .matrix { padding: 0 12px; }
   .matrix-labels, .matrix-row { grid-template-columns: 29px repeat(8, minmax(0, 1fr)); gap: 3px; }
 }
