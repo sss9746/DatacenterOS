@@ -18,7 +18,7 @@
   --ar-t-base: 240ms;
   --ar-t-drama: 1200ms;
 
-  display: flex; flex-direction: column; min-height: 560px; min-width: 0;
+  display: flex; flex-direction: column; min-width: 0;
   container-type: inline-size; container-name: agent-room;
   font-variant-numeric: tabular-nums;
 }
@@ -216,7 +216,7 @@
 #agent-room .ar-divider span { flex: 0 1 auto; text-align: center; font-size: 11px; line-height: 1.35; font-weight: 550; color: var(--ar-warn); }
 
 /* ---------------------------------------------------------------- empty */
-#agent-room .ar-empty { margin: auto; padding: 24px; text-align: center; color: var(--ar-muted); }
+#agent-room .ar-empty { margin: auto; padding: 40px 24px; text-align: center; color: var(--ar-muted); }
 #agent-room .ar-empty strong { display: block; font-size: 13px; font-weight: 500; color: #ced8e2; }
 #agent-room .ar-empty p { margin: 6px 0 0; font-size: 12px; line-height: 1.7; }
 

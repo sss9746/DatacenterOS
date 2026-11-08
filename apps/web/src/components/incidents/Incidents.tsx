@@ -27,7 +27,7 @@ export function Incidents({ incidents, evidence, workflows, events, actions, sna
     {example && <p className="example-note">Scripted example: these incidents, decisions and tool calls are illustrations. No model, planner or safety engine ran.</p>}
     {cards.length === 0
       ? <Empty title="No incidents in this run">{signals > 0
-        ? `${signals} signal${signals === 1 ? '' : 's'} observed, but no agent has grouped them into an incident yet. A fault alone does not create a diagnosis.`
+        ? `${signals} signal${signals === 1 ? '' : 's'} observed, but no agent has grouped ${signals === 1 ? 'it' : 'them'} into an incident yet. A fault alone does not create a diagnosis.`
         : mode === 'live' ? 'Incidents appear when the agent groups symptoms and records a diagnosis.' : 'Inject a fault from the presenter controls, or pick the Recovery example in the Run view.'}</Empty>
       : <div className="incident-list">{cards.map((card) => <IncidentCard key={card.incidentId} card={card}/>)}</div>}
   </Panel>;
