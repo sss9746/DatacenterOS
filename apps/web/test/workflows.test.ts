@@ -326,6 +326,19 @@ describe('persisted candidates (workflow.state.candidates)', () => {
     expect(opts[0]).toMatchObject({ lost_wu: 0, persisted: { deficit_wu: null, safety: 'allow', gpu_waste_s: 30, snapshot_epoch: 7, as_of_sim_time_ms: 5000, reason: 'r' } });
     expect(opts[1]!.lost_wu).toBeNull();
   });
+  it('numbers repeated option names per job (one per placement) so ids stay unique', () => {
+    const opts = persistedCandidateOptions({ candidates: [
+      cand({ option: 'checkpoint_then_migrate', commands_summary: 'to r1+r5', chosen: true }),
+      cand({ option: 'checkpoint_then_migrate', commands_summary: 'to r6', safety: 'deny' }),
+      cand({ option: 'keep_running' }),
+      cand({ job_id: 'job-b', option: 'checkpoint_then_migrate', chosen: true }),
+    ] })!;
+    expect(opts.map((o) => [o.option_id, o.simulated])).toEqual([
+      ['job-a:checkpoint_then_migrate #1', 'to r1+r5'], ['job-a:checkpoint_then_migrate #2', 'to r6'], ['job-a:keep_running', 'checkpoint job-a'],
+      ['job-b:checkpoint_then_migrate', 'checkpoint job-a'],
+    ]);
+    expect(new Set(opts.map((o) => o.option_id)).size).toBe(opts.length);
+  });
   it('caps at 6 per job and ignores malformed rows', () => {
     const many = Array.from({ length: 8 }, (_, i) => cand({ option: `o${i}` }));
     expect(persistedCandidateOptions({ candidates: [...many, { option: 'no-job' }, 'junk'] })).toHaveLength(6);

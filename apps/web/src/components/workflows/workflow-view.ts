@@ -556,6 +556,18 @@ export function persistedCandidateOptions(state: Record<string, unknown>): Candi
       },
     });
   }
+  // The agent persists one entry per placement, so the same option name (e.g. checkpoint_then_migrate to each of the
+  // top-3 destinations) can repeat for a job. Number repeats in persisted order so each id (and React key) is unique.
+  const total = new Map<string, number>();
+  for (const o of out) total.set(o.option_id, (total.get(o.option_id) ?? 0) + 1);
+  const nth = new Map<string, number>();
+  for (const o of out) {
+    if (total.get(o.option_id)! < 2) continue;
+    const base = o.option_id;
+    const i = (nth.get(base) ?? 0) + 1;
+    nth.set(base, i);
+    o.option_id = `${base} #${i}`;
+  }
   // Stable: chosen options first within each job, jobs in first-appearance order.
   const jobs = [...perJob.keys()];
   return jobs.flatMap((j) => {
