@@ -94,6 +94,7 @@ export function App() {
         {example && <p className="data-warning">Recovery example: incidents and tool calls are scripted illustrations. They are not a live diagnosis, executed plan, or benchmark.</p>}
         <Page state={state} store={store} snapshot={snapshot} mode={mode} dbName={dbName} canAdmin={canAdmin} localPhysics={localPhysics} example={example} now={now} runWorkflows={state.workflows.filter((row) => row.run_id === snapshot.run_id)} runPlans={state.plans.filter((row) => row.run_id === snapshot.run_id)} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onError={setControlError} navigate={navigate}/>
       </>}
+      <div className="main-spacer" aria-hidden="true"/>
       <footer className="footer"><span>DataCenterOS <span className="separator">/</span> A GPU cluster digital twin</span><span>Simulated, configurable thresholds: throttle 85 °C · shutdown 92 °C</span><a href="https://github.com/sss9746/DatacenterOS/blob/main/plans/CONTRACTS.md" target="_blank" rel="noreferrer">Model contracts<ArrowUpRight size={13} aria-hidden="true"/></a></footer>
       {snapshot && store && <DemoControls store={store} canAdmin={canAdmin} open={demoOpen} onOpenChange={setDemoOpen} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onReset={() => setRevision((r) => r + 1)} plans={state.plans} actionDetails={state.actionDetails} workflows={state.workflows} snapshot={snapshot}/>}
     </main>
