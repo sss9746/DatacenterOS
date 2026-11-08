@@ -1,8 +1,17 @@
-import { Boxes, CircleHelp, ExternalLink, Grid2X2, ListChecks, Radio, BarChart3 } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Boxes, ExternalLink } from 'lucide-react';
 import { Badge } from '../ui/panel';
-export function Header({ mode, localPhysics = false, dbName }: { mode: 'mock' | 'live'; localPhysics?: boolean; dbName?: string }) {
-  return <>
-    <header className="masthead"><a className="brand" href="#overview" aria-label="DataCenterOS overview"><Boxes size={25} strokeWidth={1.7} /><span>DataCenter<span className="brand-os">OS</span></span></a><div className="masthead-meta"><span className="desktop-only">GPU cluster reliability</span><Badge tone={mode === 'mock' ? 'warning' : 'neutral'}>{localPhysics ? 'Mock · local physics' : mode === 'mock' ? 'Mock · fixtures' : `Live DB · ${dbName ?? 'unknown'}`}</Badge><a className="icon-link" href="https://github.com/sss9746/DatacenterOS" target="_blank" rel="noreferrer" aria-label="Open DataCenterOS repository"><ExternalLink size={17}/></a></div></header>
-    <aside className="sidebar"><nav aria-label="Dashboard sections"><a href="#overview"><Grid2X2/>Cluster overview</a><a href="#jobs"><ListChecks/>Training jobs</a><a href="#activity"><Radio/>Recovery activity</a><a href="#scoreboard"><BarChart3/>Benchmarks</a></nav><div className="sidebar-note"><CircleHelp size={17}/><p>A digital twin.<br/>Every modeled value is labeled simulated.</p><span>HackUTD 2026</span></div></aside>
-  </>;
+
+/** Forest masthead (§4): display-face brand, honesty mode badge, optional controls slot (the run-view select in mock mode). No sidebar. */
+export function Header({ mode, localPhysics = false, dbName, children }: { mode: 'mock' | 'live'; localPhysics?: boolean; dbName?: string; children?: ReactNode }) {
+  const label = localPhysics ? 'Mock · local physics' : mode === 'mock' ? 'Mock · fixtures' : `Live DB · ${dbName ?? 'unknown'}`;
+  return <header className="masthead">
+    <a className="brand" href="#overview" aria-label="DataCenterOS overview"><span className="brand-mark"><Boxes size={18} strokeWidth={1.8} aria-hidden="true"/></span><span>DataCenter<span className="brand-os">OS</span></span></a>
+    <div className="masthead-meta">
+      <span className="masthead-tagline desktop-only">GPU cluster digital twin</span>
+      <Badge tone={mode === 'mock' ? 'mock' : 'real'}>{label}</Badge>
+      {children}
+      <a className="icon-link" href="https://github.com/sss9746/DatacenterOS" target="_blank" rel="noreferrer" aria-label="Open DataCenterOS repository"><ExternalLink size={17}/></a>
+    </div>
+  </header>;
 }
