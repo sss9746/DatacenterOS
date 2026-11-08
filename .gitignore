@@ -20,3 +20,6 @@ apps/db/scripts/.identities.env
 apps/agent/.cache/
 
 # NOTE: hardware/recordings/ is deliberately NOT ignored (< 5 MB replay backups are committed).
+
+# Vercel project link (local only)
+.vercel/
