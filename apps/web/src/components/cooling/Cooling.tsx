@@ -2,12 +2,17 @@ import { Fan, Minus } from 'lucide-react';
 import type { ObservedSnapshot } from '@dcos/contracts';
 import { Panel, Badge } from '../ui/panel';
 import { number } from '../../lib/utils';
+import { capacityLoss, coolingLoops, pumpLabel, rackRanges } from '../simulation/topology';
 export function Cooling({ snapshot }: { snapshot: ObservedSnapshot }) {
-  return <Panel title="Cooling & headroom" detail={<Badge>Simulated</Badge>}>
-    <div className="pumps">{['a', 'b'].map((id) => {
-      const pump = snapshot.cooling.find((row) => row.resource_id === `pump-${id}`);
-      const loop = snapshot.cooling.find((row) => row.resource_id === `loop-${id}`);
-      return <div className="pump" key={id}><Fan size={20}/><div><strong>Pump {id.toUpperCase()}</strong><span>loop-{id} · {id === 'a' ? 'r2–r4' : 'r1, r5–r8'}</span></div><div className="pump-reading"><Badge tone={pump && pump.operating_state !== 'normal' ? 'warning' : 'neutral'}>{pump?.operating_state ?? 'No data'}</Badge><span>{pump ? `${number(pump.pump_power_w / 1000, 1)} kW` : '—'} · loop {loop?.operating_state ?? 'no telemetry'}</span></div></div>;
+  const loops = coolingLoops(snapshot);
+  const pumpIds = loops.length ? loops.map((loop) => loop.pumpId) : ['pump-a', 'pump-b'];
+  return <Panel title="Cooling & headroom" detail={<Badge tone="simulated">Simulated</Badge>}>
+    <div className="pumps">{pumpIds.map((pumpId) => {
+      const pump = snapshot.cooling.find((row) => row.resource_id === pumpId);
+      const loopMeta = loops.find((loop) => loop.pumpId === pumpId);
+      const loop = loopMeta ? snapshot.cooling.find((row) => row.resource_id === loopMeta.loopId) : undefined;
+      const loss = capacityLoss(pump);
+      return <div className="pump" key={pumpId}><Fan size={20}/><div><strong>{pumpLabel(pumpId)}</strong><span>{loopMeta ? `${loopMeta.loopId} · ${rackRanges(loopMeta.racks)}` : 'loop not reported'}</span></div><div className="pump-reading"><Badge tone={pump && pump.operating_state !== 'normal' ? 'warning' : 'neutral'}>{pump?.operating_state ?? 'No data'}{loss !== null && loss > 0 ? ` · −${Math.round(loss * 100)} %` : ''}</Badge><span>{pump ? `${number(pump.pump_power_w / 1000, 1)} kW` : '—'} · loop {loop?.operating_state ?? 'no telemetry'}</span></div></div>;
     })}</div>
     <div className="rack-headroom" aria-label="Simulated thermal headroom by rack">{Array.from({ length: 8 }, (_, i) => {
       const node = snapshot.nodes.find((row) => row.rack_id === `rack-r${i + 1}`);

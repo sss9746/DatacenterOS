@@ -67,10 +67,13 @@ describe('cooling topology read from the snapshot', () => {
       const html = renderToStaticMarkup(createElement(SimulationView, { snapshot: after, selected: DEFAULT_XID_GPU_ID, onSelect: () => {}, onSelectPump: () => {} }));
       expect(html.match(/is-on-degraded-loop/g)).toHaveLength(3);
       expect(html).toContain('On degraded Pump A');
-      expect(html).toContain('Pump A loop · degraded');
       expect(html).toContain('Pump A degraded');
       expect(html).toContain('Cools racks 2–4');
+      expect(html).toContain('degraded · −60 % capacity'); // the pump button carries the measured capacity loss
+      expect(html).toContain('data-gpu="gpu-r7-n1-0"'); // the chosen rack's eight interactive tiles
+      expect(html.match(/data-sim-gpu="gpu-r\d-n1-\d"/g)?.length).toBe(64 + 8); // 64 rack tiles + 8 detail tiles
       expect(html).not.toContain('since fault'); // no pre-fault reading in a fresh render: no delta is invented
+      expect(html).not.toContain('is-failing'); // first paint never plays the failure flourish
     } finally { client.close(); }
   });
 });

@@ -1,0 +1,32 @@
+/* The one REAL tile (gpu-real-0). Forest REAL badge with the NVIDIA dot; the NVIDIA green never appears anywhere else
+   and never on a replayed or offline value. Tokens carry fallbacks because styles.css is rewritten in parallel. */
+section.real-gpu { --rg-ink: var(--ink, #1F2A1E); --rg-muted: var(--ink-muted, #5B6650); --rg-sage: var(--sage, #7F886A); --rg-paper: var(--paper, #FAF6EC); --rg-inset: var(--paper-inset, #EDE4CE); --rg-forest: var(--forest, #3E503C); --rg-cream: var(--cream-on-forest, #F3ECDB); --rg-nvidia: var(--nvidia, #76B900); --rg-amber-ink: var(--amber-ink, #7A5A12); --rg-orange-soft: var(--orange-soft, #FFD9CB); --rg-orange-ink: var(--orange-ink, #A8380F);
+  --rg-display: var(--font-display, "Bricolage Grotesque", "Inter", system-ui, sans-serif); --rg-mono: var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+  margin-bottom: 16px; padding: 16px 20px 14px; border: 1px dashed var(--rg-sage); border-radius: var(--r-panel, 14px); background: var(--rg-paper); color: var(--rg-ink); }
+section.real-gpu.is-live { border: 1px solid var(--rg-forest); }
+section.real-gpu.is-stale { border-style: solid; border-color: color-mix(in srgb, var(--rg-sage) 60%, transparent); }
+section.real-gpu.is-replay { border: 1px dashed var(--rg-sage); }
+.real-gpu-title { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.real-gpu-title > svg { color: var(--rg-forest); }
+section.real-gpu h2 { flex: 1; margin: 0; font-family: var(--rg-display); font-size: 19px; line-height: 1.25; font-weight: 650; letter-spacing: -.015em; }
+.real-gpu h2 span { font-weight: 400; font-size: 14px; color: var(--rg-muted); }
+.real-gpu .badge-real { display: inline-flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: var(--r-chip, 4px); background: var(--rg-forest); color: var(--rg-cream); font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.real-gpu .badge-real::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--rg-nvidia); }
+.real-gpu .badge-replay, .badge-replay { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: var(--r-chip, 4px); background: var(--rg-orange-soft, #FFD9CB); color: var(--rg-orange-ink, #A8380F); font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+section.real-gpu .real-gpu-pulse { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: 12.5px; color: var(--rg-muted); }
+.real-gpu.is-live .real-gpu-pulse { color: var(--rg-ink); font-weight: 600; }
+.real-gpu.is-stale .real-gpu-pulse { color: var(--rg-amber-ink); font-weight: 600; }
+.real-gpu .offline-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rg-sage); }
+.real-gpu .pulse-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rg-nvidia); box-shadow: 0 0 0 0 color-mix(in srgb, var(--rg-nvidia) 45%, transparent); animation: real-gpu-pulse 1.8s var(--ease-out, cubic-bezier(.2,.7,.2,1)) infinite; }
+.real-gpu.is-stale .pulse-dot { background: var(--rg-sage); animation: none; box-shadow: none; }
+@keyframes real-gpu-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rg-nvidia) 45%, transparent); } 100% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--rg-nvidia) 0%, transparent); } }
+.real-gpu-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 12px 0 10px; }
+.real-gpu-metrics > div:first-child { grid-column: 1 / -1; }
+.real-gpu-metrics dt { margin-bottom: 2px; font-size: 12px; color: var(--rg-muted); }
+.real-gpu-metrics dd { display: flex; align-items: baseline; gap: 4px; margin: 0; font-family: var(--rg-mono); font-size: 12.5px; color: var(--rg-muted); }
+section.real-gpu .real-gpu-metrics dd strong { font-family: var(--rg-display); font-size: 24px; font-weight: 700; line-height: 1; letter-spacing: -.02em; color: var(--rg-ink); }
+.real-gpu-metrics > div:first-child dd strong { font-size: 40px; letter-spacing: -.03em; }
+.real-gpu-metrics dd em { margin-left: 4px; font-style: normal; font-size: 12px; font-weight: 600; color: var(--rg-amber-ink); }
+.real-gpu-none { color: var(--rg-muted); }
+section.real-gpu small { display: block; margin-top: 10px; font-size: 12px; color: var(--rg-muted); }
+@media (prefers-reduced-motion: reduce) { .real-gpu .pulse-dot { animation: none; } }

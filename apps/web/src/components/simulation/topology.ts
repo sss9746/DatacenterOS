@@ -87,3 +87,75 @@ export function inletRiseC(rack: number, loop: CoolingLoop | undefined, snapshot
 
 /** Signed one-decimal Celsius delta: 5.84 → "+5.8 °C", -0.3 → "−0.3 °C". */
 export const formatDeltaC = (delta: number): string => `${delta < 0 ? '−' : '+'}${Math.abs(delta).toFixed(1)} °C`;
+
+/** Rack numbers (1-based, ascending, unique) behind a list of `gpu-rN-…` ids. Ids without a rack are ignored. */
+export const racksOfGpus = (gpuIds: readonly string[]): number[] =>
+  [...new Set(gpuIds.map((id) => /^gpu-r(\d+)-/.exec(id)?.[1]).filter((n): n is string => n !== undefined).map(Number))].sort((a, b) => a - b);
+
+/** Rack set per job from the observed allocations (jobs with no allocation are absent). */
+export function jobRacks(allocations: ReadonlyArray<{ job_id: string; gpu_id: string }>): Record<string, number[]> {
+  const byJob = new Map<string, string[]>();
+  for (const row of allocations) byJob.set(row.job_id, [...(byJob.get(row.job_id) ?? []), row.gpu_id]);
+  return Object.fromEntries([...byJob].map(([jobId, ids]) => [jobId, racksOfGpus(ids)]));
+}
+
+export interface JobMove { jobId: string; from: number[]; to: number[] }
+
+/**
+ * Jobs whose rack set changed between two observed allocation sets, with both sides non-empty: a job that merely lost
+ * its allocation (failure) or gained its first one (start) is not a move. Pure; the view diffs consecutive snapshots.
+ */
+export function detectMoves(previous: Record<string, number[]>, next: Record<string, number[]>): JobMove[] {
+  const moves: JobMove[] = [];
+  for (const [jobId, to] of Object.entries(next)) {
+    const from = previous[jobId];
+    if (!from || from.length === 0 || to.length === 0) continue;
+    if (from.length === to.length && from.every((n, i) => n === to[i])) continue;
+    moves.push({ jobId, from, to });
+  }
+  return moves.sort((a, b) => a.jobId.localeCompare(b.jobId));
+}
+
+/** Pixel geometry of the rack grid, measured by the view (gap mirrors `--sim-rack-gap` in the stylesheet). */
+export interface RackGridGeometry { width: number; height: number; cols: number; gap: number; bandHeight: number }
+
+/** Column count the stylesheet's container queries pick for a given field width. Keep in sync with simulation-view.css. */
+export const rackColumnsFor = (width: number): number => (width >= 720 ? 8 : width >= 400 ? 4 : 2);
+
+/** Centre x and bottom y (px) of rack `n` inside the measured field. */
+export function rackAnchor(n: number, g: RackGridGeometry): { x: number; top: number; bottom: number } {
+  const rows = Math.ceil(8 / g.cols);
+  const cellW = (g.width - g.gap * (g.cols - 1)) / g.cols;
+  const cellH = (g.height - g.bandHeight - g.gap * (rows - 1)) / rows;
+  const col = (n - 1) % g.cols; const row = Math.floor((n - 1) / g.cols);
+  return { x: col * (cellW + g.gap) + cellW / 2, top: row * (cellH + g.gap), bottom: row * (cellH + g.gap) + cellH };
+}
+
+/**
+ * SVG path for one coolant loop drawn in the band under a single-row rack grid: a riser from each rack's bottom edge
+ * down to a header pipe at `laneY` px below the racks, joined left to right. Returns '' when the grid is wrapped
+ * (the band is hidden there) or the loop has no racks.
+ */
+export function loopPath(racks: number[], laneY: number, g: RackGridGeometry): string {
+  if (g.cols < 8 || racks.length === 0 || g.width <= 0) return '';
+  const anchors = racks.map((n) => rackAnchor(n, g));
+  const y = anchors[0]!.bottom + laneY;
+  const header = `M ${anchors[0]!.x.toFixed(1)} ${y.toFixed(1)} H ${anchors.at(-1)!.x.toFixed(1)}`;
+  const risers = anchors.map((a) => `M ${a.x.toFixed(1)} ${a.bottom.toFixed(1)} V ${y.toFixed(1)}`).join(' ');
+  return `${header} ${risers}`;
+}
+
+/** Arc from the first old rack to the first new rack, bowing above the rack row(s), for the job-move flourish. */
+export function moveArcPath(move: JobMove, g: RackGridGeometry): string {
+  if (g.width <= 0) return '';
+  const from = rackAnchor(move.from[0]!, g); const to = rackAnchor(move.to[0]!, g);
+  const lift = Math.max(28, Math.abs(to.x - from.x) * 0.22);
+  const y0 = from.top + 6; const y1 = to.top + 6;
+  return `M ${from.x.toFixed(1)} ${y0.toFixed(1)} Q ${((from.x + to.x) / 2).toFixed(1)} ${(Math.min(y0, y1) - lift).toFixed(1)} ${to.x.toFixed(1)} ${y1.toFixed(1)}`;
+}
+
+/** Fraction of nominal capacity a pump has lost (0.6 for "60 % down"); null when the data does not say. */
+export function capacityLoss(row: Pick<CoolingCurrent, 'nominal_capacity_w' | 'observed_capacity_estimate_w'> | undefined): number | null {
+  if (!row || row.observed_capacity_estimate_w === null || !(row.nominal_capacity_w > 0)) return null;
+  return Math.round((1 - row.observed_capacity_estimate_w / row.nominal_capacity_w) * 100) / 100;
+}
