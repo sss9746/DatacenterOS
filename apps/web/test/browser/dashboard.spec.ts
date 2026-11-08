@@ -49,8 +49,12 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await page.locator('[data-gpu="gpu-r4-n1-2"]').click();
   // The detailed fault form lives under "Advanced" in the Demo controls drawer.
   await page.locator('#presenter .demo-advanced > summary').click();
-  await expect(page.getByLabel('Simulated GPU')).toHaveValue('gpu-r4-n1-2');
-  await page.getByLabel('Simulated GPU').selectOption('gpu-r3-n1-0');
+  // Scoped to the fault library's own GPU picker. FaultControls carries the same "Simulated GPU" label but is
+  // unreachable in the app (PhysicsControls -> PresenterControls -> FaultControls, and nothing imports
+  // PhysicsControls); scoping keeps this spec unambiguous if that form is ever wired back in.
+  const gpuPicker = page.locator('#presenter .fault-library').getByLabel('Simulated GPU');
+  await expect(gpuPicker).toHaveValue('gpu-r4-n1-2');
+  await gpuPicker.selectOption('gpu-r3-n1-0');
   await page.getByRole('button', { name: /Rack 3/ }).click();
   await page.getByRole('button', { name: 'Fail gpu-r3-n1-0 (Xid 79)' }).click();
   await expect(page.locator('[data-gpu="gpu-r3-n1-0"]')).toHaveAttribute('aria-label', /XID 79/);
@@ -75,7 +79,9 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await log.getByRole('button', { name: 'Show all (23)' }).click();
   await expect(log.locator('.feed-event')).toHaveCount(23);
   await log.getByRole('button', { name: /^Nemotron/ }).click();
-  await expect(log.locator('.feed-event')).toHaveCount(5);
+  // Choosing an actor filter drops back to the newest 6: the example has 7 Nemotron events (two of them the team messages).
+  await expect(log.locator('.feed-event')).toHaveCount(6);
+  await expect(log).toContainText('Showing 6 of 7 Nemotron events');
   await log.getByRole('button', { name: /^All/ }).click();
   await log.getByRole('button', { name: 'Show all (23)' }).click();
   const exclude = log.locator('.tool-call', { hasText: 'list_placement_candidates' }).first();
@@ -127,7 +133,7 @@ test('local physics: pump degradation heats loop A, XID 79 fails a job, and the 
 
   // Step 3: with no persisted plan in local physics, the target is the GPU selected in the Advanced form.
   await page.getByRole('button', { name: /Rack 3,/ }).click();
-  await page.getByLabel('Simulated GPU').selectOption('gpu-r3-n1-0');
+  await page.locator('#presenter .fault-library').getByLabel('Simulated GPU').selectOption('gpu-r3-n1-0');
   await expect(page.locator('#presenter .demo-target')).toContainText('gpu-r3-n1-0');
   await page.getByRole('button', { name: 'Fail a GPU (XID 79)' }).click();
   await page.getByRole('button', { name: 'Advance 30 sim-s' }).click();

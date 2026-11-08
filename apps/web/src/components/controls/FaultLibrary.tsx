@@ -122,9 +122,12 @@ export function FaultLibrary({ store, canAdmin, selectedGpuId, selectedPumpId, o
     {FAULT_GROUPS.map((group) => {
       const Icon = GROUP_ICON[group.id];
       const entries = FAULT_CATALOG.filter((entry) => entry.group === group.id);
-      return <section key={group.id} className="fault-group" aria-labelledby={`${id}-${group.id}`}>
+      // The heading id is namespaced (`-group-`): a bare `${id}-${group.id}` collided with the target
+      // pickers' select ids (`${id}-gpu`, `${id}-node`), so their labels pointed at the heading and the
+      // selects had no accessible name.
+      return <section key={group.id} className="fault-group" aria-labelledby={`${id}-group-${group.id}`}>
         <div className="fault-group-head">
-          <h3 id={`${id}-${group.id}`}><Icon size={14} aria-hidden="true"/>{group.name}</h3>
+          <h3 id={`${id}-group-${group.id}`}><Icon size={14} aria-hidden="true"/>{group.name}</h3>
           <div className="fault-group-target">{picker(group.id)}</div>
         </div>
         <ul className="fault-rows">{entries.map((entry) => {
