@@ -128,7 +128,10 @@ The existing v0 functions (`step` for the facility, `simulate`, `checkAction`) m
 `decision` is `allow | deny | needs_approval`.
 
 ### 0.8 Additions to the kit's tables (§B)
-- **`agent_event`** gains `tool_calls_json`: `[{ tool, args_summary, result_summary }]`. This is **F-NV1**: the dashboard shows Nemotron's tool calls and a one-line summary for each step. Never store raw chain-of-thought.
+- **`agent_event`** gains `tool_calls_json`: `[{ tool, args_summary, result_summary, actor }]` with `actor: "nemotron" | "code"`, plus an event-level `actor` column with the same values. This is **F-NV1**: the dashboard shows Nemotron's tool calls and a one-line summary for each step.
+  - **`nemotron`** marks diagnosis, incident grouping/splitting, option choice and replan decisions.
+  - **`code`** marks `simulate_plan`, `evaluate_safety`, ranking and ledger actions.
+  - Summaries are Nemotron's own stated conclusions, e.g. *"24 GPUs on racks 2–4 + pump A at 0 kW → one incident. XID 79 on rack 7 → unrelated, separate incident."* Never store raw chain-of-thought.
 - **`resource`** gains a `gpu-real-0` row. `gpu_current` is updated from `nvidia-smi` telemetry ingested with `source_kind: "hardware"` (**F-NV2**).
 - **Tier 1 tables** (P2 builds these first):
   - `run`, `resource`, `dependency_edge`
