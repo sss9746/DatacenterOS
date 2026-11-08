@@ -33,6 +33,9 @@ import type * as G from './generated/types.js';
 import {
   DbError,
   parseDbError,
+  type ActionDetail,
+  type ActionHistoryEntry,
+  type ActionSafety,
   type AgentEventInput,
   type DbChange,
   type Evidence,
@@ -52,7 +55,7 @@ const TABLES = [
   'run', 'resource', 'dependency_edge', 'gpu_current', 'node_current', 'cooling_current',
   'job_spec', 'job_current', 'job_gpu_allocation', 'checkpoint', 'telemetry_recent', 'signal_event',
   'symptom', 'incident', 'incident_symptom', 'incident_resource', 'workflow', 'workflow_incident',
-  'plan', 'action', 'resource_lease', 'agent_event', 'evaluation_result',
+  'plan', 'action', 'action_event', 'resource_lease', 'agent_event', 'evaluation_result',
 ] as const;
 
 const nul = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
@@ -81,6 +84,62 @@ function toActionStatus(r: G.Action): ActionStatus {
     result: { ...result, ...(r.dueSimTimeMs !== undefined ? { due_sim_time_ms: r.dueSimTimeMs } : {}) },
     reason_code: nul(r.reasonCode),
     version: r.version,
+  };
+}
+
+function toSafety(v: unknown): ActionSafety | null {
+  if (!v || typeof v !== 'object') return null;
+  const s = v as Partial<ActionSafety>;
+  return {
+    decision: s.decision ?? 'deny',
+    violations: Array.isArray(s.violations) ? s.violations : [],
+    checked_decision_epoch: typeof s.checked_decision_epoch === 'number' ? s.checked_decision_epoch : null,
+    evidence: s.evidence && typeof s.evidence === 'object' ? s.evidence : {},
+  };
+}
+
+/** `events` = this action's action_event rows, any order. */
+function toActionDetail(r: G.Action, events: G.ActionEvent[]): ActionDetail {
+  const stored = parse<{ command?: ActionCommand; safety?: unknown; start_safety?: unknown }>(r.resultJson, {});
+  // request_action always stores the command; rebuild it from the columns if a row ever lacks it.
+  const command: ActionCommand = stored.command ?? {
+    schema_version: V,
+    run_id: r.runId,
+    action_id: r.actionId,
+    command_key: r.commandKey,
+    workflow_id: r.workflowId,
+    plan_id: r.planId,
+    incident_ids: parse<ActionCommand['incident_ids']>(r.incidentIdsJson, [] as unknown as ActionCommand['incident_ids']),
+    operation: r.operation as ActionCommand['operation'],
+    target_resource_id: r.targetResourceId,
+    job_id: nul(r.jobId),
+    arguments: parse<Record<string, unknown>>(r.argsJson, {}),
+    depends_on_command_keys: parse<string[]>(r.dependsOnCommandKeysJson, []),
+    expected_decision_epoch: r.expectedDecisionEpoch,
+    expected_resource_versions: parse<Record<string, number>>(r.expectedVersionsJson, {}),
+    requested_sim_time_ms: r.requestedSimTimeMs,
+  };
+  const history = [...events]
+    .sort((a, b) => (a.actionEventId < b.actionEventId ? -1 : a.actionEventId > b.actionEventId ? 1 : 0))
+    .map((e): ActionHistoryEntry => {
+      const { version, ...detail } = parse<Record<string, unknown>>(e.detailJson, {});
+      return {
+        status: e.status as ActionStatus['status'],
+        version: typeof version === 'number' ? version : 0,
+        sim_time_ms: e.simTimeMs,
+        observed_unix_ms: e.observedUnixMs,
+        reason_code: nul(e.reasonCode),
+        detail,
+      };
+    });
+  return {
+    status: toActionStatus(r),
+    command,
+    claimed_by: nul(r.claimedBy),
+    due_sim_time_ms: nul(r.dueSimTimeMs),
+    safety: toSafety(stored.safety),
+    start_safety: toSafety(stored.start_safety),
+    history,
   };
 }
 
@@ -542,6 +601,18 @@ export async function connect(opts: ConnectOptions): Promise<DbClient> {
     onJobs: (cb) => watch([w(db.jobCurrent), w(db.jobGpuAllocation)], jobStates, cb),
     onIncidents: (cb) => watch([w(db.incident)], () => [...db.incident.iter()].map(toIncident), cb),
     onActions: (cb) => watch([w(db.action)], () => [...db.action.iter()].map(toActionStatus), cb),
+    onActionDetails: (cb) =>
+      watch([w(db.action), w(db.actionEvent)], () => {
+        const byKey = new Map<string, G.ActionEvent[]>();
+        for (const e of db.actionEvent.iter()) {
+          const list = byKey.get(e.commandKey);
+          if (list) list.push(e);
+          else byKey.set(e.commandKey, [e]);
+        }
+        return [...db.action.iter()]
+          .map((a) => toActionDetail(a, byKey.get(a.commandKey) ?? []))
+          .sort((a, b) => a.command.requested_sim_time_ms - b.command.requested_sim_time_ms || a.status.command_key.localeCompare(b.status.command_key));
+      }, cb),
     onAgentEvents: (cb) =>
       watch([w(db.agentEvent)], () => [...db.agentEvent.iter()].map(toAgentEvent).sort((a, b) => a.sim_time_ms - b.sim_time_ms), cb),
     onEvaluation: (cb) => watch([w(db.evaluationResult)], () => [...db.evaluationResult.iter()].map(toEvaluation), cb),

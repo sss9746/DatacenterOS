@@ -1,7 +1,9 @@
 // createMockClient(): an in-memory DbClient for P3/P4 before (or without) the live DB.
 // Browser-safe (no Node APIs). Serves P1's gpu_demo_8 fixtures and models the reducer rules
 // P3 relies on: idempotent request_action, key collisions, CAS, fencing, lifecycle, leases.
-// It is NOT a physics engine: `tick()` advances the clock, job progress and due actions only.
+// It is NOT a physics engine: `tick()` advances the clock, job progress, GPU `last_seen_sim_ms`
+// and due actions only. Temperatures change only through fixture overlays (`loadSnapshot('pump_degraded')`,
+// the pump-a `injectFault`), which keep the current clock, jobs, allocations and actions.
 
 import {
   validatePayload,
@@ -22,6 +24,9 @@ import {
 import type { DbClient, Unsubscribe } from './client.js';
 import {
   DbError,
+  type ActionDetail,
+  type ActionHistoryEntry,
+  type ActionSafety,
   type AgentEventInput,
   type DbChange,
   type Evidence,
@@ -70,9 +75,14 @@ export interface MockDbClient extends DbClient {
   readonly mode: 'mock';
   /** Every DbClient call in order (P3 asserts on what it sent). */
   readonly calls: MockCall[];
-  /** Advance logical time by one step (or `simMs`): job progress, due action completions. */
+  /** Advance logical time by one step (or `simMs`): job progress, GPU freshness, due action completions. */
   tick(simMs?: number): void;
-  /** Swap in another observed snapshot (e.g. `pump_degraded`); bumps the decision epoch. */
+  /**
+   * A fixture name (`pump_degraded`, `demo`) overlays that fixture's thermal and cooling state on the current run:
+   * GPU temps + thermal bit, node thermal headroom, cooling rows. Clock, jobs, allocations, checkpoints, actions,
+   * cordons, XID failures and power caps stay. `demo` restores healthy cooling.
+   * A full `ObservedSnapshot` replaces the whole observed state (e.g. a real-physics world). Both bump the epoch.
+   */
   loadSnapshot(snapshot: MockSnapshotName | ObservedSnapshot): void;
   /** Append a signal (e.g. MOCK_FIXTURES.signal_xid79) as if the DB tick emitted it. */
   injectSignal(signal: SignalEvent): void;
@@ -88,9 +98,31 @@ interface ActionRecord {
   dueSimMs: number | null;
   claimedAtMs: number | null;
   claimedBy: string | null;
+  safety: ActionSafety | null;
+  history: ActionHistoryEntry[];
 }
 
 const V = '1.1.0' as const;
+/** CONTRACTS §0.11 #5: DCGM SW thermal slowdown. */
+const THERMAL_BIT = 0x20;
+/** XID -> observed effect, as in @dcos/physics: 79 drops the GPU, 48 and 79 kill its job, 74 only degrades. */
+const XID: Record<number, { availability: GpuCurrent['availability']; jobFatal: boolean; severity: SignalEvent['severity']; text: string }> = {
+  79: { availability: 'unreachable', jobFatal: true, severity: 'critical', text: 'GPU has fallen off the bus' },
+  48: { availability: 'degraded', jobFatal: true, severity: 'critical', text: 'double-bit ECC error' },
+  74: { availability: 'degraded', jobFatal: false, severity: 'warning', text: 'NVLink error' },
+};
+const XID_OF_FAULT: Partial<Record<FaultInjection['kind'], number>> = { gpu_xid_79: 79, gpu_xid_48: 48, gpu_xid_74: 74 };
+/** source_id of signals the mock generates (same as P1's fixtures). */
+const SIM_SOURCE = 'sim-engine-1';
+
+/** Set `run_id` on the snapshot and every row in it. */
+function restampRunId(s: ObservedSnapshot, runId: string): void {
+  s.run_id = runId;
+  for (const v of Object.values(s)) {
+    if (!Array.isArray(v)) continue;
+    for (const row of v) if (row && typeof row === 'object' && 'run_id' in row) (row as { run_id: string }).run_id = runId;
+  }
+}
 const DURATION_MS: Partial<Record<ActionCommand['operation'], number>> = {
   checkpoint: 30_000,
   migrate_restart: 120_000,
@@ -181,7 +213,23 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     return rec;
   };
 
-  const transition = (rec: ActionRecord, status: ActionStatus['status'], patch: Partial<ActionStatus> = {}) => {
+  /** Like live `action_event`: one history entry per status write. */
+  const logEvent = (rec: ActionRecord, detail: Record<string, unknown>) =>
+    rec.history.push({
+      status: rec.status.status,
+      version: rec.status.version,
+      sim_time_ms: rec.status.updated_sim_time_ms,
+      observed_unix_ms: now(),
+      reason_code: rec.status.reason_code,
+      detail: clone(detail),
+    });
+
+  const transition = (
+    rec: ActionRecord,
+    status: ActionStatus['status'],
+    patch: Partial<ActionStatus> = {},
+    detail: Record<string, unknown> = {},
+  ) => {
     rec.status = {
       ...rec.status,
       ...patch,
@@ -189,9 +237,21 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       updated_sim_time_ms: simNow(),
       version: rec.status.version + 1,
     };
+    logEvent(rec, detail);
     emitChange({ kind: 'action_status', status: rec.status });
     emit('actions');
   };
+
+  const toDetail = (rec: ActionRecord): ActionDetail =>
+    clone({
+      status: rec.status,
+      command: rec.cmd,
+      claimed_by: rec.claimedBy,
+      due_sim_time_ms: rec.dueSimMs,
+      safety: rec.safety,
+      start_safety: null,
+      history: rec.history,
+    });
 
   /** Resources an action reserves while claimed/running: target, job, destination GPUs. */
   const closureOf = (cmd: ActionCommand): string[] => {
@@ -300,21 +360,102 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     if (snap.clock.paused) return;
     snap.clock.sim_time_ms += simMs;
     snap.clock.tick_index += 1;
+    // Like physics step(): every reachable GPU reports this tick, so evaluateSafety's EVIDENCE_STALE stays quiet.
+    for (const g of snap.gpus) if (g.availability !== 'unreachable') g.last_seen_sim_ms = simNow();
     const rateById = new Map(snap.job_specs.map((s) => [s.job_id, s.work_rate_per_gpu_per_sim_s]));
     for (const job of snap.job_states) {
+      job.last_update_sim_time_ms = simNow();
       if (job.status !== 'running') continue;
       job.progress_work_units += job.allocated_gpu_ids.length * (rateById.get(job.job_id) ?? 0) * (simMs / 1000);
-      job.last_update_sim_time_ms = simNow();
     }
     for (const rec of actions.values()) {
       if (rec.status.status === 'running' && rec.dueSimMs !== null && rec.dueSimMs <= simNow()) {
         applyCompletion(rec.cmd);
-        transition(rec, 'succeeded');
+        const outcome = { status: 'succeeded', reason_code: null, sim_time_ms: simNow() };
+        transition(rec, 'succeeded', { result: { ...rec.status.result, outcome } }, { outcome });
       }
     }
     emit('gpu', 'jobs');
   };
   const autoTimer = opts.autoTickMs ? setInterval(() => tick(), opts.autoTickMs) : undefined;
+
+  /** Physics failJob: roll back to durable, release the GPUs, fail the job's in-flight operations. */
+  const failJob = (job: JobState) => {
+    job.status = 'failed';
+    job.progress_work_units = job.durable_work_units;
+    job.allocated_gpu_ids = [];
+    snap.allocations = snap.allocations.filter((a) => a.job_id !== job.job_id);
+    job.version += 1;
+    for (const rec of actions.values()) {
+      if (rec.status.status !== 'running' || (rec.cmd.job_id ?? rec.cmd.target_resource_id) !== job.job_id) continue;
+      rec.dueSimMs = null;
+      const outcome = { status: 'failed', reason_code: 'JOB_FAILED_DURING_OPERATION', sim_time_ms: simNow() };
+      transition(rec, 'failed', { reason_code: 'JOB_FAILED_DURING_OPERATION', result: { ...rec.status.result, outcome } }, { outcome });
+    }
+  };
+
+  // --- fixture overlay -----------------------------------------------------
+  /**
+   * Apply a fixture's thermal + cooling state on top of the current run (see MockDbClient.loadSnapshot).
+   * GPU versions do not change for a temperature change (as in physics); a changed cooling row bumps its version.
+   */
+  const overlayFixture = (name: MockSnapshotName) => {
+    const src = MOCK_FIXTURES[name];
+    const gpuSrc = new Map(src.gpus.map((g) => [g.resource_id, g]));
+    for (const g of snap.gpus) {
+      const s = gpuSrc.get(g.resource_id);
+      if (!s || g.availability === 'unreachable') continue; // a dead GPU reports nothing
+      g.temp_c = s.temp_c;
+      g.last_seen_sim_ms = simNow();
+      const reasons = (g.clocks_event_reasons & ~THERMAL_BIT) | (s.clocks_event_reasons & THERMAL_BIT);
+      if (reasons !== g.clocks_event_reasons) {
+        // the thermal bit is material in physics (gpuMaterialKey): version + resource_version
+        g.clocks_event_reasons = reasons;
+        g.version += 1;
+        emitGpuVersion(g);
+      }
+    }
+    const nodeSrc = new Map(src.nodes.map((n) => [n.resource_id, n]));
+    for (const n of snap.nodes) {
+      const s = nodeSrc.get(n.resource_id);
+      if (s) n.thermal_headroom_c = s.thermal_headroom_c;
+    }
+    const coolSrc = new Map(src.cooling.map((c) => [c.resource_id, c]));
+    for (const c of snap.cooling) {
+      const s = coolSrc.get(c.resource_id);
+      if (!s) continue;
+      const changed =
+        c.operating_state !== s.operating_state ||
+        c.pump_power_w !== s.pump_power_w ||
+        c.observed_capacity_estimate_w !== s.observed_capacity_estimate_w;
+      if (!changed) continue;
+      c.operating_state = s.operating_state;
+      c.pump_power_w = s.pump_power_w;
+      c.observed_capacity_estimate_w = s.observed_capacity_estimate_w;
+      c.version += 1;
+      emitChange({ kind: 'resource_version', resource_id: c.resource_id, version: c.version, sim_time_ms: simNow() });
+    }
+    bumpEpoch();
+    emit('gpu', 'jobs');
+  };
+
+  /** Fresh run state: what live create_run wipes for the run (every run-scoped row). */
+  const resetRunState = (runId: string) => {
+    actions.clear();
+    workflows.clear();
+    incidents.clear();
+    links.length = 0;
+    symptoms.clear();
+    plans.clear();
+    agentEvents.length = 0;
+    signals.length = 0;
+    telemetry.length = 0;
+    seenEventIds.clear();
+    lastSourceSeq.clear();
+    injectedFaults.length = 0;
+    for (const [k, e] of evaluations) if (e.run_id === runId) evaluations.delete(k);
+    runConfig = { speed: 1 };
+  };
 
   // --- client --------------------------------------------------------------
   const client: MockDbClient = {
@@ -382,12 +523,17 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
         return cur !== undefined && cur !== v;
       });
       if (staleVersion) violations.push('STALE_RESOURCE_VERSION');
+      let safety: ActionSafety | null =
+        violations.length > 0
+          ? { decision: 'deny', violations: [...violations], checked_decision_epoch: snap.clock.decision_epoch, evidence: {} }
+          : null;
       if (violations.length === 0 && opts.evaluateSafety) {
         const d = opts.evaluateSafety(clone(snap), cmd, {
           decision_epoch: snap.clock.decision_epoch,
           leased_resource_ids: leasedResourceIds(),
         });
         if (d.decision !== 'allow') violations.push(...d.violations);
+        safety = { decision: d.decision, violations: [...d.violations], checked_decision_epoch: d.checked_decision_epoch, evidence: clone(d.evidence) };
       }
       const rejected = violations.length > 0;
       const rec: ActionRecord = {
@@ -409,7 +555,10 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
         dueSimMs: null,
         claimedAtMs: null,
         claimedBy: null,
+        safety,
+        history: [],
       };
+      logEvent(rec, { safety });
       actions.set(cmd.command_key, rec);
       emitChange({ kind: 'action_status', status: rec.status });
       emit('actions');
@@ -436,7 +585,12 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       rec.fencingToken = nextToken++;
       rec.claimedAtMs = now();
       rec.claimedBy = workerId;
-      transition(rec, 'claimed', { result: { ...rec.status.result, claimed_by: workerId } });
+      transition(
+        rec,
+        'claimed',
+        { result: { ...rec.status.result, claimed_by: workerId } },
+        { worker_id: workerId, fencing_token: rec.fencingToken.toString(), locked: closureOf(rec.cmd) },
+      );
       return { status: clone(rec.status), fencing_token: rec.fencingToken };
     },
 
@@ -451,7 +605,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
         }
       }
       rec.dueSimMs = simNow() + (DURATION_MS[rec.cmd.operation] ?? snap.clock.step_ms);
-      transition(rec, 'running', { result: { ...rec.status.result, due_sim_time_ms: rec.dueSimMs } });
+      transition(rec, 'running', { result: { ...rec.status.result, due_sim_time_ms: rec.dueSimMs } }, { enqueued: true });
       return clone(rec.status);
     },
 
@@ -466,7 +620,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       if (rec.status.status !== 'requested' && rec.status.status !== 'claimed') {
         throw new DbError('INVALID_TRANSITION', `cannot cancel ${commandKey} from ${rec.status.status}`);
       }
-      transition(rec, 'cancelled', { reason_code: reasonCode });
+      transition(rec, 'cancelled', { reason_code: reasonCode }, { by: rec.fencingToken === fencingToken ? 'action_token' : 'workflow_token' });
       return clone(rec.status);
     },
 
@@ -474,7 +628,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       record('verifyAction', [commandKey, evidence]);
       const rec = getRec(commandKey);
       if (rec.status.status !== 'succeeded') throw new DbError('INVALID_TRANSITION', `cannot verify ${commandKey} in ${rec.status.status}`);
-      transition(rec, 'succeeded', { result: { ...rec.status.result, verification: clone(evidence) } });
+      transition(rec, 'succeeded', { result: { ...rec.status.result, verification: clone(evidence) } }, { verification: evidence });
       return clone(rec.status);
     },
 
@@ -626,9 +780,12 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     async createRun(runId, _seed, presetId) {
       record('createRun', [runId, _seed, presetId]);
       if (presetId !== 'gpu_demo_8') throw new DbError('INVALID_PAYLOAD', `unknown preset ${presetId}`);
+      // Like live create_run: one consistent new run, no rows left over from the old one.
+      resetRunState(runId);
       snap = pick('demo');
-      snap.run_id = runId;
-      emit('gpu', 'jobs');
+      restampRunId(snap, runId);
+      emitChange({ kind: 'decision_epoch', decision_epoch: snap.clock.decision_epoch, sim_time_ms: simNow() });
+      (Object.keys(subs) as Topic[]).forEach((t) => emit(t));
     },
 
     async configureRun(runId, config) {
@@ -645,29 +802,53 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       record('injectFault', [fault]);
       mustValidate('FaultInjection', fault);
       injectedFaults.push(clone(fault));
-      // Mock-only visible effects so dashboards have something to show.
+      // Mock-only visible effects so dashboards have something to show. Applied now, on top of the current state.
+      // event_ids never derive from fault_id: the fault is private truth.
+      const seq = (lastSourceSeq.get(SIM_SOURCE) ?? -1) + 1; // monotonic per source (CONTRACTS §A)
       if (fault.kind === 'cooling_pump_degradation' && fault.target_resource_id === 'pump-a') {
-        client.loadSnapshot('pump_degraded');
-      } else if (fault.kind === 'gpu_xid_79') {
+        overlayFixture('pump_degraded');
+        const pump = snap.cooling.find((c) => c.resource_id === 'pump-a');
+        client.injectSignal({
+          schema_version: V,
+          event_id: `sig.${simNow()}.pump-a.equipment_alarm.${seq}`,
+          run_id: snap.run_id,
+          resource_id: 'pump-a',
+          source_kind: 'simulator',
+          source_id: SIM_SOURCE,
+          source_seq: seq,
+          sim_time_ms: simNow(),
+          observed_unix_ms: now(),
+          event_type: 'equipment_alarm',
+          xid_code: null,
+          severity: 'warning',
+          message: 'pump-a low-flow alarm: pump power below nominal (simulated)',
+          evidence: { operating_state: pump?.operating_state ?? null, pump_power_w: pump?.pump_power_w ?? null, cooling_loop_id: 'loop-a', simulated: true },
+        });
+      } else if (XID_OF_FAULT[fault.kind] !== undefined) {
+        const code = XID_OF_FAULT[fault.kind]!;
+        const fx = XID[code]!;
         const gpu = snap.gpus.find((g) => g.resource_id === fault.target_resource_id);
         if (!gpu) throw new DbError('NOT_FOUND', `gpu ${fault.target_resource_id}`);
-        gpu.availability = 'unreachable';
-        gpu.last_xid_code = 79;
+        // unreachable beats cordoned beats degraded (physics gpuAvailability)
+        if (fx.availability === 'unreachable' || gpu.availability === 'ready') gpu.availability = fx.availability;
+        gpu.last_xid_code = code;
         gpu.version += 1;
-        for (const job of snap.job_states.filter((j) => j.allocated_gpu_ids.includes(gpu.resource_id))) {
-          job.status = 'failed';
-          job.progress_work_units = job.durable_work_units;
-          job.version += 1;
+        if (fx.jobFatal) {
+          for (const job of snap.job_states.filter((j) => j.allocated_gpu_ids.includes(gpu.resource_id))) failJob(job);
         }
-        // event_id must not derive from fault_id: the fault is private truth.
-        const seq = signals.length + 1;
+        const rackId = snap.nodes.find((n) => n.resource_id === gpu.node_id)?.rack_id ?? null;
         client.injectSignal({
           ...MOCK_FIXTURES.signal_xid79,
-          event_id: `sig-xid79-${gpu.resource_id}-${seq}`,
+          event_id: `sig.${simNow()}.${gpu.resource_id}.xid_error.${seq}`,
           run_id: snap.run_id,
           resource_id: gpu.resource_id,
           sim_time_ms: simNow(),
+          observed_unix_ms: now(),
           source_seq: seq,
+          xid_code: code,
+          severity: fx.severity,
+          message: `Xid ${code}: ${fx.text} (simulated)`,
+          evidence: { ...MOCK_FIXTURES.signal_xid79.evidence, xid_code: code, gpu_id: gpu.resource_id, node_id: gpu.node_id, rack_id: rackId },
         });
         emitChange({ kind: 'resource_version', resource_id: gpu.resource_id, version: gpu.version, sim_time_ms: simNow() });
         bumpEpoch();
@@ -686,6 +867,15 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     onJobs: (cb) => subscribe<JobState[]>('jobs', () => clone(snap.job_states), cb),
     onIncidents: (cb) => subscribe<Incident[]>('incidents', () => [...incidents.values()].map(clone), cb),
     onActions: (cb) => subscribe<ActionStatus[]>('actions', () => [...actions.values()].map((r) => clone(r.status)), cb),
+    onActionDetails: (cb) =>
+      subscribe<ActionDetail[]>(
+        'actions',
+        () =>
+          [...actions.values()]
+            .map(toDetail)
+            .sort((a, b) => a.command.requested_sim_time_ms - b.command.requested_sim_time_ms || a.status.command_key.localeCompare(b.status.command_key)),
+        cb,
+      ),
     onAgentEvents: (cb) => subscribe<AgentEventInput[]>('agentEvents', () => agentEvents.map(clone), cb),
     onEvaluation: (cb) => subscribe<EvaluationResult[]>('evaluation', () => [...evaluations.values()].map(clone), cb),
 
@@ -698,6 +888,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     tick,
 
     loadSnapshot(s) {
+      if (typeof s === 'string') return overlayFixture(s);
       const before = new Map(snap.gpus.map((g) => [g.resource_id, g.version]));
       const epoch = snap.clock.decision_epoch;
       snap = pick(s);
@@ -713,6 +904,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
 
     injectSignal(signal) {
       signals.push(clone(signal));
+      lastSourceSeq.set(signal.source_id, Math.max(lastSourceSeq.get(signal.source_id) ?? -1, signal.source_seq));
       emitChange({ kind: 'signal', signal });
     },
   };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { validatePayload, type ActionCommand, type GpuCurrent, type TelemetryEvent } from '@dcos/contracts';
-import { createMockClient, isDbError, isSafetyRejected, MOCK_FIXTURES, parseDbError, type DbChange } from '../src/index.js';
+import { validatePayload, type ActionCommand, type FaultInjection, type GpuCurrent, type TelemetryEvent } from '@dcos/contracts';
+import { createMockClient, isDbError, isSafetyRejected, MOCK_FIXTURES, parseDbError, type ActionDetail, type DbChange } from '../src/index.js';
 
 const manualClock = () => {
   let t = 1_794_091_200_000;
@@ -24,6 +24,19 @@ const checkpointCmd = (over: Partial<ActionCommand> = {}): ActionCommand => ({
   expected_resource_versions: {},
   requested_sim_time_ms: 0,
   ...over,
+});
+
+const fault = (kind: FaultInjection['kind'], target: string): FaultInjection => ({
+  schema_version: '1.1.0',
+  fault_id: `f-${kind}-${target}`,
+  run_id: 'run-demo-1',
+  target_resource_id: target,
+  kind,
+  start_sim_time_ms: 0,
+  duration_sim_ms: null,
+  severity: 1,
+  parameters: {},
+  seed_offset: 0,
 });
 
 describe('createMockClient', () => {
@@ -217,6 +230,180 @@ describe('createMockClient', () => {
     expect(w1.current_command_key).toBe('cap');
     const w2 = await db.updateWorkflow('wf-9', w1.version, l.fencing_token, 'verify', { current_command_key: null });
     expect(w2.current_command_key).toBeNull();
+  });
+
+  it('fixtures are P1 v1.1.1: clock 600000, loop rows, checkpoints at 60000 / 540000', () => {
+    const d = MOCK_FIXTURES.demo;
+    expect(d.clock.sim_time_ms).toBe(600_000);
+    expect(d.cooling.map((c) => c.resource_id).sort()).toEqual(['loop-a', 'loop-b', 'pump-a', 'pump-b']);
+    expect(Object.fromEntries(d.checkpoints.map((c) => [c.job_id, c.complete_sim_time_ms]))).toEqual({ 'job-a': 60_000, 'job-b': 540_000 });
+    expect(new Set(d.gpus.map((g) => g.last_seen_sim_ms))).toEqual(new Set([600_000]));
+  });
+
+  it('tick refreshes last_seen_sim_ms on reachable GPUs only (no EVIDENCE_STALE after many ticks)', async () => {
+    // Stand-in for physics evaluateSafety's staleness rule: reachable GPU not seen for > 10 sim-s.
+    const evaluateSafety: NonNullable<Parameters<typeof createMockClient>[0]>['evaluateSafety'] = (o, cmd) => {
+      const stale = o.gpus.some((g) => g.availability !== 'unreachable' && o.clock.sim_time_ms - g.last_seen_sim_ms > 10_000);
+      return {
+        schema_version: '1.1.0', run_id: cmd.run_id, plan_id: cmd.plan_id, action_id: cmd.action_id,
+        decision: stale ? 'deny' : 'allow', checked_decision_epoch: 0, violations: stale ? ['EVIDENCE_STALE'] : [],
+        checked_resource_ids: [], evidence: {},
+      };
+    };
+    const db = createMockClient({ evaluateSafety });
+    await db.injectFault(fault('gpu_xid_79', 'gpu-r3-n1-0'));
+    const epoch = (await db.getObservedSnapshot()).clock.decision_epoch;
+    for (let i = 0; i < 30; i++) db.tick();
+    const snap = await db.getObservedSnapshot();
+    expect(snap.gpus.find((g) => g.resource_id === 'gpu-r3-n1-0')!.last_seen_sim_ms).toBe(600_000);
+    expect(snap.gpus.find((g) => g.resource_id === 'gpu-r1-n1-0')!.last_seen_sim_ms).toBe(630_000);
+    const s = await db.requestAction(checkpointCmd({ job_id: 'job-b', target_resource_id: 'job-b', expected_decision_epoch: epoch }));
+    expect(s.status).toBe('requested');
+  });
+
+  it('pump-a injectFault applies on top of the current run (clock, jobs, actions kept)', async () => {
+    const db = createMockClient();
+    const changes: DbChange[] = [];
+    db.onChange((c) => changes.push(c));
+    await db.requestAction(checkpointCmd());
+    for (let i = 0; i < 5; i++) db.tick();
+    const before = await db.getObservedSnapshot();
+    await db.injectFault(fault('cooling_pump_degradation', 'pump-a'));
+    const after = await db.getObservedSnapshot();
+    expect(validatePayload('ObservedSnapshot', after)).toEqual({ ok: true });
+    expect(after.clock.sim_time_ms).toBe(605_000);
+    expect(after.clock.decision_epoch).toBe(before.clock.decision_epoch + 1);
+    expect(after.job_states).toEqual(before.job_states);
+    expect(after.checkpoints).toEqual(before.checkpoints);
+    expect(await db.getActionStatus('wf-1:ckpt:job-a')).not.toBeNull();
+    const cool = Object.fromEntries(after.cooling.map((c) => [c.resource_id, c]));
+    expect([cool['pump-a']!.operating_state, cool['loop-a']!.operating_state, cool['pump-b']!.operating_state]).toEqual(['degraded', 'degraded', 'normal']);
+    expect(cool['pump-a']!.version).toBe(1);
+    const hot = MOCK_FIXTURES.pump_degraded.gpus.find((g) => g.resource_id === 'gpu-r3-n1-0')!;
+    expect(after.gpus.find((g) => g.resource_id === 'gpu-r3-n1-0')!.temp_c).toBe(hot.temp_c);
+    expect(changes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'resource_version', resource_id: 'pump-a' })]));
+    const alarm = (await db.getEvidence([], 1e9)).signals.at(-1)!;
+    expect(validatePayload('SignalEvent', alarm)).toEqual({ ok: true });
+    expect([alarm.event_type, alarm.resource_id, alarm.sim_time_ms]).toEqual(['equipment_alarm', 'pump-a', 605_000]);
+    // `demo` overlay restores healthy cooling, still on the same clock
+    db.loadSnapshot('demo');
+    const healed = await db.getObservedSnapshot();
+    expect(healed.cooling.every((c) => c.operating_state === 'normal')).toBe(true);
+    expect(healed.clock.sim_time_ms).toBe(605_000);
+  });
+
+  it('XID 48 degrades the GPU and fails its job; XID 74 only degrades; signals are contract-valid', async () => {
+    const db = createMockClient();
+    await db.injectFault(fault('gpu_xid_48', 'gpu-r4-n1-6'));
+    await db.injectFault(fault('gpu_xid_74', 'gpu-r6-n1-0'));
+    const snap = await db.getObservedSnapshot();
+    const gpu = (id: string) => snap.gpus.find((g) => g.resource_id === id)!;
+    expect([gpu('gpu-r4-n1-6').availability, gpu('gpu-r4-n1-6').last_xid_code]).toEqual(['degraded', 48]);
+    expect([gpu('gpu-r6-n1-0').availability, gpu('gpu-r6-n1-0').last_xid_code]).toEqual(['degraded', 74]);
+    const job = (id: string) => snap.job_states.find((j) => j.job_id === id)!;
+    expect(job('job-b').status).toBe('failed');
+    expect(job('job-b').progress_work_units).toBe(job('job-b').durable_work_units);
+    expect(job('job-c').status).toBe('running');
+    const sigs = (await db.getEvidence([], 1e9)).signals;
+    expect(sigs.map((s) => [s.xid_code, s.severity])).toEqual([[48, 'critical'], [74, 'warning']]);
+    for (const s of sigs) expect(validatePayload('SignalEvent', s)).toEqual({ ok: true });
+  });
+
+  it('a fatal XID during a checkpoint releases the GPUs and fails the running action (physics failJob)', async () => {
+    const db = createMockClient();
+    await db.requestAction(checkpointCmd());
+    const { fencing_token } = await db.claimAction('wf-1:ckpt:job-a', 1, 'w');
+    await db.startAction('wf-1:ckpt:job-a', fencing_token);
+    const ckptsBefore = (await db.getObservedSnapshot()).checkpoints.length;
+    await db.injectFault(fault('gpu_xid_48', 'gpu-r3-n1-0'));
+    for (let i = 0; i < 30; i++) db.tick();
+    const snap = await db.getObservedSnapshot();
+    const jobA = snap.job_states.find((j) => j.job_id === 'job-a')!;
+    expect([jobA.status, jobA.allocated_gpu_ids]).toEqual(['failed', []]);
+    expect(snap.allocations.filter((a) => a.job_id === 'job-a')).toEqual([]);
+    expect(snap.checkpoints).toHaveLength(ckptsBefore);
+    expect(await db.getActionStatus('wf-1:ckpt:job-a')).toMatchObject({ status: 'failed', reason_code: 'JOB_FAILED_DURING_OPERATION' });
+  });
+
+  it('XID evidence names the target rack; generated source_seq keeps rising after a fixture signal', async () => {
+    const db = createMockClient();
+    db.injectSignal(MOCK_FIXTURES.signal_xid79); // sim-engine-1 seq 150900
+    await db.injectFault(fault('gpu_xid_48', 'gpu-r7-n1-0'));
+    await db.injectFault(fault('gpu_xid_74', 'gpu-r7-n1-1'));
+    const sigs = (await db.getEvidence([], 1e9)).signals;
+    // the fixture signal is stamped sim 750000 (future of the 600000 clock), so getEvidence leaves it out
+    expect(sigs.map((s) => s.source_seq)).toEqual([150_901, 150_902]);
+    expect(sigs[0]!.evidence).toMatchObject({ gpu_id: 'gpu-r7-n1-0', node_id: 'node-r7-n1', rack_id: 'rack-r7' });
+  });
+
+  it('an overlay that flips the thermal bit bumps the GPU version', async () => {
+    const hot = structuredClone(MOCK_FIXTURES.demo);
+    hot.gpus[0]!.clocks_event_reasons |= 0x20;
+    const db = createMockClient({ snapshot: hot });
+    const changes: DbChange[] = [];
+    db.onChange((c) => changes.push(c));
+    db.loadSnapshot('demo');
+    const g = (await db.getObservedSnapshot()).gpus[0]!;
+    expect([g.clocks_event_reasons & 0x20, g.version]).toEqual([0, hot.gpus[0]!.version + 1]);
+    expect(changes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'resource_version', resource_id: g.resource_id })]));
+  });
+
+  it('createRun wipes every run-scoped row and tells subscribers', async () => {
+    const db = createMockClient();
+    await db.requestAction(checkpointCmd());
+    await db.injectFault(fault('gpu_xid_79', 'gpu-r3-n1-0'));
+    await db.claimWorkflow('wf-1', 'w', 0, 10_000);
+    await db.publishAgentEvent({ run_id: 'run-demo-1' } as never);
+    const seen = { actions: -1, incidents: -1, agentEvents: -1 };
+    db.onActions((a) => (seen.actions = a.length));
+    db.onAgentEvents((a) => (seen.agentEvents = a.length));
+    db.onIncidents((a) => (seen.incidents = a.length));
+    expect(seen.actions).toBe(1);
+    await db.createRun('run-demo-2', 42, 'gpu_demo_8');
+    expect(seen).toEqual({ actions: 0, incidents: 0, agentEvents: 0 });
+    expect(await db.getActionStatus('wf-1:ckpt:job-a')).toBeNull();
+    expect(await db.listOpenWorkflows()).toEqual([]);
+    expect(db.injectedFaults).toEqual([]);
+    const snap = await db.getObservedSnapshot();
+    expect(validatePayload('ObservedSnapshot', snap)).toEqual({ ok: true });
+    expect(snap.clock).toMatchObject({ sim_time_ms: 600_000, decision_epoch: 0 });
+    expect(snap.gpus.every((g) => g.run_id === 'run-demo-2' && g.availability === 'ready')).toBe(true);
+    expect((await db.getEvidence([], 1e9)).signals).toEqual([]);
+  });
+
+  it('onActionDetails: command, safety evidence and history per action', async () => {
+    const db = createMockClient({
+      evaluateSafety: (_o, cmd) => ({
+        schema_version: '1.1.0', run_id: cmd.run_id, plan_id: cmd.plan_id, action_id: cmd.action_id,
+        decision: cmd.operation === 'migrate_restart' ? 'deny' : 'allow', checked_decision_epoch: 0,
+        violations: cmd.operation === 'migrate_restart' ? ['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'] : [],
+        checked_resource_ids: ['rack-r6'], evidence: { rack_id: 'rack-r6', headroom_c: 2.5, required_headroom_c: 8 },
+      }),
+    });
+    let details: ActionDetail[] = [];
+    db.onActionDetails((d) => (details = d));
+    expect(details).toEqual([]);
+    await db.requestAction(checkpointCmd({ requested_sim_time_ms: 600_000 }));
+    const { fencing_token } = await db.claimAction('wf-1:ckpt:job-a', 1, 'worker-1');
+    await db.startAction('wf-1:ckpt:job-a', fencing_token);
+    await db.requestAction(checkpointCmd({
+      command_key: 'wf-1:mig:job-a', action_id: 'act-2', operation: 'migrate_restart', requested_sim_time_ms: 600_001,
+      depends_on_command_keys: ['wf-1:ckpt:job-a'], arguments: { destination_gpu_ids: ['gpu-r6-n1-0'] },
+    }));
+    expect(details.map((d) => [d.command.operation, d.status.status])).toEqual([['checkpoint', 'running'], ['migrate_restart', 'failed']]);
+    const [ck, mig] = details;
+    expect(ck!.history.map((h) => [h.status, h.version])).toEqual([['requested', 1], ['claimed', 2], ['running', 3]]);
+    expect([ck!.claimed_by, ck!.due_sim_time_ms]).toEqual(['worker-1', 630_000]);
+    // same detail keys live writes to action_event
+    expect(ck!.history[1]!.detail).toMatchObject({ worker_id: 'worker-1', locked: ['job-a'] });
+    expect(ck!.history[2]!.detail).toEqual({ enqueued: true });
+    expect(ck!.safety).toMatchObject({ decision: 'allow', violations: [] });
+    expect(mig!.command.depends_on_command_keys).toEqual(['wf-1:ckpt:job-a']);
+    expect(mig!.safety).toEqual({
+      decision: 'deny', violations: ['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'], checked_decision_epoch: 0,
+      evidence: { rack_id: 'rack-r6', headroom_c: 2.5, required_headroom_c: 8 },
+    });
+    expect(mig!.status).toEqual(await db.getActionStatus('wf-1:mig:job-a'));
   });
 
   it('parseDbError turns reducer strings into coded errors', () => {

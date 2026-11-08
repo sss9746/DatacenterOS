@@ -13,7 +13,7 @@ The P2 lane split into one file per task. Source of truth for scope: [`plans/LAN
 | 5 | [Action ledger](P2-5-action-ledger.md) | 1:00 AM | — | P2-4, P1 `evaluateSafety` | ☐ |
 | 6 | [Workflow + incidents](P2-6-workflow-incidents.md) ‖ | 1:15 AM | — | P2-3 | ☐ |
 | 7 | [Gate 2 script](P2-7-gate2-script.md) | 1:30 AM | **Gate 2** | P2-5, P2-6 | ☐ |
-| 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ☐ |
+| 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ◐ (prod live; P3/P4 smoke) |
 | 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ☐ |
 
 Status key: ☐ not started · ◐ in progress · ☑ done (all "Done when" boxes ticked) · ⛔ blocked (say why in the file).
