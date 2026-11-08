@@ -13,6 +13,12 @@ importers:
       '@dcos/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@dcos/db-client':
+        specifier: workspace:*
+        version: link:../../packages/db-client
+      '@dcos/physics':
+        specifier: workspace:*
+        version: link:../../packages/physics
       openai:
         specifier: ^7.53.0
         version: 7.53.0(zod@4.6.7)

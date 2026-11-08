@@ -1,7 +1,7 @@
 // DbPort over P2's @dcos/db-client (CONTRACTS §0.6 frozen wrapper names + §0.11 #7/#10 additions).
 // Imported dynamically so apps/agent typechecks before the package exists. P2's client must match the
 // shapes in src/ports.ts; we only verify that every wrapper name is present.
-// NOTE: @dcos/db-client is not yet a dependency of `agent`; add `"@dcos/db-client": "workspace:*"` once P2 ships.
+// @dcos/db-client is a workspace:* dependency of `agent`; createMockClient() and connect() both satisfy DbPort.
 
 import type { DbPort } from '../ports.js';
 import { AdapterNotReadyError, defaultImporter, isModuleNotFound, missingFunctions, type Importer } from './errors.js';
