@@ -1,5 +1,6 @@
 import { connect, createMockClient, type ActionDetail, type DbClient, type AgentEventInput, type Evidence, type MockDbClient, type WorkflowRecord } from '@dcos/db-client';
 import type { ActionStatus, EvaluationResult, Incident, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
+import { evaluateSafety } from '@dcos/physics';
 import { loadRecoveryExample } from './recovery-example';
 import { createLocalPhysicsClient, type LocalFacilityConfig } from './local-physics';
 
@@ -20,6 +21,10 @@ export interface DashboardState {
   losses: Record<string, number>;
   jobHistory: Record<string, Array<{ status: string; sim_time_ms: number }>>;
   error: string | null;
+  /**
+   * Wall time of the last observed change: a subscription callback or an advancing sim clock. A periodic re-read of
+   * an unchanged client cache does not count, so a silently dropped live socket shows up as stale rather than fresh.
+   */
   lastReceived: number | null;
 }
 export const emptyState = (): DashboardState => ({ phase: 'loading', snapshot: null, incidents: [], actions: [], actionDetails: [], events: [], workflows: [], results: [], evidence: null, signals: [], losses: {}, jobHistory: {}, error: null, lastReceived: null });
@@ -45,16 +50,18 @@ export class DashboardStore {
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((cb) => cb());
   }
+  private touch() { this.update({ lastReceived: Date.now() }); }
   start() {
+    const seen = <T>(fn: (value: T) => void) => (value: T) => { this.touch(); fn(value); };
     this.unsubscribers = [
-      this.client.onGpu(() => { void this.refresh(); }),
-      this.client.onJobs(() => { void this.refresh(); }),
-      this.client.onIncidents((incidents) => { this.update({ incidents }); void this.refresh(); }),
-      this.client.onActions((actions) => this.update({ actions })),
-      this.client.onActionDetails((actionDetails) => { this.update({ actionDetails }); void this.refresh(); }),
-      this.client.onAgentEvents((events) => { this.update({ events: events.slice(-200) }); void this.refresh(); }),
-      this.client.onEvaluation((results) => this.update({ results })),
-      this.client.onChange(() => { void this.refresh(); }),
+      this.client.onGpu(seen((_) => { void this.refresh(); })),
+      this.client.onJobs(seen((_) => { void this.refresh(); })),
+      this.client.onIncidents(seen((incidents) => { this.update({ incidents }); void this.refresh(); })),
+      this.client.onActions(seen((actions) => this.update({ actions }))),
+      this.client.onActionDetails(seen((actionDetails) => { this.update({ actionDetails }); void this.refresh(); })),
+      this.client.onAgentEvents(seen((events) => { this.update({ events: events.slice(-200) }); void this.refresh(); })),
+      this.client.onEvaluation(seen((results) => this.update({ results }))),
+      this.client.onChange(seen((_) => { void this.refresh(); })),
     ];
     // The current API has no onRun/onCooling subscription. Refresh its public snapshot
     // once per second as well, so paused clocks and cooling-only changes are visible.
@@ -82,7 +89,8 @@ export class DashboardStore {
           if (entries.at(-1)?.status !== job.status) history[job.job_id] = [...entries, { status: job.status, sim_time_ms: snapshot.clock.sim_time_ms }].slice(-12);
         }
         const runWorkflows = workflows.filter((row) => row.run_id === snapshot.run_id);
-        this.update({ snapshot, evidence, workflows: runWorkflows, signals: evidence.signals.slice(-100), losses, jobHistory: history, phase: 'ready', error: null, lastReceived: Date.now() });
+        const advanced = !sameRun || snapshot.clock.sim_time_ms !== this.state.snapshot?.clock.sim_time_ms || this.state.lastReceived === null;
+        this.update({ snapshot, evidence, workflows: runWorkflows, signals: evidence.signals.slice(-100), losses, jobHistory: history, phase: 'ready', error: null, ...(advanced ? { lastReceived: Date.now() } : {}) });
       } while (this.refreshAgain && !this.closed);
     } catch (error) { this.update({ phase: 'error', error: errorMessage(error) }); }
     finally { this.refreshing = false; }
@@ -109,7 +117,7 @@ export async function openDashboard(mode: 'mock' | 'live', preview: Preview, opt
   let client: DbClient;
   if (mode === 'live') client = await connect({ ...options, runId: 'run-demo-1' });
   else {
-    const mock = preview === 'physics' ? createLocalPhysicsClient(42, options.localConfig) : createMockClient({ snapshot: preview === 'pump_degraded' ? preview : 'demo' });
+    const mock = preview === 'physics' ? createLocalPhysicsClient(42, options.localConfig) : createMockClient({ snapshot: preview === 'pump_degraded' ? preview : 'demo', evaluateSafety });
     if (preview === 'recovery') await loadRecoveryExample(mock);
     client = mock;
   }

@@ -1,11 +1,13 @@
 import { validatePayload, type FaultInjection, type PhysicsWorld } from '@dcos/contracts';
 import { createMockClient, type DbClient, type MockDbClient } from '@dcos/db-client';
-import { buildPreset, step, toObserved, STEP_MS, WIRE_SCHEMA_VERSION } from '@dcos/physics';
+import { buildPreset, evaluateSafety, step, toObserved, STEP_MS, WIRE_SCHEMA_VERSION } from '@dcos/physics';
 
 /**
  * Browser-local demo using P1's real physics engine. The mock DB client only supplies the
  * existing subscription/read API; it does not advance the world or apply faults here.
- * This is an isolated run, not a durable SpacetimeDB session or an agent execution.
+ * `requestAction` runs P1's real `evaluateSafety` (the same check the live `request_action` reducer
+ * runs), so a presenter safety probe gets a real decision; accepted actions are recorded but never
+ * executed by this local world. This is an isolated run, not a durable SpacetimeDB session or an agent execution.
  */
 export interface LocalPhysicsClient extends MockDbClient {
   readonly localPhysics: true;
@@ -68,7 +70,7 @@ const allowedTargets: Record<FaultInjection['kind'], readonly string[]> = {
 
 export function createLocalPhysicsClient(seed = 42, config: LocalFacilityConfig = DEFAULT_LOCAL_FACILITY): LocalPhysicsClient {
   let world = configuredWorld(seed, config);
-  const base = createMockClient({ snapshot: toObserved(world) });
+  const base = createMockClient({ snapshot: toObserved(world), evaluateSafety: (obs, cmd, ctx) => evaluateSafety(obs, cmd, ctx) });
   const pending: FaultInjection[] = [];
   const injected: FaultInjection[] = [];
   const sync = () => base.loadSnapshot(toObserved(world));
@@ -99,7 +101,13 @@ export function createLocalPhysicsClient(seed = 42, config: LocalFacilityConfig 
     ...base,
     localPhysics: true,
     get injectedFaults() { return injected; },
-    getObservedSnapshot: async () => toObserved(world),
+    // The mock base bumps its decision epoch on every published step and checks commands against that epoch,
+    // so reads expose the base's epoch: a command built from a fresh read then matches what requestAction checks.
+    getObservedSnapshot: async () => {
+      const observed = toObserved(world);
+      observed.clock.decision_epoch = (await base.getObservedSnapshot()).clock.decision_epoch;
+      return observed;
+    },
     tick(simMs = STEP_MS) { runSteps(Math.max(1, Math.round(simMs / STEP_MS)), true); },
     advance(seconds) { runSteps(Math.max(1, Math.min(600, Math.round(seconds))), false); },
     async injectFault(fault) {

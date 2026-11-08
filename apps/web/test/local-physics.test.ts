@@ -40,6 +40,25 @@ describe('local P1 physics simulation', () => {
     } finally { client.close(); }
   });
 
+  it('runs real safety on requestAction against the epoch a fresh read reports', async () => {
+    const client = createLocalPhysicsClient();
+    try {
+      client.advance(3);
+      const snapshot = await client.getObservedSnapshot();
+      const destination = Array.from({ length: 8 }, (_, k) => `gpu-r5-n1-${k}`);
+      const versions = Object.fromEntries([['job-b', snapshot.job_states.find((j) => j.job_id === 'job-b')!.version], ...destination.map((id) => [id, snapshot.gpus.find((g) => g.resource_id === id)!.version])]);
+      const status = await client.requestAction({
+        schema_version: '1.1.0', run_id: snapshot.run_id, action_id: 'move-r5', command_key: 'move-r5', workflow_id: 'wf-test', plan_id: 'plan-test',
+        incident_ids: ['inc-test'], operation: 'migrate_restart', target_resource_id: 'job-b', job_id: 'job-b', arguments: { destination_gpu_ids: destination },
+        depends_on_command_keys: [], expected_decision_epoch: snapshot.clock.decision_epoch, expected_resource_versions: versions, requested_sim_time_ms: snapshot.clock.sim_time_ms,
+      });
+      expect(status.status).toBe('requested');
+      let safety: unknown = null;
+      client.onActionDetails((rows) => { safety = rows.find((row) => row.command.command_key === 'move-r5')?.safety; })();
+      expect(safety).toMatchObject({ decision: 'allow', violations: [] });
+    } finally { client.close(); }
+  });
+
   it('applies facility tuning to the real model before stepping', async () => {
     const defaultClient = createLocalPhysicsClient();
     const tunedClient = createLocalPhysicsClient(42, { pumpACapacityPct: 40, pumpBCapacityPct: 100, rack6InletOffsetC: 0 });
