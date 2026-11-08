@@ -140,7 +140,7 @@ describe('un-shimmed specs (P3 epoch fix must pass; P2 bugs stay it.fails until 
     expect(new Set(requested(w.mock).map((c) => c.expected_decision_epoch)).size).toBeGreaterThan(1);
     for (const n of perKey(w.mock).values()) expect(n).toBe(1);
   });
-  it.fails('P2 bug: last_seen freshness — un-shimmed, no step is EVIDENCE_STALE (today: mock tick never refreshes last_seen)', async () => {
+  it('P2 bug: last_seen freshness — un-shimmed, no step is EVIDENCE_STALE (today: mock tick never refreshes last_seen)', async () => {
     const { outcomes } = await runPlain({ freshTelemetry: false });
     expect(outcomes.filter((o) => o.violations?.includes('EVIDENCE_STALE'))).toEqual([]);
   });
