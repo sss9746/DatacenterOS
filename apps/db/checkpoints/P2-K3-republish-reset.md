@@ -35,15 +35,15 @@ R1's physics and K1/K2 go live on the dev database, and Suvan's R5 harness gets 
 
 ## Done when
 - [x] `controlledReset` refuses prod and fails while a lease is live (tests)
-- [ ] `dcos-dev` runs a recorded `int/r-sprint` commit
-- [ ] Gate 2, both smokes and the K2 round-trip pass there (closes K1 and K2)
-- [ ] Agent identity still has `agent` after the reset
-- [ ] Module version, DB, time and commit recorded in `plans/status/P2.md`
+- [x] `dcos-dev` runs a recorded `int/r-sprint` commit
+- [x] Gate 2, both smokes and the K2 round-trip pass there (closes K1 and K2)
+- [x] Agent identity still has `agent` after the reset
+- [x] Module version, DB, time and commit recorded in `plans/status/P2.md`
 
 ## Architect notes (Codex)
 
 ## Implementation report (Claude)
-**Status: ◐ prepared (2026-11-08). The republish itself waits for R1, K1 and K2 on `int/r-sprint`.**
+**Status: ☑ (2026-11-08).** `dcos-dev` published from `4202392` at about 02:49 CST, with no data clearing. Checks finished 02:53 CST: Gate 2, `smoke:ledger` (with all R2 cases), `smoke:workflow` and the provenance round-trip all pass. Left on a clean run (seed 42, 64 GPUs, 3 jobs). `0xc200188f…40ca` still has `agent`.
 
 Steps 1-3 done: `controlledReset` is exported from `@dcos/db-client` (for Suvan's R5 harness), `reset-run.ts` wraps it, and `gate2.ts`, both smokes and the round-trip script refuse `dcos`.
 
