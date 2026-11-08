@@ -10,7 +10,7 @@ async function expectAccessibleAndContained(page: Page) {
 
 test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted example', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/'); await page.getByLabel('Run view').selectOption('demo');
+  await page.goto('/?presenter=1'); await page.getByLabel('Run view').selectOption('demo');
   await expect(page.getByRole('button', { name: /Rack \d/ })).toHaveCount(8);
   await expect(page.locator('[data-gpu]')).toHaveCount(8);
   await expect(page.getByRole('heading', { name: 'No matched evaluation runs yet' })).toBeVisible();
@@ -57,7 +57,8 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
 
 test('local physics: pump degradation heats loop A, XID 79 fails a job, and the r6 probe is BLOCKED', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?presenter=1');
+  await expect(page.locator('#presenter')).toHaveAttribute('open', '');
   await expect(page.getByRole('heading', { name: 'Inject a fault' })).toBeVisible();
   await page.getByRole('button', { name: /Pump B Cools racks/ }).click();
   await expect(page.locator('select[id$="-pump"]')).toHaveValue('pump-b');

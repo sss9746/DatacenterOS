@@ -370,10 +370,10 @@ td small { display: block; color: var(--muted); font-size: 11px; margin-top: 5px
   .gpu-inspector { padding: 14px 16px 17px; }
   .gpu-inspector dl { grid-template-columns: repeat(2, 1fr); gap: 14px; }
   .job, .incident, .feed-event { padding: 18px 16px; }
-  .presenter-drawer { margin: 0 -16px; }
+  .presenter-drawer { position: static; margin: 0 -16px; box-shadow: none; }
   .presenter-drawer > summary { padding: 10px 16px; }
   .presenter-drawer > summary small { display: none; }
-  .presenter-drawer-body { padding: 16px 16px 4px; max-height: 78vh; }
+  .presenter-drawer-body { padding: 16px 16px 4px; max-height: none; }
   .real-gpu-metrics dd strong { font-size: 18px; }
   .benchmark-empty { padding: 25px 16px 14px; }
   .benchmark-empty > div { grid-template-columns: 1fr; gap: 17px; }
