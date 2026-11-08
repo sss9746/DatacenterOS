@@ -5,7 +5,7 @@ import type { EvaluationResult } from '@dcos/contracts';
 import examples from '@dcos/contracts/schema/example-payloads.json';
 import { Scoreboard } from '../src/components/scoreboard/Scoreboard';
 import {
-  buildScoreboard, comparisonConflicts, exportPayload, matchedCases, metricInfo, metricLabel, metricValue, nemotronClaim, nemotronName,
+  buildScoreboard, columnName, comparisonConflicts, exportPayload, headlineColumns, matchedCases, metricInfo, metricLabel, metricValue, nemotronClaim, nemotronName,
   provenanceKind, provenanceLabel, tally, tiesAndLosses, unfinishedTotal, verdict, type Provenance,
 } from '../src/components/scoreboard/scoreboard-view';
 import { REHEARSAL_BATCH } from '../src/data/rehearsal-batch';
@@ -155,6 +155,35 @@ describe('metrics, ties and losses', () => {
     expect(losses).toEqual([{ scenario_id: 'sc03', seed: 103, baseline: 'threshold', metric: 'job_completion_delay_s', ours: 45, theirs: 40 }]);
     expect(ties.filter((t) => t.metric === 'lost_work_units')).toHaveLength(3);
   });
+  it('builds the headline from the matched cases: summed lost work, mirrored tallies, lowest only when strictly lowest', () => {
+    const rows = [
+      ...detCase('sc03', 103, { reactive: { lost_work_units: 100 }, threshold: { lost_work_units: 10 }, nemotron: { lost_work_units: 10 } }),
+      ...detCase('sc04', 104, { reactive: { lost_work_units: 5 }, threshold: { lost_work_units: 7 }, nemotron: { lost_work_units: 5 } }),
+    ];
+    const { cases } = matchedCases(rows);
+    const [reactive, threshold, nemotron] = headlineColumns(cases);
+    expect([reactive!.lostWork, threshold!.lostWork, nemotron!.lostWork]).toEqual([105, 17, 15]);
+    expect([reactive!.lowest, threshold!.lowest, nemotron!.lowest]).toEqual([false, false, true]);
+    expect(nemotron!.tallies).toEqual([
+      { versus: 'reactive', win: 1, tie: 1, loss: 0, unknown: 0 },
+      { versus: 'threshold', win: 1, tie: 1, loss: 0, unknown: 0 },
+    ]);
+    // a baseline column shows the same comparison from its side
+    expect(reactive!.tallies).toEqual([{ versus: 'nemotron', win: 0, tie: 1, loss: 1, unknown: 0 }]);
+    expect(threshold!.tallies).toEqual([{ versus: 'nemotron', win: 0, tie: 1, loss: 1, unknown: 0 }]);
+    // an exact tie for lowest flags nobody
+    const tied = matchedCases(detCase('sc05', 105, { reactive: { lost_work_units: 3 }, threshold: { lost_work_units: 3 }, nemotron: { lost_work_units: 9 } })).cases;
+    expect(headlineColumns(tied).map((c) => c.lowest)).toEqual([false, false, false]);
+    expect(headlineColumns([]).map((c) => [c.lostWork, c.lowest])).toEqual([[0, false], [0, false], [0, false]]);
+  });
+  it('shortens only the fully deterministic nemotron column name', () => {
+    expect(columnName('nemotron', [det('nemotron', 2)])).toBe('Nemotron policy · no model calls');
+    expect(columnName('reactive', [det('reactive')])).toBe('Reactive rule-based');
+    const live = row({ policy: 'nemotron', provenance: { live_model_responses: 3, cache_hits: 0, model_requests: 3, fallback_decisions: 0 } });
+    expect(columnName('nemotron', [live])).toBe(nemotronName([live]));
+    expect(columnName('nemotron', [live, det('nemotron')])).toBe('Nemotron policy (mixed provenance)');
+    expect(columnName('nemotron', [])).toBe('Nemotron policy');
+  });
 });
 
 describe('deterministic 12 × 3 rehearsal batch', () => {
@@ -174,6 +203,29 @@ describe('deterministic 12 × 3 rehearsal batch', () => {
     const sc01 = view.cases.find((c) => c.scenario_id.startsWith('sc01'))!;
     expect(provenanceLabel(sc01.rows.nemotron).text).toBe('Deterministic planner, no model calls');
     expect(view.outcomes.ties.length).toBeGreaterThan(0);
+  });
+  it('headline numbers agree with the per-case rows and the aggregate report', () => {
+    for (const column of view.headline) {
+      const fromRows = view.cases.reduce((sum, item) => sum + item.rows[column.policy].lost_work_units, 0);
+      expect(column.lostWork).toBeCloseTo(fromRows, 6);
+      const summary = view.report.summaries.find((s) => s.policy === column.policy)!;
+      expect(column.lostWork).toBeCloseTo(summary.metrics.lost_work_units!.total, 6);
+    }
+    const vsReactive = tally(view.cases, 'lost_work_units', 'reactive');
+    expect(view.headline[2]!.tallies[0]).toEqual({ versus: 'reactive', ...vsReactive });
+    expect(view.headline[0]!.tallies[0]).toMatchObject({ versus: 'nemotron', win: vsReactive.loss, loss: vsReactive.win, tie: vsReactive.tie });
+    expect(view.shortNames.nemotron).toBe('Nemotron policy · no model calls');
+    expect(view.headline.filter((c) => c.lowest).length).toBeLessThanOrEqual(1);
+    const html = renderToStaticMarkup(createElement(Scoreboard, { results: rows, mode: 'mock' }));
+    expect(html).toContain('Nemotron policy · no model calls');
+    // the headline precedes the banner, which precedes the open losses list, which precedes the collapsed provenance
+    const order = ['sb-headline', 'Cannot substantiate a Nemotron performance claim', 'loses or trades off', 'sb-provenance'].map((text) => html.indexOf(text));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).toMatch(/<details class="report-details" open="">[^<]*<summary>Cases where/);
+    expect(html).toContain('<details class="report-details sb-provenance"><summary>Batch provenance');
+    // the per-row provenance pill is gone when every nemotron row carries the column header's label
+    expect(html).not.toContain('Nemotron-policy row provenance');
   });
   it('renders the header, banner and tables without Nemotron claims, dollars or GPU-hours', () => {
     const html = renderToStaticMarkup(createElement(Scoreboard, { results: rows, mode: 'mock' }));
