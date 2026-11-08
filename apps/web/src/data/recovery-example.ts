@@ -128,6 +128,29 @@ export async function loadRecoveryExample(client: MockDbClient) {
   await cool.stage('execute', { current_command_key: ckpt.command_key });
   await publish(coolWf, cooling.incident_id, 'execute', 'code', 'job-b power_cap succeeded; waiting on the kept job-a checkpoint.', [...capCalls, call('get_action_status', cap.command_key, 'succeeded')]);
 
+  // The kept job-a checkpoint completes (30 sim-s), then job-a is moved off loop A onto racks r1 + r5 from that checkpoint.
+  // Scripted choice; the move itself goes through the real mock ledger (request → claim → start) and completes on the
+  // mock clock 120 sim-s after it started, so the page shows the job in flight and then landing.
+  client.tick(30_000);
+  const e2 = await epoch();
+  const ckptRow = snapshot.checkpoints.filter((c) => c.job_id === 'job-a' && c.status === 'complete').at(-1);
+  await publish(coolWf, cooling.incident_id, 'execute', 'code', `job-a checkpoint succeeded${ckptRow ? ` (${ckptRow.checkpoint_id}, ${ckptRow.progress_work_units} wu durable)` : ''}.`, [call('get_action_status', ckpt.command_key, 'succeeded')]);
+  const planMove = 'plan-example-cooling-3';
+  const r1r5 = snapshot.gpus.filter((g) => /^gpu-r[15]-/.test(g.resource_id)).map((g) => g.resource_id);
+  const moveA = command(coolWf, planMove, cooling.incident_id, 'example-cooling-3-move-job-a', 'migrate_restart', 'job-a', 'job-a', { destination_gpu_ids: r1r5 }, e2);
+  await cool.stage('plan', { plan_id: planMove, attempt: 3, previous_plan_id: plan2 });
+  await client.submitPlan(plan(coolWf, planMove, cooling.incident_id, [moveA.command_key], 0, 120));
+  await publish(coolWf, cooling.incident_id, 'plan', 'nemotron', 'loop A is still degraded: move job-a to the cool racks r1 + r5 from its fresh checkpoint (scripted choice).', [
+    ...option('job-a:move:r1r5', 'job-a: migrate_restart r1+r5', 'lost 0 wu · delay 120 s'),
+    ...option('job-a:keep', 'job-a: keep_running', 'lost 0 wu · delay 0 s · thermal risk'),
+    call('choose_options', '{"jobs":1}', 'job-a:move:r1r5', 'nemotron'),
+  ]);
+  await cool.stage('execute', { command_keys: [moveA.command_key], current_command_key: moveA.command_key });
+  const moveCalls = await start(moveA, 'example-agent-alpha-1');
+  await publish(coolWf, cooling.incident_id, 'execute', 'code', `job-a migrate_restart to r1 + r5 running (from ${ckptRow?.checkpoint_id ?? 'its latest checkpoint'}).`, moveCalls);
+  client.tick(45_000); // mid-move when the page opens: ~75 sim-s of the 120 s restart remain
+  await epoch();
+
   // ------------------------------------------------------------------ workflow 2: XID 79 (cordon, resume, verified)
   const xidWf = 'wf-example-xid';
   const gpuWf = workflow(xidWf);

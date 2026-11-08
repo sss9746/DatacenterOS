@@ -247,10 +247,10 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(views.map((v) => v.workflow.workflow_id)).toEqual(['wf-example-cooling', 'wf-example-xid']);
     const [cool, xid] = views as [WorkflowView, WorkflowView];
     expect(cool.status.kind).toBe('waiting');
-    expect(cool.waiting?.operation).toBe('checkpoint');
+    expect(cool.waiting?.operation).toBe('migrate_restart'); // the story now ends with job-a moving r2+r3 → r1+r5 from its completed checkpoint
     expect(cool.groups.blocked.map((l) => l.reason)).toEqual(['STALE_DECISION_EPOCH']);
-    expect(cool.attempt).toBe(2);
-    expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:cap')?.chosen).toBe(true);
+    expect(cool.attempt).toBe(3);
+    expect(cool.candidates?.options.find((o) => o.option_id === 'job-a:move:r1r5')?.chosen).toBe(true);
     expect(xid.status.kind).toBe('verified');
     expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-alpha-1', count: 1 });
     expect(xid.workflow.lease_owner).toBe('example-agent-beta-2');

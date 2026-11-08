@@ -5,6 +5,7 @@ import { situation, situationTone } from '../components/simulation/situation';
 import { Cooling } from '../components/cooling/Cooling';
 import { RealGpu } from '../components/heatmap/RealGpu';
 import { Badge } from '../components/ui/panel';
+import { jobMoveTimelines } from '../components/jobs/move-timeline';
 import '../components/heatmap/real-gpu.css';
 
 /** The four cluster-impact tiles on the left; the safety tile sits under the real GPU on the right. */
@@ -18,6 +19,7 @@ const SIDE_STATS = ['blocked'] as const;
  */
 export function ClusterPage({ snapshot, state, example, mode, now, selectedGpuId, onSelectGpu, onSelectPump }: PageProps) {
   const tone = situationTone(snapshot);
+  const moves = jobMoveTimelines({ snapshot, actionDetails: state.actionDetails, jobTrail: state.jobTrail });
   return <>
     <p className={`cluster-situation is-${tone}`} aria-live="polite">
       {situation(snapshot)}
@@ -42,7 +44,7 @@ export function ClusterPage({ snapshot, state, example, mode, now, selectedGpuId
         <Impact snapshot={snapshot} details={state.actionDetails} ids={SIDE_STATS} label="Safety summary (simulated)" className="cluster-impact-side"/>
       </div>
     </div>
-    <SimulationView snapshot={snapshot} selected={selectedGpuId} onSelect={onSelectGpu} onSelectPump={onSelectPump} telemetry={state.evidence?.telemetry} actionDetails={state.actionDetails}/>
+    <SimulationView snapshot={snapshot} selected={selectedGpuId} onSelect={onSelectGpu} onSelectPump={onSelectPump} telemetry={state.evidence?.telemetry} actionDetails={state.actionDetails} moves={moves}/>
     <details className="sim-more"><summary>Detailed cooling measurements</summary><Cooling snapshot={snapshot}/></details>
   </>;
 }

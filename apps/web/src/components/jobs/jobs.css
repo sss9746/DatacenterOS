@@ -65,3 +65,41 @@
   #jobs .jobcard-progress i { transition-duration: 160ms !important; }
   #jobs .jobcard-shield::before, #jobs .jobcard-shield svg, #jobs .jobcard-move svg { animation: none !important; }
 }
+
+/* Recovery story: five steps with the active one pulsing, before/after placement chips, restart countdown. Colours
+   come from the card's --job-color; state is carried by the dot (filled = done, ring = pending, pulse = active). */
+#jobs .jobcard-timeline { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border: 1px solid color-mix(in srgb, var(--job-color) 35%, var(--line, #303c49)); border-radius: 8px; background: color-mix(in srgb, var(--job-color) 7%, transparent); }
+#jobs .jobcard-timeline.is-rollback { border-color: #7a4a4f; background: #241a1f66; }
+#jobs .jobcard-timeline-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+#jobs .jobcard-timeline-title { font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--job-color); }
+#jobs .jobcard-timeline.is-rollback .jobcard-timeline-title { color: var(--danger, #f0a29d); }
+#jobs .jobcard-chips { display: inline-flex; align-items: center; gap: 5px; color: var(--muted, #a6b4c3); }
+#jobs .jobcard-chips svg { animation: jobcard-arrow 900ms var(--jb-ease) infinite alternate; }
+#jobs .phase-running .jobcard-chips svg { animation: none; }
+#jobs .jobcard-chip { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; border: 1px solid var(--line, #303c49); color: var(--muted, #a6b4c3); background: var(--surface-raised, #202a35); }
+#jobs .jobcard-chip.is-from { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted, #a6b4c3) 70%, transparent); }
+#jobs .jobcard-chip.is-to { border-color: var(--job-color); color: var(--foreground, #e8edf2); background: color-mix(in srgb, var(--job-color) 22%, #1b2631); }
+#jobs .jobcard-steps { list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; margin: 0; padding: 0; }
+#jobs .jobcard-step { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding-right: 8px; }
+#jobs .jobcard-step > i { position: relative; z-index: 1; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line, #303c49); background: var(--surface, #171e27); }
+#jobs .jobcard-step > i b { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+#jobs .jobcard-step.is-done > i { border-color: var(--job-color); background: var(--job-color); }
+#jobs .jobcard-step.is-done > i b { background: #141b23; }
+#jobs .jobcard-step.is-active > i { border-color: var(--job-color); box-shadow: 0 0 0 0 color-mix(in srgb, var(--job-color) 60%, transparent); animation: jobcard-step-pulse 1.3s ease-out infinite; }
+#jobs .jobcard-step.is-active > i b { background: var(--job-color); }
+#jobs .jobcard-step.is-failed > i { border-color: var(--danger, #f0a29d); background: #442a2d; }
+#jobs .jobcard-step.is-failed > i b { background: var(--danger, #f0a29d); }
+#jobs .jobcard-step-line { position: absolute; top: 6px; left: 14px; right: 0; height: 1.5px; background: var(--line, #303c49); }
+#jobs .jobcard-step.is-done .jobcard-step-line { background: var(--job-color); }
+#jobs .jobcard-step.is-active .jobcard-step-line { background: linear-gradient(90deg, var(--job-color), var(--line, #303c49)); }
+#jobs .jobcard-step-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 11px; line-height: 1.35; }
+#jobs .jobcard-step-text strong { font-weight: 600; color: var(--muted, #a6b4c3); }
+#jobs .jobcard-step.is-done .jobcard-step-text strong, #jobs .jobcard-step.is-active .jobcard-step-text strong { color: var(--foreground, #e8edf2); }
+#jobs .jobcard-step.is-failed .jobcard-step-text strong { color: var(--danger, #f0a29d); }
+#jobs .jobcard-step-text small { font-size: 11px; color: var(--muted, #a6b4c3); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#jobs .jobcard-step.is-active .jobcard-step-text small { color: var(--job-color); }
+#jobs .jobcard-countdown { margin: 0; font-size: 12px; color: var(--foreground, #e8edf2); font-variant-numeric: tabular-nums; }
+#jobs .jobcard-countdown strong { color: var(--job-color); font-weight: 600; }
+@keyframes jobcard-step-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--job-color) 60%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+@media (max-width: 420px) { #jobs .jobcard-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; } #jobs .jobcard-step-line { display: none; } }
+@media (prefers-reduced-motion: reduce) { #jobs .jobcard-step.is-active > i, #jobs .jobcard-chips svg { animation: none !important; } }

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Activity, Fan } from 'lucide-react';
 import type { GpuCurrent, ObservedSnapshot, TelemetryEvent } from '@dcos/contracts';
 import type { ActionDetail } from '@dcos/db-client';
 import { number } from '../../lib/utils';
+import type { JobMoveTimeline } from '../jobs/move-timeline';
 import { Badge } from '../ui/panel';
 import type { PumpId } from '../controls/fault-form';
 import {
@@ -16,6 +17,8 @@ type Props = {
   telemetry?: readonly TelemetryEvent[];
   /** Typed ledger projection: a job with an active `migrate_restart` is marked "moving" on its racks. */
   actionDetails?: ActionDetail[];
+  /** Per-job recovery stories (jobMoveTimeline): drive the persistent move arc, destination fill and freed source tiles. */
+  moves?: JobMoveTimeline[];
 };
 type State = 'normal' | 'warm' | 'hot' | 'fault';
 const RACKS = Array.from({ length: 8 }, (_, i) => i + 1);
@@ -31,10 +34,14 @@ const rackState = (gpus: GpuCurrent[]): State => gpus.some((g) => stateOf(g) ===
 /** Last-resort mapping when the snapshot carries no cooling topology at all (P1's preset always does). */
 const FALLBACK_PUMP = (rack: number): PumpId => (rack >= 2 && rack <= 4 ? 'pump-a' : 'pump-b');
 const jobClass = (jobId: string | undefined) => (jobId ? `has-job job-${jobId.replace(/^job-/, '')}` : '');
+/** How long (sim ms) a landed job keeps its arc and "arrived" fill after the restart completed. */
+const LANDED_SHOW_MS = 90_000;
+/** Pixel width per character of the 11px arc label, for its backing plate. */
+const LABEL_CHAR_PX = 6.4;
 const rackOfGpu = (id: string) => Number(/gpu-r(\d+)-/.exec(id)?.[1]);
 const loopClass = (pumpId: string) => `sim-loop-${pumpId.replace('pump-', '')}`;
 
-export function SimulationView({ snapshot, selected, onSelect, onSelectPump, telemetry, actionDetails = [] }: Props) {
+export function SimulationView({ snapshot, selected, onSelect, onSelectPump, telemetry, actionDetails = [], moves = [] }: Props) {
   const [chosenRack, setChosenRack] = useState<number | null>(null);
   const [selectedPump, setSelectedPump] = useState<PumpId | null>(null);
   const selectedRack = rackOfGpu(selected);
@@ -57,6 +64,28 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
   const firstRackOf = (pump: PumpId) => racksOfPump(pump)[0] ?? (pump === 'pump-a' ? 2 : 1);
   const lossText = (id: string) => { const loss = capacityLoss(pumpRow(id)); return loss === null ? null : `−${Math.round(loss * 100)} % capacity`; };
   const movingJobs = new Set(actionDetails.filter((d) => d.command.operation === 'migrate_restart' && ACTIVE.has(d.status.status) && d.command.job_id).map((d) => d.command.job_id as string));
+
+  // Live recovery stories: a move in flight (requested, restarting) or landed within LANDED_SHOW_MS, and rollbacks.
+  const simNow = snapshot.clock.sim_time_ms;
+  const liveMoves = moves.filter((m) => m.kind === 'move' && m.to && (m.phase === 'moving' || m.phase === 'restarting' || (m.phase === 'running' && m.resumedSimMs !== null && simNow - m.resumedSimMs <= LANDED_SHOW_MS)));
+  const rollbacks = moves.filter((m) => m.kind === 'rollback' && m.from);
+  const tileRole = new Map<string, { cls: string; jobId: string; fill: number | null }>();
+  for (const m of rollbacks) for (const id of m.from!.gpuIds) if (!jobByGpu.has(id)) tileRole.set(id, { cls: 'is-move-source is-failed-source', jobId: m.jobId, fill: null });
+  for (const m of liveMoves) {
+    const started = m.restart?.startedSimMs ?? null; const due = m.restart?.dueSimMs ?? null;
+    const fill = m.phase === 'running' ? 1 : m.phase === 'restarting' && started !== null && due !== null && due > started ? Math.min(1, Math.max(0, (simNow - started) / (due - started))) : m.phase === 'restarting' ? null : 0;
+    for (const id of m.from?.gpuIds ?? []) if (!m.to!.gpuIds.includes(id) && !jobByGpu.has(id)) tileRole.set(id, { cls: 'is-move-source', jobId: m.jobId, fill: null });
+    for (const id of m.to!.gpuIds) tileRole.set(id, { cls: `is-move-dest ${m.phase === 'running' ? 'is-landed' : m.phase === 'restarting' ? 'is-restarting' : 'is-arriving'}`, jobId: m.jobId, fill });
+  }
+  const rackFlagOf = (n: number): string | null => {
+    const flags: string[] = [];
+    for (const m of liveMoves) {
+      if (m.to!.racks.includes(n)) flags.push(`${m.jobId} ${m.phase === 'running' ? 'arrived' : m.phase === 'restarting' ? 'restarting here' : 'arriving'}`);
+      else if (m.from?.racks.includes(n)) flags.push(`${m.jobId} ${m.phase === 'moving' ? 'leaving' : 'freed'}`);
+    }
+    for (const m of rollbacks) if (m.from!.racks.includes(n)) flags.push(`${m.jobId} failed here`);
+    return flags.length ? flags.join(' · ') : null;
+  };
 
   // Baseline per rack: its hottest GPU reading while its pump was still normal this session. A later reading on a
   // degraded loop is compared against it; no baseline (page opened mid-fault) means no delta is shown.
@@ -169,19 +198,33 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
             <span className="sim-rack-cabinet" aria-hidden="true"><span className="sim-rack-rail"/><span className="sim-rack-modules">{gpus.map((gpu, slot) => {
               const id = `gpu-r${n}-n1-${slot}`;
               if (!gpu) return <span key={slot} className="sim-rack-module sim-rack-module-missing"><i/><b/><em/></span>;
-              const s = stateOf(gpu);
-              return <span key={slot} data-sim-gpu={id} title={tileTitle(gpu, id)} className={`sim-rack-module sim-rack-module-${s} ${selected === id ? 'is-selected' : ''}`}><i/><b/><em/></span>;
+              const s = stateOf(gpu); const role = tileRole.get(id);
+              const style = role?.fill !== null && role?.fill !== undefined ? ({ '--fill': `${Math.round(role.fill * 100)}%` } as CSSProperties) : undefined;
+              return <span key={slot} data-sim-gpu={id} data-move-role={role?.cls.split(' ')[0]} title={tileTitle(gpu, id)} style={style} className={`sim-rack-module sim-rack-module-${s} ${jobClass(role?.jobId ?? jobByGpu.get(id))} ${role?.cls ?? ''} ${selected === id ? 'is-selected' : ''}`}><i/><b/><em/></span>;
             })}</span><span className="sim-rack-rail"/></span>
             <span className="sim-rack-bottom" aria-hidden="true">
               {onDegradedLoop && <span className="sim-rack-loop-note">On degraded {pumpLabel(pump)}{delta ? <em>{delta}</em> : null}</span>}
-              {moving.length > 0 && <span className="sim-rack-flag">{moving.join(', ')} moving</span>}
+              {rackFlagOf(n) ? <span className={`sim-rack-flag ${rollbacks.some((m) => m.from!.racks.includes(n)) && !liveMoves.some((m) => m.to!.racks.includes(n)) ? 'is-failed' : ''}`}>{rackFlagOf(n)}</span> : moving.length > 0 && <span className="sim-rack-flag">{moving.join(', ')} moving</span>}
               <span className="sim-rack-description">{stateText(state)}</span><span className="sim-rack-ready">{readyHere}/8 ready</span>
             </span>
           </button>;
         })}</div>
-        {size.width > 0 && arcs.length > 0 && <svg className="sim-overlay" aria-hidden="true" width={size.width} height={size.height} viewBox={`0 0 ${size.width} ${size.height}`}>
+        {size.width > 0 && (arcs.length > 0 || liveMoves.some((m) => m.from)) && <svg className="sim-overlay" aria-hidden="true" width={size.width} height={size.height} viewBox={`0 0 ${size.width} ${size.height}`}>
           {arcs.map(({ key, move }) => <path key={key} className={`sim-move-arc ${jobClass(move.jobId)}`} d={moveArcPath(move, geometry)}/>)}
           {arcs.map(({ key, move }) => { const to = rackAnchor(move.to[0]!, geometry); return <circle key={`${key}-dot`} className={`sim-move-dot ${jobClass(move.jobId)}`} cx={to.x} cy={to.top + 6} r={5}/>; })}
+          {liveMoves.filter((m) => m.from).map((m) => {
+            const move: JobMove = { jobId: m.jobId, from: m.from!.racks, to: m.to!.racks };
+            const pathId = `sim-move-path-${m.jobId}`; const a = rackAnchor(move.from[0]!, geometry); const b = rackAnchor(move.to[0]!, geometry);
+            const lift = Math.max(28, Math.abs(b.x - a.x) * 0.22); const apexY = Math.min(a.top, b.top) + 6 - lift / 2; const midX = (a.x + b.x) / 2;
+            const label = m.arcLabel ?? m.jobId; const w = Math.min(label.length * LABEL_CHAR_PX + 16, size.width - 8);
+            const labelX = Math.min(Math.max(midX, w / 2 + 4), size.width - w / 2 - 4);
+            return <g key={pathId} className={`sim-move-live phase-${m.phase} ${jobClass(m.jobId)}`} data-move-arc={m.jobId}>
+              <path id={pathId} className="sim-move-live-arc" d={moveArcPath(move, geometry)}/>
+              {m.phase !== 'running' && <circle className="sim-move-live-dot" r={4}><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href={`#${pathId}`}/></animateMotion></circle>}
+              <rect className="sim-move-live-plate" x={labelX - w / 2} y={apexY - 20} width={w} height={20} rx={10}/>
+              <text className="sim-move-live-label" x={labelX} y={apexY - 6} textAnchor="middle">{label}</text>
+            </g>;
+          })}
         </svg>}
       </div>
       {loops.length > 0 && <div className="sim-loop-band" aria-hidden="true">{loopSegments(loops).map((segment) => <span key={`${segment.pumpId}-${segment.start}`} className={`sim-loop-segment ${loopClass(segment.pumpId)} ${degraded.has(segment.pumpId) ? 'is-degraded' : ''}`} style={{ gridColumn: `${segment.start} / ${segment.end + 1}` }}><i/><span>{pumpLabel(segment.pumpId)} loop{degraded.has(segment.pumpId) ? ` · degraded${lossText(segment.pumpId) ? ` · ${lossText(segment.pumpId)}` : ''}` : ''}</span></span>)}</div>}

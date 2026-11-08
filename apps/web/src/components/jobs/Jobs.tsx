@@ -8,6 +8,8 @@ import { Panel, Badge } from '../ui/panel';
 import { duration, fraction, number } from '../../lib/utils';
 import { detectMoves, jobRacks, type JobMove } from '../simulation/topology';
 import { decisionFor, jobKey, jobName, lastCheckpointFailed, placementOf, placementText, statusLabel, statusTone, workAtRisk, writingCheckpoint } from './job-view';
+import { jobMoveTimeline } from './move-timeline';
+import { MoveTimeline } from './MoveTimeline';
 import './jobs.css';
 
 const ACTIVE = new Set(['requested', 'claimed', 'running']);
@@ -27,10 +29,12 @@ type Props = {
   example?: boolean;
   /** Local physics preview: no agent runs, so the decision slot says why it is empty. */
   localPhysics?: boolean;
+  /** Observed per-job trail from the store; drives the recovery step timeline (previous placement, work lost). */
+  trail?: DashboardState['jobTrail'];
 };
 
 /** One card per training job: progress vs durable work, where it runs, what is at risk, and what the agent decided. */
-export function Jobs({ snapshot, losses, history, details = [], workflows = [], plans = [], example = false, localPhysics = false }: Props) {
+export function Jobs({ snapshot, losses, history, details = [], workflows = [], plans = [], example = false, localPhysics = false, trail = {} }: Props) {
   const legacyClock = snapshot.checkpoints.some((c) => c.complete_sim_time_ms === 0 && c.command_key.startsWith('preset.'));
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +84,7 @@ export function Jobs({ snapshot, losses, history, details = [], workflows = [], 
       const checkpointLeft = writing ? (activeAction(details, job.job_id, 'checkpoint')?.due_sim_time_ms ?? writing.requested_sim_time_ms + CHECKPOINT_DURATION_MS) - snapshot.clock.sim_time_ms : null;
       const moveAction = activeAction(details, job.job_id, 'migrate_restart');
       const moveLeft = moveAction?.due_sim_time_ms != null ? moveAction.due_sim_time_ms - snapshot.clock.sim_time_ms : null;
+      const timeline = jobMoveTimeline(job.job_id, { snapshot, actionDetails: details, jobTrail: trail });
       return <article className={`jobcard job-${jobKey(job.job_id)} is-${job.status} ${moving ? 'is-moving' : ''}`} key={job.job_id} title={title} aria-label={`${jobName(job.job_id)}, ${statusLabel(job.status)}`}>
         <header className="jobcard-head">
           <h3><i aria-hidden="true"/>{jobName(job.job_id)}</h3>
@@ -109,6 +114,7 @@ export function Jobs({ snapshot, losses, history, details = [], workflows = [], 
           {moving && !move && <em className="jobcard-moving">moving{moveLeft !== null && moveLeft > 0 ? ` · about ${duration(moveLeft)} left (estimate)` : ''}</em>}
         </p>
 
+        {timeline && <MoveTimeline timeline={timeline} example={example}/>}
         {writing && <p className="jobcard-note">Writing a checkpoint · not safe until it completes{checkpointLeft !== null && checkpointLeft > 0 ? ` · about ${duration(checkpointLeft)} left (estimate)` : ''}</p>}
         {!writing && lastCheckpointFailed(snapshot, job.job_id) && <p className="jobcard-note is-danger">Latest checkpoint attempt failed · safe work unchanged</p>}
 
