@@ -70,6 +70,8 @@ interface ActionRecord {
   /** Wall time of the (latest) claim; only meaningful while status is 'claimed'. */
   claimedAtMs: number | null;
   claimedBy: string | null;
+  /** Job status to restore when a checkpoint completes (physics: paused stays paused, else running). */
+  resumeStatus?: ObservedSnapshot['job_states'][number]['status'];
 }
 
 const V = '1.1.0' as const;
@@ -245,8 +247,9 @@ export class FakeDb implements DbPort {
 
   /**
    * Advance sim time by `simMs` (in step_ms ticks) and complete running actions whose due time passed:
-   * checkpoint -> new complete Checkpoint + durable progress; migrate_restart -> reallocate the job to
-   * arguments.destination_gpu_ids; others -> succeeded with no state change.
+   * checkpoint -> its `writing` row completes + durable progress; migrate_restart -> the job (re-allocated to
+   * arguments.destination_gpu_ids at start) runs again; others -> succeeded with no state change. Like physics,
+   * checkpoint start/completion and migrate start/completion each bump the job version and decision_epoch.
    */
   tick(simMs: number): void {
     const target = this.simMs + simMs;
@@ -291,42 +294,43 @@ export class FakeDb implements DbPort {
     const result: Record<string, unknown> = {};
     const job = cmd.job_id ? this.snap.job_states.find((j) => j.job_id === cmd.job_id) : undefined;
     if (cmd.operation === 'checkpoint' && job) {
-      const n = this.snap.checkpoints.filter((c) => c.job_id === job.job_id).length;
-      const cp: Checkpoint = {
-        schema_version: V,
-        run_id: this.snap.run_id,
-        checkpoint_id: `ckpt-${job.job_id}-${n}`,
-        job_id: job.job_id,
-        storage_resource_id: 'ckpt-store-1',
-        status: 'complete',
-        progress_work_units: job.progress_work_units,
-        requested_sim_time_ms: rec.status.updated_sim_time_ms,
-        complete_sim_time_ms: this.simMs,
-        accessible: true,
-        command_key: cmd.command_key,
-      };
-      this.snap.checkpoints.push(cp);
-      job.durable_work_units = job.progress_work_units;
+      // physics completeCommand: the `writing` row (from applyStart) becomes durable, the job resumes, epoch + 1
+      let cp = this.snap.checkpoints.find((c) => c.command_key === cmd.command_key && c.status === 'writing');
+      if (!cp) {
+        const n = this.snap.checkpoints.filter((c) => c.job_id === job.job_id).length;
+        const created: Checkpoint = {
+          schema_version: V,
+          run_id: this.snap.run_id,
+          checkpoint_id: `ckpt-${job.job_id}-${n}`,
+          job_id: job.job_id,
+          storage_resource_id: 'ckpt-store-1',
+          status: 'writing',
+          progress_work_units: job.progress_work_units,
+          requested_sim_time_ms: rec.status.updated_sim_time_ms,
+          complete_sim_time_ms: null,
+          accessible: true,
+          command_key: cmd.command_key,
+        };
+        this.snap.checkpoints.push(created);
+        cp = created;
+      }
+      cp.status = 'complete';
+      cp.complete_sim_time_ms = this.simMs;
+      if (job.status === 'checkpointing') job.status = rec.resumeStatus ?? 'running';
+      job.durable_work_units = cp.progress_work_units;
       job.latest_checkpoint_id = cp.checkpoint_id;
-      job.version += 1;
+      this.bumpJob(job);
       result.checkpoint_id = cp.checkpoint_id;
     }
     if (cmd.operation === 'migrate_restart' && job) {
-      const dest = (cmd.arguments.destination_gpu_ids as string[] | undefined) ?? [];
-      this.snap.allocations = this.snap.allocations.filter((a) => a.job_id !== job.job_id);
-      for (const gpu_id of dest) {
-        this.snap.allocations.push({ schema_version: V, run_id: this.snap.run_id, job_id: job.job_id, gpu_id, since_sim_time_ms: this.simMs });
-      }
-      job.allocated_gpu_ids = [...dest];
-      job.progress_work_units = job.durable_work_units;
+      // re-allocation + rollback to durable work already happened at start (applyStart); now it runs again
       job.status = 'running';
-      job.version += 1;
-      result.destination_gpu_ids = dest;
+      this.bumpJob(job);
+      result.destination_gpu_ids = (cmd.arguments.destination_gpu_ids as string[] | undefined) ?? [];
       this.progressingJobs.add(job.job_id);
     }
     if (this.applyCordon && cmd.operation === 'cordon_gpu') this.setGpuAvailability(cmd.target_resource_id, 'cordoned');
     if (this.applyCordon && cmd.operation === 'uncordon_gpu') this.setGpuAvailability(cmd.target_resource_id, 'ready');
-    if (job) this.emit({ kind: 'resource_version', resource_id: job.job_id, version: job.version, sim_time_ms: this.simMs });
     this.transition(rec, 'succeeded', { result });
   }
 
@@ -462,7 +466,62 @@ export class FakeDb implements DbPort {
       }
     }
     rec.dueSimMs = this.simMs + this.durationFor(rec.cmd);
-    return this.transition(rec, 'running');
+    const running = this.transition(rec, 'running');
+    this.applyStart(rec);
+    return running;
+  }
+
+  /**
+   * What real physics does the tick an action starts (packages/physics/src/gpu/actions.ts startCommand), so
+   * versions and decision_epoch move exactly as on the live DB (step.ts: a material change bumps the epoch):
+   *  - checkpoint: a `writing` checkpoint row appears and the job goes `checkpointing` (job version + epoch).
+   *  - migrate_restart: the job is atomically re-allocated to the destination, goes `restarting`, and its progress
+   *    rolls back to durable work (work since the last durable checkpoint is lost) (job version + epoch).
+   */
+  private applyStart(rec: ActionRecord): void {
+    const { cmd } = rec;
+    const job = cmd.job_id ? this.snap.job_states.find((j) => j.job_id === cmd.job_id) : undefined;
+    if (!job) return;
+    if (cmd.operation === 'checkpoint') {
+      const n = this.snap.checkpoints.filter((c) => c.job_id === job.job_id).length;
+      const spec = this.snap.job_specs.find((j) => j.job_id === job.job_id);
+      this.snap.checkpoints.push({
+        schema_version: V,
+        run_id: this.snap.run_id,
+        checkpoint_id: `ckpt-${job.job_id}-${n}`,
+        job_id: job.job_id,
+        storage_resource_id: spec?.checkpoint_storage_id ?? 'ckpt-store-1',
+        status: 'writing',
+        progress_work_units: job.progress_work_units,
+        requested_sim_time_ms: this.simMs,
+        complete_sim_time_ms: null,
+        accessible: true,
+        command_key: cmd.command_key,
+      });
+      rec.resumeStatus = job.status === 'checkpointing' ? 'running' : job.status;
+      job.status = 'checkpointing';
+      this.bumpJob(job);
+      return;
+    }
+    if (cmd.operation === 'migrate_restart') {
+      const dest = (cmd.arguments.destination_gpu_ids as string[] | undefined) ?? [];
+      this.snap.allocations = this.snap.allocations.filter((a) => a.job_id !== job.job_id);
+      for (const gpu_id of dest) {
+        this.snap.allocations.push({ schema_version: V, run_id: this.snap.run_id, job_id: job.job_id, gpu_id, since_sim_time_ms: this.simMs });
+      }
+      job.allocated_gpu_ids = [...dest];
+      job.status = 'restarting';
+      job.progress_work_units = job.durable_work_units;
+      this.progressingJobs.delete(job.job_id);
+      this.bumpJob(job);
+    }
+  }
+
+  /** A material job change: version + 1, resource_version change, decision_epoch + 1 (like step.ts). */
+  private bumpJob(job: ObservedSnapshot['job_states'][number]): void {
+    job.version += 1;
+    this.emit({ kind: 'resource_version', resource_id: job.job_id, version: job.version, sim_time_ms: this.simMs });
+    this.bumpDecisionEpoch();
   }
 
   async cancelAction(commandKey: string, reasonCode: string, fencingToken: bigint): Promise<ActionStatus> {

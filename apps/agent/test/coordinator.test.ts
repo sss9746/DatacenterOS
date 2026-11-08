@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ActionCommand, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
-import { createCoordinator, type ExecutablePlan, type ExecuteState } from '../src/coordinator.js';
+import {
+  createCoordinator,
+  DEFAULT_LEASE_MS,
+  epochRestampBlocker,
+  restampForSubmission,
+  type ExecutablePlan,
+  type ExecuteState,
+} from '../src/coordinator.js';
 import { createEventPublisher } from '../src/events.js';
 import { DbError, type PhysicsPort } from '../src/ports.js';
 import { buildCommand } from '../src/tools/command.js';
@@ -424,5 +431,145 @@ describe('coordinator vs real db-client errors and late heartbeats (review P3 #1
     expect(a.coord.lease()!.lease_expires_unix_ms).toBeGreaterThan(lease.lease_expires_unix_ms);
     expect(a.coord.lease()!.workflow.version).toBe(version);
     expect(await a.coord.updateStage('execute', { note: 'y' })).not.toBeNull();
+  });
+});
+
+describe('decision_epoch re-stamp before submit (real physics bumps the epoch on checkpoint start + completion)', () => {
+  const sentCmd = (db: FakeDb, key: string) =>
+    db.calls.filter((c) => c.method === 'requestAction').map((c) => c.args[0] as ActionCommand).find((c) => c.command_key === key);
+
+  it('the migrate goes out with the CURRENT epoch, persisted before requestAction; each key requested once', async () => {
+    const { db, coord, snap } = setup();
+    const p = makePlan(snap);
+    const res = await coord.execute(WF, p);
+    expect(res.outcomes.map((o) => o.status)).toEqual(['succeeded', 'succeeded']);
+    const [ck, mv] = p.commands as [ActionCommand, ActionCommand];
+    const sent = sentCmd(db, mv.command_key)!;
+    // FakeDb (like physics) bumped the epoch at checkpoint start and at completion
+    expect(sent.expected_decision_epoch).toBe(snap.clock.decision_epoch + 2);
+    expect(sentCmd(db, ck.command_key)!.expected_decision_epoch).toBe(snap.clock.decision_epoch);
+    expect(sent.expected_resource_versions['job-a']).toBe(snap.job_states.find((j) => j.job_id === 'job-a')!.version + 2);
+    const reqIdx = db.calls.findIndex((c) => c.method === 'requestAction' && (c.args[0] as ActionCommand).command_key === mv.command_key);
+    const persistedIdx = db.calls.findIndex(
+      (c) => c.method === 'updateWorkflow' && (c.args[4] as ExecuteState).commands?.[1]?.expected_decision_epoch === sent.expected_decision_epoch,
+    );
+    expect(persistedIdx).toBeGreaterThanOrEqual(0);
+    expect(persistedIdx).toBeLessThan(reqIdx);
+    expect(requestedKeys(db)).toEqual(p.commands.map((c) => c.command_key));
+  });
+
+  it('an epoch bump unrelated to the command (other resources) is re-stamped: the plan still succeeds', async () => {
+    let n = 0;
+    let dbRef: FakeDb | null = null;
+    const a = setup({
+      onSleep: () => {
+        if (++n !== 3 || !dbRef) return;
+        dbRef.mutateSnapshot((s) => {
+          s.gpus.find((g) => g.resource_id === gpuId(1, 0))!.version += 1; // not a destination, not job-a's
+        });
+        dbRef.bumpDecisionEpoch();
+      },
+    });
+    dbRef = a.db;
+    const res = await a.coord.execute(WF, makePlan(a.snap));
+    expect(res.outcomes.map((o) => o.status)).toEqual(['succeeded', 'succeeded']);
+  });
+
+  it('a destination GPU XID mid-checkpoint is material: the migrate keeps its plan-time epoch, is blocked and never requested', async () => {
+    let n = 0;
+    let dbRef: FakeDb | null = null;
+    const victim = COOL_DEST[3]!;
+    const a = setup({
+      onSleep: () => {
+        if (++n !== 3 || !dbRef) return;
+        dbRef.mutateSnapshot((s) => {
+          const g = s.gpus.find((x) => x.resource_id === victim)!;
+          g.last_xid_code = 79;
+          g.availability = 'unreachable';
+          g.version += 1;
+        });
+        dbRef.bumpDecisionEpoch();
+      },
+    });
+    dbRef = a.db;
+    const p = makePlan(a.snap);
+    const res = await a.coord.execute(WF, p);
+    expect(res.outcomes[0]!.status).toBe('succeeded');
+    expect(res.outcomes[1]!.status).toBe('blocked');
+    expect(res.outcomes[1]!.violations).toEqual(expect.arrayContaining(['STALE_DECISION_EPOCH', 'STALE_RESOURCE_VERSION', 'DEST_GPU_UNHEALTHY']));
+    expect(requestedKeys(a.db)).toEqual([p.commands[0]!.command_key]);
+  });
+
+  it('restampForSubmission: own effects re-stamped; a foreign change on the command resources or a bad destination is not', () => {
+    const snap = loadPumpDegradedSnapshot();
+    const [ck, mv] = makePlan(snap).commands as [ActionCommand, ActionCommand];
+    const later = structuredClone(snap);
+    later.clock.decision_epoch += 2;
+    later.job_states.find((j) => j.job_id === 'job-a')!.version += 2; // the checkpoint's own effect
+    const ok = restampForSubmission(mv, [ck], later);
+    expect(ok.expected_decision_epoch).toBe(later.clock.decision_epoch);
+    expect(ok.expected_resource_versions['job-a']).toBe(later.job_states.find((j) => j.job_id === 'job-a')!.version);
+    expect(mv.expected_decision_epoch).toBe(snap.clock.decision_epoch); // input never mutated
+    // without the checkpoint as an own command, job-a's change is foreign: nothing re-stamped
+    expect(restampForSubmission(mv, [], later)).toBe(mv);
+    // a destination version moved (not ours): keep the plan-time epoch
+    const destMoved = structuredClone(later);
+    destMoved.gpus.find((g) => g.resource_id === COOL_DEST[0])!.version += 1;
+    expect(restampForSubmission(mv, [ck], destMoved).expected_decision_epoch).toBe(snap.clock.decision_epoch);
+    expect(epochRestampBlocker(restampForSubmission(mv, [ck], destMoved), destMoved)).toMatch(/changed/);
+    // a destination no longer ready (even at the same version): keep the plan-time epoch
+    const destCordoned = structuredClone(later);
+    destCordoned.gpus.find((g) => g.resource_id === COOL_DEST[0])!.availability = 'cordoned';
+    expect(restampForSubmission(mv, [ck], destCordoned).expected_decision_epoch).toBe(snap.clock.decision_epoch);
+    // epoch already current: nothing to do
+    expect(restampForSubmission(ck, [], snap)).toBe(ck);
+  });
+});
+
+describe('heartbeat on the injected clock (accelerated-time harness)', () => {
+  it('keeps the lease through a plan that spans many lease lengths of injected wall time', async () => {
+    const physics = new FakePhysics();
+    const snap = loadPumpDegradedSnapshot();
+    const t0 = 1_794_091_200_000;
+    let wall = t0;
+    let sim = snap.clock.sim_time_ms;
+    const db = new FakeDb({ snapshot: snap, physics, now: () => wall });
+    const clock = { unixMs: () => wall, simTimeMs: () => sim };
+    const events = createEventPublisher({ db, runId: RUN_ID, clock, redact: (s) => s });
+    const lost: string[] = [];
+    const coord = createCoordinator({
+      db,
+      physics,
+      events,
+      workerId: 'worker-1',
+      clock,
+      pollMs: 1,
+      // 6 s of injected wall time per poll and no real time: a real-time setInterval would never fire in between
+      sleep: async () => {
+        wall += 6_000;
+        db.tick(1_000);
+        sim += 1_000;
+      },
+      onLostOwnership: (r) => lost.push(r),
+    });
+    await coord.ensureWorkflow(WF, ['inc-1']);
+    coord.startHeartbeat();
+    try {
+      const res = await coord.execute(WF, makePlan(snap));
+      expect(lost).toEqual([]);
+      expect(res.aborted).toBe(false);
+      expect(res.outcomes.map((o) => o.status)).toEqual(['succeeded', 'succeeded']);
+      expect(wall - t0).toBeGreaterThan(10 * DEFAULT_LEASE_MS);
+      expect(db.calls.filter((c) => c.method === 'heartbeatWorkflow').length).toBeGreaterThan(10);
+    } finally {
+      coord.stopHeartbeat();
+    }
+  });
+
+  it('without startHeartbeat no automatic beats happen (manual heartbeatOnce semantics unchanged)', async () => {
+    const a = setup();
+    await a.coord.ensureWorkflow(WF, ['inc-1']);
+    await a.coord.execute(WF, makePlan(a.snap));
+    expect(a.db.calls.filter((c) => c.method === 'heartbeatWorkflow')).toHaveLength(0);
   });
 });

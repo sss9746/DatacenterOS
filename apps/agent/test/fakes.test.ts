@@ -117,7 +117,9 @@ describe('FakeDb actions (TEST-ONLY)', () => {
     const { fencing_token } = await db.claimAction(a.command_key, a.version, 'w');
     await db.startAction(a.command_key, fencing_token);
     await expectDbError(db.cancelAction(a.command_key, 'SUPERSEDED', fencing_token), 'INVALID_TRANSITION');
-    const b = await db.requestAction(cmd(obs, { command_key: 'k-b', action_id: 'act-b', job_id: 'job-b', target_resource_id: 'job-b' }));
+    // starting k-a's checkpoint is a material change (decision_epoch + 1, like physics): plan k-b on a fresh snapshot
+    const fresh = await db.getObservedSnapshot();
+    const b = await db.requestAction(cmd(fresh, { command_key: 'k-b', action_id: 'act-b', job_id: 'job-b', target_resource_id: 'job-b' }));
     expect((await db.cancelAction(b.command_key, 'SUPERSEDED', 0n)).status).toBe('cancelled');
   });
 
@@ -450,7 +452,8 @@ describe('FakeDb cordon, claim lease, post-migration progress (TEST-ONLY)', () =
     const dest = rackGpus(7).concat(rackGpus(8));
     await finish(db, cmd(obs));
     db.tick(30_000); // checkpoint duration
-    const mv = await db.requestAction(migrateA(obs, dest));
+    // checkpoint start + completion each bumped decision_epoch (physics parity): plan the move on a fresh snapshot
+    const mv = await db.requestAction(migrateA(await db.getObservedSnapshot(), dest));
     const { fencing_token } = await db.claimAction(mv.command_key, mv.version, 'w');
     await db.startAction(mv.command_key, fencing_token);
     db.tick(120_000);

@@ -31,19 +31,17 @@ beforeAll(async () => {
 });
 
 /**
- * HARNESS SHIMS for two integration bugs (each reported; each also has an un-shimmed `it.fails` spec below):
- *  - freshTelemetry: P2's mock tick() never advances gpus[].last_seen_sim_ms, so P1's evaluateSafety reports
- *    EVIDENCE_STALE (> 10 sim-s) on every request after the first ~10 ticks. Live DB runs real step(), which does.
- *  - restampEpoch: P3's coordinator requests plan steps one at a time with the PLAN-time expected_decision_epoch,
- *    but a checkpoint starting/completing is a material change (real physics + P2 mock bump the epoch), so every
- *    later step is STALE_DECISION_EPOCH. The shim re-stamps the epoch at request time (one candidate P3 fix).
+ * HARNESS SHIM for the one remaining P2-owned integration bug (reported; it also has an un-shimmed `it.fails` spec):
+ *  - freshTelemetry — "P2 bug: last_seen freshness": P2's mock tick() never advances gpus[].last_seen_sim_ms, so
+ *    P1's evaluateSafety reports EVIDENCE_STALE (> 10 sim-s) on every request after the first ~10 ticks. The live
+ *    DB runs real step(), which does. Remove once P2's mock refreshes last_seen on tick.
+ * The former `restampEpoch` shim is gone: P3's coordinator now re-stamps expected_decision_epoch itself before
+ * submitting each not-yet-submitted step (coordinator.ts restampForSubmission).
  */
 export interface Shims {
   freshTelemetry: boolean;
-  restampEpoch: boolean;
 }
-const NO_SHIMS: Shims = { freshTelemetry: false, restampEpoch: false };
-const ALL_SHIMS: Shims = { freshTelemetry: true, restampEpoch: true };
+const ALL_SHIMS: Shims = { freshTelemetry: true };
 
 const withFreshTelemetry = (f: typeof physicsPkg.evaluateSafety): typeof physicsPkg.evaluateSafety => (obs, cmd, ctx) => {
   const o = structuredClone(obs);
@@ -51,34 +49,17 @@ const withFreshTelemetry = (f: typeof physicsPkg.evaluateSafety): typeof physics
   return f(o, cmd, ctx);
 };
 
-/** Same shims on the agent's own PhysicsPort: P3's coordinator prechecks every step locally with evaluateSafety. */
+/** The P2 last_seen shim on the agent's own PhysicsPort too: P3's coordinator prechecks every step locally. */
 function shimPhysics(p: PhysicsPort, shims: Shims): PhysicsPort {
-  const base = shims.freshTelemetry ? withFreshTelemetry(p.evaluateSafety) : p.evaluateSafety;
-  return {
-    ...p,
-    evaluateSafety: (obs, cmd, ctx) => base(obs, shims.restampEpoch ? { ...cmd, expected_decision_epoch: ctx.decision_epoch } : cmd, ctx),
-  };
-}
-
-function withEpochRestamp(mock: MockDbClient): DbPort {
-  return new Proxy(mock, {
-    get(target, prop) {
-      if (prop !== 'requestAction') return Reflect.get(target, prop, target);
-      return async (cmd: ActionCommand) => {
-        if (await target.getActionStatus(cmd.command_key)) return target.requestAction(cmd); // idempotent replay
-        const epoch = (await target.getObservedSnapshot()).clock.decision_epoch;
-        return target.requestAction({ ...cmd, expected_decision_epoch: epoch });
-      };
-    },
-  }) as DbPort;
+  return shims.freshTelemetry ? { ...p, evaluateSafety: withFreshTelemetry(p.evaluateSafety) } : p;
 }
 
 interface World {
   mock: MockDbClient;
-  /** What the agent talks to: the mock, optionally behind the epoch shim. */
+  /** What the agent talks to: P2's mock itself (no DB-side shim). */
   db: DbPort;
   physics: PhysicsPort;
-  /** Real wall time + an offset we jump forward to expire leases (P3 heartbeats on a real setInterval). */
+  /** Real wall time + an offset we jump forward to expire a dead worker's lease (live workers beat on this clock). */
   wall: { readonly now: number; offset: number };
   sim: () => number;
   sleep: () => Promise<void>;
@@ -89,7 +70,7 @@ async function world(snapshot: 'pump_degraded' | ObservedSnapshot, shims: Shims 
   const wall = { offset: 0, get now() { return Date.now() + this.offset; } };
   const evaluateSafety = shims.freshTelemetry ? withFreshTelemetry(physicsPkg.evaluateSafety) : physicsPkg.evaluateSafety;
   const mock = createMockClient({ snapshot, now: () => wall.now, evaluateSafety });
-  const db = shims.restampEpoch ? withEpochRestamp(mock) : mock;
+  const db: DbPort = mock;
   let sim = (await mock.getObservedSnapshot()).clock.sim_time_ms;
   const hooks: Array<() => Promise<void> | void> = [];
   const sleep = async () => {
@@ -143,29 +124,29 @@ describe('adapter wiring', () => {
   });
 });
 
-describe('UN-SHIMMED specs (expected to fail until the reported bugs are fixed)', () => {
+describe('un-shimmed specs (P3 epoch fix must pass; P2 bugs stay it.fails until P2 fixes them)', () => {
   const runPlain = async (shims: Shims) => {
     const w = await world('pump_degraded', shims);
     const r = await makeLoop(w).runOnce();
     return { w, r, outcomes: r.executions.flatMap((e) => e.outcomes) };
   };
-  it.fails('P3 bug: with fresh telemetry only, every planned step succeeds (today: STALE_DECISION_EPOCH)', async () => {
-    const { outcomes } = await runPlain({ freshTelemetry: true, restampEpoch: false });
+  it('P3 epoch fix: every planned step succeeds although checkpoint start/complete bump decision_epoch (no epoch shim)', async () => {
+    const { w, r, outcomes } = await runPlain({ freshTelemetry: true });
+    expect(outcomes.length).toBeGreaterThan(1);
     expect(outcomes.filter((o) => o.status !== 'succeeded')).toEqual([]);
+    expect(outcomes.some((o) => o.violations?.includes('STALE_DECISION_EPOCH'))).toBe(false);
+    expect(r.verification?.verified).toBe(true);
+    // later steps went out re-stamped to the then-current epoch; still exactly one request per key
+    expect(new Set(requested(w.mock).map((c) => c.expected_decision_epoch)).size).toBeGreaterThan(1);
+    for (const n of perKey(w.mock).values()) expect(n).toBe(1);
   });
-  it('P3 bug (observed): later steps are blocked with STALE_DECISION_EPOCH and the workflow escalates', async () => {
-    const { r, outcomes } = await runPlain({ freshTelemetry: true, restampEpoch: false });
-    expect(outcomes[0]!.status).toBe('succeeded'); // job-a checkpoint
-    expect(outcomes.some((o) => o.status === 'blocked' && o.violations?.includes('STALE_DECISION_EPOCH'))).toBe(true);
-    expect(r.verification?.verified).toBe(false);
-  });
-  it.fails('P2 mock bug: with the epoch shim only, no step is EVIDENCE_STALE (today: mock never refreshes last_seen)', async () => {
-    const { outcomes } = await runPlain({ freshTelemetry: false, restampEpoch: true });
+  it.fails('P2 bug: last_seen freshness — un-shimmed, no step is EVIDENCE_STALE (today: mock tick never refreshes last_seen)', async () => {
+    const { outcomes } = await runPlain({ freshTelemetry: false });
     expect(outcomes.filter((o) => o.violations?.includes('EVIDENCE_STALE'))).toEqual([]);
   });
 });
 
-describe('agent loop on P2 createMockClient("pump_degraded") + real physics (both shims)', () => {
+describe('agent loop on P2 createMockClient("pump_degraded") + real physics (P2 last_seen shim only)', () => {
   it('pump fault -> plan -> execute -> verify; no duplicate keys, no double allocation', async () => {
     const w = await world('pump_degraded');
     const r = await makeLoop(w).runOnce();

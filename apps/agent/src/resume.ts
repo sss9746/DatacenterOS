@@ -17,7 +17,7 @@ import type { ActionCommand, ActionStatus, PlanCandidate } from '@dcos/contracts
 import {
   createCoordinator,
   DEFAULT_LEASE_MS,
-  restampForDependencies,
+  restampForSubmission,
   type CommandOutcome,
   type Coordinator,
   type ExecutablePlan,
@@ -269,7 +269,7 @@ const violationsOf = (s: ActionStatus): string[] => (Array.isArray(s.result.viol
 /**
  * First reason the persisted plan cannot run as-is on a fresh snapshot, or null. Checks keys the DB already
  * safety-rejected, then every not-yet-submitted command with the same local evaluateSafety the coordinator
- * would run right before submitting it (dependencies that already succeeded are re-stamped the same way).
+ * would run right before submitting it (versions and decision_epoch re-stamped the same way: restampForSubmission).
  */
 export async function persistedPlanInvalidReason(
   db: DbPort,
@@ -285,17 +285,20 @@ export async function persistedPlanInvalidReason(
     const v = s ? violationsOf(s) : [];
     return `${subject(byKey.get(r.command_key))} was safety-rejected${v.length ? ` (${v.join(', ')})` : ''}`;
   }
+  // This workflow's own succeeded commands (per the ledger): their effects are re-stamped, as the coordinator does.
+  const own: ActionCommand[] = [];
+  for (const c of plan.commands) {
+    if (decision.get(c.command_key) === 'resubmit_same_key') continue;
+    if (decision.get(c.command_key) === 'skip' || (await db.getActionStatus(c.command_key))?.status === 'succeeded') own.push(c);
+  }
   let snap = await db.getObservedSnapshot();
   for (const c of plan.commands) {
     if (decision.get(c.command_key) !== 'resubmit_same_key') continue;
-    const deps = c.depends_on_command_keys
-      .filter((k) => decision.get(k) === 'skip')
-      .map((k) => byKey.get(k))
-      .filter((x): x is ActionCommand => !!x);
-    const cmd = restampForDependencies(c, deps, snap);
+    let cmd = restampForSubmission(c, own, snap);
     let d = physics.evaluateSafety(snap, cmd, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] });
     if (d.decision === 'retry_new_snapshot') {
       snap = await db.getObservedSnapshot();
+      cmd = restampForSubmission(c, own, snap);
       d = physics.evaluateSafety(snap, cmd, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] });
     }
     if (d.decision === 'allow' || (d.decision === 'needs_approval' && c.operation === 'escalate')) continue;

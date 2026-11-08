@@ -66,6 +66,13 @@ export const SAFETY_REASON_CODES = [
   'UNSUPPORTED_OPERATION',
   'CORDON_IS_NOT_REPAIR',
   'REAL_GPU_NOT_ALLOCATABLE',
+  // physics codes added to §0.7 by CONTRACTS §0.12 #4 (same order as @dcos/physics SAFETY_REASON_CODES);
+  // evaluateSafety never emits the last one, which only happens while a command runs.
+  'JOB_NOT_FOUND',
+  'JOB_STATE_INVALID',
+  'TARGET_NOT_FOUND',
+  'INVALID_ARGUMENT',
+  'JOB_FAILED_DURING_OPERATION',
 ] as const;
 export type SafetyReasonCode = (typeof SAFETY_REASON_CODES)[number];
 
