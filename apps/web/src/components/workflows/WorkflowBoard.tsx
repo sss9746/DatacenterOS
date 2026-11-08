@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import type { ActionDetail, AgentActor, AgentEventInput, WorkflowRecord } from '@dcos/db-client';
+import type { ActionDetail, AgentActor, AgentEventInput, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import type { Incident, ObservedSnapshot } from '@dcos/contracts';
 import { Code2, RotateCcw, Sparkles } from 'lucide-react';
 import { Badge, Empty, Panel } from '../ui/panel';
@@ -26,6 +26,8 @@ export interface WorkflowBoardProps {
   snapshot: ObservedSnapshot | null;
   example: boolean;
   mode: 'mock' | 'live';
+  /** Persisted plans from `onPlans`; the workflow's selected plan is the one whose id equals `workflow.plan_id`. */
+  plans?: PlanRecord[];
   /** Wall clock for lease expiry labels (defaults to Date.now() at render). */
   nowUnixMs?: number;
 }
@@ -42,7 +44,7 @@ const STATUS_TONE: Record<StatusKind, string> = {
 };
 
 /** Per-workflow progress: one card per persisted workflow, driven by DB rows, agent events and the action ledger. */
-export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, nowUnixMs }: WorkflowBoardProps) {
+export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs }: WorkflowBoardProps) {
   const views = useMemo(() => buildWorkflowViews({ workflows, events, actionDetails, incidents, snapshot }), [workflows, events, actionDetails, incidents, snapshot]);
   const source = example ? 'Scripted example' : mode === 'live' ? 'Live DB' : 'Mock data';
   const simNow = snapshot?.clock.sim_time_ms ?? null;
@@ -51,7 +53,7 @@ export function WorkflowBoard({ workflows, events, actionDetails, incidents, sna
     {example && <p className="example-note">Scripted example workflows, written through the mock client APIs. No model, planner or safety engine ran.</p>}
     {views.length === 0
       ? <Empty title="No workflow opened">{mode === 'mock' ? 'No agent is running in mock mode, so the orchestrator has not opened a workflow. Choose the recovery example to see scripted workflows.' : 'The orchestrator has not opened a workflow yet. One appears per incident group once the agent claims it.'}</Empty>
-      : <ol className="wf-list" aria-label="Workflows">{views.map((view) => <li key={view.workflow.workflow_id}><WorkflowCard view={view} example={example} simNow={simNow} now={now}/></li>)}</ol>}
+      : <ol className="wf-list" aria-label="Workflows">{views.map((view) => <li key={view.workflow.workflow_id}><WorkflowCard view={view} example={example} simNow={simNow} now={now} plan={view.planId ? plans.find((p) => p.plan_id === view.planId) ?? null : null}/></li>)}</ol>}
   </Panel>;
 }
 
@@ -62,7 +64,7 @@ function ActorBadge({ actor, example }: { actor: AgentActor | null | undefined; 
 const simAt = (ms: number | null) => (ms === null ? 'not recorded' : `${duration(ms)} sim`);
 const wallTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
-const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now }: { view: WorkflowView; example: boolean; simNow: number | null; now: number }) {
+const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, plan }: { view: WorkflowView; example: boolean; simNow: number | null; now: number; plan: PlanRecord | null }) {
   const wf = view.workflow;
   const headingId = `wf-${wf.workflow_id}-heading`;
   const closed = wf.stage === 'done' || wf.stage === 'escalated';
@@ -93,12 +95,31 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now }: 
       <div><dt>Row updated</dt><dd>{wallTime(wf.updated_at_unix_ms)} wall</dd></div>
       <div><dt>Events</dt><dd>{actorSummary(view.actors)}{example && view.events.length ? ' (scripted)' : ''}</dd></div>
     </dl>
-    <Candidates round={view.candidates} example={example}/>
+    <Candidates round={view.candidates} example={example} plan={plan} planId={view.planId}/>
     <Handoff view={view} example={example}/>
   </article>;
 });
 
-function Candidates({ round, example }: { round: CandidateRound | null; example: boolean }) {
+/** The workflow's selected plan (`workflow.plan_id`) from the persisted `plan` table. `plan.status` is not shown: it stays `proposed`. */
+function SelectedPlan({ plan, planId }: { plan: PlanRecord | null; planId: string | null }) {
+  if (!planId) return <p className="wf-muted">No plan selected by this workflow yet.</p>;
+  if (!plan) return <p className="wf-muted">Selected plan <code className="wf-key">{planId}</code> has not been received from the DB yet.</p>;
+  return <div className="wf-group wf-selected-plan"><h4>Selected plan (persisted)</h4>
+    <dl className="wf-plan-facts">
+      <div><dt>Plan</dt><dd><code className="wf-key">{plan.plan_id}</code></dd></div>
+      <div><dt>Snapshot decision epoch</dt><dd>{plan.based_on_decision_epoch}</dd></div>
+      <div><dt>Predicted lost work</dt><dd>{plan.expected_lost_work_units} wu</dd></div>
+      <div><dt>Finite-horizon work deficit</dt><dd>{plan.expected_completion_delay_sim_s} sim-s</dd></div>
+      <div><dt>GPU busy waste</dt><dd>{plan.expected_gpu_busy_waste_s} s</dd></div>
+      <div><dt>Model risk score</dt><dd>{plan.failure_risk_estimate}</dd></div>
+    </dl>
+    <p className="wf-muted">Predictions on an estimated copy of the observed cluster; not a calibrated failure probability. Commands: {plan.command_keys.length}.</p>
+    {plan.explanation && <p className="wf-wrap">{plan.explanation}</p>}
+    <details className="wf-assumptions"><summary>Assumptions ({plan.assumptions.length})</summary><ul>{plan.assumptions.map((a, i) => <li key={i}><span className="wf-wrap">{a}</span></li>)}</ul></details>
+  </div>;
+}
+
+function Candidates({ round, example, plan, planId }: { round: CandidateRound | null; example: boolean; plan: PlanRecord | null; planId: string | null }) {
   return <details className="wf-section">
     <summary>Candidates{round ? ` · ${round.options.length} ${round.options.length === 1 ? 'option' : 'options'}` : ' · none published'}</summary>
     <div className="wf-section-body">
@@ -120,7 +141,8 @@ function Candidates({ round, example }: { round: CandidateRound | null; example:
         </li>)}</ul>}
         {round.combined && <p className="wf-narrative"><ActorBadge actor={round.combined.actor} example={example}/><span className="wf-wrap">Selected commands together: {round.combined.reported}{round.combined.simulated ? ` (${round.combined.simulated})` : ''}</span></p>}
       </>}
-      <p className="wf-unavailable">Assumptions, snapshot epoch and structured plan metrics: not exposed by the client yet (the DB plan table has no reader in @dcos/db-client).</p>
+      <SelectedPlan plan={plan} planId={planId}/>
+      <p className="wf-muted">Rejected options are not persisted by the agent; alternatives above come only from its published event tool calls.</p>
     </div>
   </details>;
 }

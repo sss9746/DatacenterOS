@@ -232,3 +232,18 @@ describe('R3 handoff and persisted resume marker', () => {
   });
 });
 
+
+describe('persisted plans and workflows via onPlans / onWorkflows', () => {
+  it('delivers every workflow (done ones included) and each selected plan from the DB subscriptions', async () => {
+    const store = await openDashboard('mock', 'recovery', { uri: '', db: '' });
+    store.start();
+    await new Promise((r) => setTimeout(r, 50));
+    const { workflows, plans } = store.state;
+    expect(workflows.map((w) => w.workflow_id).sort()).toEqual(['wf-example-cooling', 'wf-example-xid']);
+    expect(workflows.some((w) => w.stage === 'done')).toBe(true);
+    const selected = workflows.map((w) => w.plan_id).filter((id): id is string => Boolean(id));
+    expect(selected.length).toBeGreaterThan(0);
+    for (const id of selected) expect(plans.find((p) => p.plan_id === id)?.assumptions.length).toBeGreaterThan(0);
+    store.close();
+  });
+});

@@ -1,4 +1,4 @@
-import { connect, createMockClient, type ActionDetail, type DbClient, type AgentEventInput, type Evidence, type MockDbClient, type WorkflowRecord } from '@dcos/db-client';
+import { connect, createMockClient, type ActionDetail, type DbClient, type AgentEventInput, type Evidence, type MockDbClient, type PlanRecord, type WorkflowRecord } from '@dcos/db-client';
 import type { ActionStatus, EvaluationResult, Incident, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
 import { evaluateSafety } from '@dcos/physics';
 import { loadRecoveryExample } from './recovery-example';
@@ -13,8 +13,10 @@ export interface DashboardState {
   /** Typed ledger projection from `onActionDetails`: command, safety evidence, timing and history. */
   actionDetails: ActionDetail[];
   events: AgentEventInput[];
-  /** Persisted workflow rows (open ones plus any workflow referenced by events or actions), read from the DB. */
+  /** Every persisted workflow row (`onWorkflows`), including `done` ones whose state carries the final handoff. */
   workflows: WorkflowRecord[];
+  /** Persisted plans (`onPlans`). The selected plan is `workflow.plan_id`; `plan.status` stays `proposed` and is not an adoption signal. */
+  plans: PlanRecord[];
   results: EvaluationResult[];
   evidence: Evidence | null;
   signals: SignalEvent[];
@@ -27,7 +29,7 @@ export interface DashboardState {
    */
   lastReceived: number | null;
 }
-export const emptyState = (): DashboardState => ({ phase: 'loading', snapshot: null, incidents: [], actions: [], actionDetails: [], events: [], workflows: [], results: [], evidence: null, signals: [], losses: {}, jobHistory: {}, error: null, lastReceived: null });
+export const emptyState = (): DashboardState => ({ phase: 'loading', snapshot: null, incidents: [], actions: [], actionDetails: [], events: [], workflows: [], plans: [], results: [], evidence: null, signals: [], losses: {}, jobHistory: {}, error: null, lastReceived: null });
 export function errorMessage(error: unknown): string {
   const code = typeof error === 'object' && error !== null && 'code' in error ? `${String(error.code)}: ` : '';
   return code + (error instanceof Error ? error.message : 'The database request failed. Retry when the connection is available.');
@@ -61,6 +63,8 @@ export class DashboardStore {
       this.client.onActionDetails(seen((actionDetails) => { this.update({ actionDetails }); void this.refresh(); })),
       this.client.onAgentEvents(seen((events) => { this.update({ events: events.slice(-200) }); void this.refresh(); })),
       this.client.onEvaluation(seen((results) => this.update({ results }))),
+      this.client.onWorkflows(seen((workflows) => this.update({ workflows }))),
+      this.client.onPlans(seen((plans) => this.update({ plans }))),
       this.client.onChange(seen((_) => { void this.refresh(); })),
     ];
     // The current API has no onRun/onCooling subscription. Refresh its public snapshot
@@ -75,7 +79,7 @@ export class DashboardStore {
     try {
       do {
         this.refreshAgain = false;
-        const [snapshot, evidence, workflows] = await Promise.all([this.client.getObservedSnapshot(), this.client.getEvidence([], 600_000), this.readWorkflows()]);
+        const [snapshot, evidence] = await Promise.all([this.client.getObservedSnapshot(), this.client.getEvidence([], 600_000)]);
         if (this.closed) return;
         const losses = { ...this.state.losses };
         const history = { ...this.state.jobHistory };
@@ -88,27 +92,11 @@ export class DashboardStore {
           const entries = history[job.job_id] ?? [];
           if (entries.at(-1)?.status !== job.status) history[job.job_id] = [...entries, { status: job.status, sim_time_ms: snapshot.clock.sim_time_ms }].slice(-12);
         }
-        const runWorkflows = workflows.filter((row) => row.run_id === snapshot.run_id);
         const advanced = !sameRun || snapshot.clock.sim_time_ms !== this.state.snapshot?.clock.sim_time_ms || this.state.lastReceived === null;
-        this.update({ snapshot, evidence, workflows: runWorkflows, signals: evidence.signals.slice(-100), losses, jobHistory: history, phase: 'ready', error: null, ...(advanced ? { lastReceived: Date.now() } : {}) });
+        this.update({ snapshot, evidence, signals: evidence.signals.slice(-100), losses, jobHistory: history, phase: 'ready', error: null, ...(advanced ? { lastReceived: Date.now() } : {}) });
       } while (this.refreshAgain && !this.closed);
     } catch (error) { this.update({ phase: 'error', error: errorMessage(error) }); }
     finally { this.refreshing = false; }
-  }
-  /**
-   * Workflow rows straight from the DB. `listOpenWorkflows` omits `done` rows, so closed workflows that events or
-   * actions still reference are read individually; their persisted state carries the verification handoff.
-   * References come only from DB subscriptions, so a reset (which clears those rows) drops the previous run's workflows.
-   */
-  private async readWorkflows(): Promise<WorkflowRecord[]> {
-    const open = await this.client.listOpenWorkflows();
-    const known = new Set(open.map((row) => row.workflow_id));
-    const referenced = new Set<string>();
-    for (const event of this.state.events) if (event.workflow_id) referenced.add(event.workflow_id);
-    for (const detail of this.state.actionDetails) if (detail.command.workflow_id) referenced.add(detail.command.workflow_id);
-    const missing = [...referenced].filter((id) => !known.has(id));
-    const closed = await Promise.all(missing.map((id) => this.client.getWorkflow(id)));
-    return [...open, ...closed.filter((row): row is WorkflowRecord => row !== null)];
   }
   close() { this.closed = true; clearInterval(this.timer); this.unsubscribers.forEach((fn) => fn()); this.client.close(); this.listeners.clear(); }
 }

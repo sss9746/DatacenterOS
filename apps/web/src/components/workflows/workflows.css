@@ -72,3 +72,10 @@
   .wf-card { padding: 16px; }
   .wf-track { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* Selected plan (persisted plan row). */
+.wf-plan-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: 0.5rem 1rem; margin: 0.4rem 0; }
+.wf-plan-facts div { min-width: 0; }
+.wf-plan-facts dt { color: var(--muted); font-size: 0.75rem; }
+.wf-plan-facts dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wf-assumptions > summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
