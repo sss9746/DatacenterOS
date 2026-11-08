@@ -163,10 +163,10 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
 function CandidateSummary({ round, example }: { round: CandidateRound | null; example: boolean }) {
   if (!round || !round.options.length) return null;
   const sorted = [...round.options].sort((a, b) => Number(b.chosen === true) - Number(a.chosen === true));
-  return <ul className="wf-candidates" aria-label="Candidate options">{sorted.map((o) => {
+  return <ul className="wf-candidates" aria-label="Candidate options">{sorted.map((o, i) => {
     const name = o.persisted ? `${o.persisted.job_id} · ${o.persisted.option.replace(`${o.persisted.job_id}:`, '')}` : o.option_id;
     const reason = o.persisted?.reason ?? (o.chosen === true ? 'chosen by the planner' : o.blocked ? 'blocked by safety' : 'not chosen');
-    return <li key={o.option_id} className={o.chosen === true ? 'wf-cand wf-cand-chosen' : o.blocked ? 'wf-cand wf-cand-blocked' : 'wf-cand'} title={o.option_id}>
+    return <li key={`${o.option_id}-${i}`} className={o.chosen === true ? 'wf-cand wf-cand-chosen' : o.blocked ? 'wf-cand wf-cand-blocked' : 'wf-cand'} title={o.option_id}>
       <span className="wf-cand-verdict">{o.chosen === true ? <CheckCircle2 size={13} aria-hidden="true"/> : o.blocked ? <ShieldAlert size={13} aria-hidden="true"/> : <CircleDashed size={13} aria-hidden="true"/>}{o.chosen === true ? 'Chosen' : o.blocked ? 'Blocked' : o.persisted ? 'Rejected' : 'Alternative'}</span>
       <span className="wf-cand-name">{name}</span>
       <span className="wf-cand-reason wf-wrap">{reason}</span>
@@ -227,7 +227,7 @@ function Candidates({ round, example, plan, planId }: { round: CandidateRound | 
         {round.source === 'events' && (round.choice
           ? <p className="wf-narrative"><ActorBadge actor={round.choice.actor} example={example}/><span className="wf-wrap">choose_options: {round.choice.reported}</span></p>
           : <p className="wf-muted">No option-level choice was published; the chosen option cannot be identified by id. The plan summary above names it.</p>)}
-        {round.options.length > 0 && <ul className="wf-options">{round.options.map((o) => <li key={o.option_id} className={o.chosen ? 'wf-option-chosen' : ''}>
+        {round.options.length > 0 && <ul className="wf-options">{round.options.map((o, i) => <li key={`${o.option_id}-${i}`} className={o.chosen ? 'wf-option-chosen' : ''}>
           <div className="wf-option-head"><code>{o.option_id}</code>{o.chosen === true && <Badge tone="agent">Chosen</Badge>}{o.chosen === false && <Badge>{o.persisted ? 'Rejected' : 'Alternative'}</Badge>}{o.blocked && <Badge tone="danger">Blocked by safety</Badge>}</div>
           {o.persisted ? <PersistedOption o={o} example={example} showDeficit={round.showDeficit}/> : <>
             <dl>

@@ -111,9 +111,9 @@ function Options({ step, example }: { step: OptionsStep; example: boolean }) {
         <tbody>{rows.map((r) => <tr key={r.key} className={`${r.chosen === true ? 'dt-row-chosen' : ''} ${r.lowest_cost ? 'dt-row-lowest' : ''}`} title={r.option_id}>
           <td><span className="dt-option-name">{r.chosen === true && <CheckCircle2 size={13} aria-hidden="true"/>}{r.name}</span>{r.chosen === true && <span className="dt-tag dt-tag-chosen">chosen</span>}{r.lowest_cost && <span className="dt-tag dt-tag-lowest">lowest cost</span>}</td>
           <td className="dt-cmds">{r.commands || NOT_RECORDED}</td>
-          <td className="dt-num">{wu(r.lost_wu)}</td>
-          {step.show_deficit && <td className="dt-num">{wu(r.deficit_wu)}</td>}
-          <td className="dt-num">{step.source === 'workflow_state' ? secs(r.gpu_waste_s) : NOT_RECORDED}</td>
+          <td className="dt-num" data-label="Lost work: ">{wu(r.lost_wu)}</td>
+          {step.show_deficit && <td className="dt-num" data-label="Work deficit: ">{wu(r.deficit_wu)}</td>}
+          <td className="dt-num" data-label="GPU-busy waste: ">{step.source === 'workflow_state' ? secs(r.gpu_waste_s) : NOT_RECORDED}</td>
           <td><DecidedBy actor={r.actor} example={example}/></td>
         </tr>)}</tbody>
       </table>

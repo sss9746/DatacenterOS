@@ -82,7 +82,8 @@
   .dt-table tr { padding: 6px 0; border-bottom: 1px solid #1f2933; }
   .dt-table td { border: 0; padding: 2px 0; }
   .dt-table .dt-num { text-align: left; white-space: normal; }
-  .dt-table .dt-num::before { content: attr(data-label); }
+  .dt-table .dt-num::before { content: attr(data-label); color: var(--muted); }
+  .dt-table caption { display: block; width: 100%; }
 }
 
 /* Cost bars: pure CSS, one row per option, chosen row in green. */
