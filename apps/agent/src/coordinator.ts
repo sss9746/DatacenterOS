@@ -8,6 +8,7 @@
 import type { ActionCommand, ActionStatus, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
 import type { EventPublisher } from './events.js';
 import {
+  dbErrorCode,
   isDbError,
   isSafetyRejected,
   type ActionLifecycle,
@@ -144,7 +145,7 @@ const realSleep = (ms: number): Promise<void> =>
     (t as { unref?: () => void }).unref?.();
   });
 
-const errCode = (e: unknown): string => (isDbError(e) ? e.code : e instanceof Error ? e.name || 'ERROR' : 'ERROR');
+const errCode = (e: unknown): string => dbErrorCode(e) ?? (e instanceof Error ? e.name || 'ERROR' : 'ERROR');
 const isLostError = (e: unknown): boolean => LOST_CODES.some((c) => isDbError(e, c));
 
 const subjectOf = (cmd: ActionCommand): string => cmd.job_id ?? cmd.target_resource_id;
@@ -265,11 +266,18 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
   async function heartbeatOnce(): Promise<boolean> {
     if (!current || lost) return false;
+    const sent = current;
     try {
-      const lease = await db.heartbeatWorkflow(current.workflow.workflow_id, workerId, current.fencing_token, leaseMs);
-      current = { ...lease, workflow: { ...lease.workflow } };
+      const lease = await db.heartbeatWorkflow(sent.workflow.workflow_id, workerId, sent.fencing_token, leaseMs);
+      // A late reply from before a re-claim (older token) must never overwrite the current lease. On success only
+      // the cached expiry is refreshed: heartbeat_workflow does not bump workflow.version (§0.11 #16), and the
+      // workflow record / version are owned by claim + updateStage.
+      if (!current || current.fencing_token !== sent.fencing_token || lease.fencing_token < current.fencing_token) return !lost;
+      const expires = Math.max(current.lease_expires_unix_ms, lease.lease_expires_unix_ms);
+      current = { ...current, lease_expires_unix_ms: expires, workflow: { ...current.workflow, lease_expires_unix_ms: expires } };
       return true;
     } catch (e) {
+      if (!current || current.fencing_token !== sent.fencing_token) return !lost; // rejection of a superseded token
       if (isDbError(e, 'STALE_FENCING_TOKEN') || isDbError(e, 'LEASE_EXPIRED') || isDbError(e, 'LEASE_HELD') || isDbError(e, 'NOT_FOUND')) {
         loseOwnership(errCode(e));
         return false;

@@ -4,7 +4,7 @@ import { createCoordinator, type ExecutablePlan, type ExecuteState } from '../sr
 import { createEventPublisher } from '../src/events.js';
 import { DbError, type PhysicsPort } from '../src/ports.js';
 import { buildCommand } from '../src/tools/command.js';
-import { FakeDb, FakePhysics } from './fakes/index.js';
+import { FakeDb, FakePhysics, withPlainErrors } from './fakes/index.js';
 import { RUN_ID, gpuId, loadPumpDegradedSnapshot } from './fixtures/index.js';
 
 const WF = 'wf-1';
@@ -357,5 +357,72 @@ describe('F-NV1 actor tags (coordinator)', () => {
       expect(e.actor).toBe('code');
       for (const t of e.tool_calls) expect(t.actor).toBe('code');
     }
+  });
+});
+
+describe('coordinator vs real db-client errors and late heartbeats (review P3 #1, #5)', () => {
+  it('heartbeat: a code-less "STALE_FENCING_TOKEN: ..." rejection loses ownership (not treated as transient)', async () => {
+    const lostReasons: string[] = [];
+    const a = setup();
+    const db = withPlainErrors(a.db, 'message');
+    const coord = createCoordinator({ db, physics: a.physics, events: a.events, workerId: 'worker-1', clock: a.clock, onLostOwnership: (r) => lostReasons.push(r) });
+    await coord.ensureWorkflow(WF, ['inc-1']);
+    a.db.advanceWallMs(16_000);
+    const other = createCoordinator({ db: a.db, physics: a.physics, events: a.events, workerId: 'worker-2', clock: a.clock });
+    await other.ensureWorkflow(WF, ['inc-1']); // worker-2 re-claims: worker-1's token is now stale
+    expect(await coord.heartbeatOnce()).toBe(false);
+    expect(lostReasons).toEqual(['STALE_FENCING_TOKEN']);
+    expect(coord.isOwner()).toBe(false);
+  });
+
+  it('heartbeat: a plain coded LEASE_EXPIRED error (Object.assign(new Error, {code})) loses ownership', async () => {
+    const lostReasons: string[] = [];
+    const a = setup();
+    const db = withPlainErrors(a.db, 'coded');
+    const coord = createCoordinator({ db, physics: a.physics, events: a.events, workerId: 'worker-1', clock: a.clock, onLostOwnership: (r) => lostReasons.push(r) });
+    await coord.ensureWorkflow(WF, ['inc-1']);
+    a.db.advanceWallMs(16_000);
+    expect(await coord.heartbeatOnce()).toBe(false);
+    expect(lostReasons).toEqual(['LEASE_EXPIRED']);
+  });
+
+  it('a late heartbeat reply from before a re-claim never overwrites the newer lease', async () => {
+    const a = setup();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const slow = new Proxy(a.db, {
+      get(target, prop) {
+        const v = Reflect.get(target, prop, target) as unknown;
+        if (prop !== 'heartbeatWorkflow') return typeof v === 'function' ? (v as (...x: unknown[]) => unknown).bind(target) : v;
+        return async (...args: Parameters<FakeDb['heartbeatWorkflow']>) => {
+          const reply = await target.heartbeatWorkflow(...args); // the DB answered with the OLD token...
+          await held; // ...but the reply arrives late
+          return reply;
+        };
+      },
+    }) as FakeDb;
+    const coord = createCoordinator({ db: slow, physics: a.physics, events: a.events, workerId: 'worker-1', clock: a.clock });
+    const first = await coord.ensureWorkflow(WF, ['inc-1']);
+    const beat = coord.heartbeatOnce();
+    await new Promise((r) => setTimeout(r, 0));
+    const second = await coord.ensureWorkflow(WF, ['inc-1']); // re-claim: new fencing token
+    expect(second.fencing_token).toBeGreaterThan(first.fencing_token);
+    release();
+    expect(await beat).toBe(true);
+    expect(coord.lease()!.fencing_token).toBe(second.fencing_token);
+    expect(await coord.updateStage('plan', { note: 'after late beat' })).not.toBeNull();
+    expect(coord.isOwner()).toBe(true);
+  });
+
+  it('a successful heartbeat refreshes only the cached lease expiry (version untouched)', async () => {
+    const a = setup();
+    const lease = await a.coord.ensureWorkflow(WF, ['inc-1']);
+    await a.coord.updateStage('plan', { note: 'x' });
+    const version = a.coord.lease()!.workflow.version;
+    a.db.advanceWallMs(5_000);
+    expect(await a.coord.heartbeatOnce()).toBe(true);
+    expect(a.coord.lease()!.lease_expires_unix_ms).toBeGreaterThan(lease.lease_expires_unix_ms);
+    expect(a.coord.lease()!.workflow.version).toBe(version);
+    expect(await a.coord.updateStage('execute', { note: 'y' })).not.toBeNull();
   });
 });

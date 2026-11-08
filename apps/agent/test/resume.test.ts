@@ -4,6 +4,7 @@ import { createCoordinator } from '../src/coordinator.js';
 import { createEventPublisher } from '../src/events.js';
 import { classify, persistedPlanInvalidReason, resumeOpenWorkflows, type ResumeHandoff } from '../src/resume.js';
 import { KILL_POINTS, WF, killable, makePlan, makeWorld, runKillPoint, type KillPoint } from '../scripts/crash-test.js';
+import { withPlainErrors } from './fakes/index.js';
 import { RUN_ID, loadSignalXid79Dest } from './fixtures/index.js';
 
 const failed = (checks: Array<{ name: string; ok: boolean; detail: string }>) =>
@@ -62,6 +63,23 @@ describe('resume', () => {
     expect((await w.db.getWorkflow(WF))?.lease_owner).toBe('worker-1');
     expect(JSON.stringify(w.db.listActions())).toBe(ledgerBefore);
     expect(w.db.calls.some((c) => c.method === 'claimAction' && c.args[2] === 'worker-2')).toBe(false);
+  });
+
+  it.each(['coded', 'message'] as const)('a live lease rejected as a plain db-client error (%s) is left alone, not a crash', async (mode) => {
+    const w = makeWorld();
+    const ev = createEventPublisher({ db: w.db, runId: RUN_ID, clock: w.clock, redact: (s) => s });
+    const owner = createCoordinator({ db: w.db, physics: w.physics, events: ev, workerId: 'worker-1', clock: w.clock });
+    await owner.ensureWorkflow(WF, ['inc-1']);
+    const report = await resumeOpenWorkflows({
+      db: withPlainErrors(w.db, mode),
+      physics: w.physics,
+      events: ev,
+      workerId: 'worker-2',
+      clock: w.clock,
+      sleep: async () => undefined,
+    });
+    expect(report.items).toEqual([expect.objectContaining({ workflow_id: WF, action: 'nothing_to_do', note: 'LEASE_HELD_BY_LIVE_WORKER' })]);
+    expect((await w.db.getWorkflow(WF))?.lease_owner).toBe('worker-1');
   });
 
   it('claimed action on a DB that never releases claims -> needs_operator, escalated, no duplicate', async () => {

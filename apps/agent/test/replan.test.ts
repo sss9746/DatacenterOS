@@ -222,6 +222,65 @@ describe('runReplan cancellation and reservations', () => {
   });
 });
 
+describe('runReplan incident scope (review P3 #3) and persistence (#5)', () => {
+  /** An unrelated XID on r7 becomes its own incident; returns it after `prep` set its state. */
+  async function withOtherIncident(db: FakeDb, plan: PlanResult) {
+    db.injectSignal(loadSignalXid79R7());
+    const t = await runTriage({ db, llm: null, now: () => 0 });
+    const other = t.incidents.find((i) => !plan.plan.incident_ids.includes(i.incident_id))!;
+    expect(other).toBeDefined();
+    return other;
+  }
+  const exec = (plan: PlanResult) => ({ workflow_id: WF, plan_id: plan.plan.plan_id, outcomes: [], aborted: true });
+
+  it('never folds in an already-handled (monitoring) incident or calls it new, and never reopens it', async () => {
+    const { db, plan, replanDeps } = await setup();
+    const other = await withOtherIncident(db, plan);
+    await db.upsertIncident({ ...other, state: 'monitoring', version: other.version + 1 }, []); // a finished workflow handled it
+    const out = await runReplan(replanDeps(), { previous: plan, execution: exec(plan), attempt: 2, reason: 'test' });
+    expect(out.new_incident_ids).not.toContain(other.incident_id);
+    expect(out.new_plan.plan.incident_ids).not.toContain(other.incident_id);
+    expect(db.incidents.get(other.incident_id)?.state).toBe('monitoring');
+    expect((await db.getWorkflow(WF))?.incident_ids).not.toContain(other.incident_id);
+    for (const e of db.agentEvents.filter((x) => x.stage === 'replan')) {
+      expect(e.summary).not.toContain('new incident');
+      expect(e.summary).not.toContain(other.incident_id);
+    }
+  });
+
+  it('never folds in an open incident that another open workflow already lists', async () => {
+    const { db, plan, replanDeps, physics, events } = await setup();
+    const other = await withOtherIncident(db, plan);
+    const owner = createCoordinator({ db, physics, events, workerId: 'worker-9', clock: { unixMs: () => 0, simTimeMs: () => 0 } });
+    await owner.ensureWorkflow('wf-other', [other.incident_id]);
+    const out = await runReplan(replanDeps(), { previous: plan, execution: exec(plan), attempt: 2, reason: 'test' });
+    expect(out.new_incident_ids).not.toContain(other.incident_id);
+    expect(out.new_plan.plan.incident_ids).not.toContain(other.incident_id);
+  });
+
+  it('still folds in a genuinely new open incident nobody handles', async () => {
+    const { db, plan, replanDeps } = await setup();
+    const other = await withOtherIncident(db, plan);
+    const out = await runReplan(replanDeps(), { previous: plan, execution: exec(plan), attempt: 2, reason: 'test' });
+    expect(out.new_incident_ids).toEqual([other.incident_id]);
+  });
+
+  it('persists through the given persist callback (lease owner) instead of writing the workflow itself', async () => {
+    const { db, plan, replanDeps, coord } = await setup();
+    const persisted: Array<{ stage: string; patch: Record<string, unknown> }> = [];
+    const before = db.calls.filter((c) => c.method === 'updateWorkflow').length;
+    const out = await runReplan(
+      { ...replanDeps(), persist: async (stage, patch) => (persisted.push({ stage, patch }), coord.updateStage(stage, patch)) },
+      { previous: plan, execution: exec(plan), attempt: 2, reason: 'test' },
+    );
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ stage: 'replan', patch: { superseded: true, plan_id: out.new_plan.plan.plan_id } });
+    expect(db.calls.filter((c) => c.method === 'updateWorkflow')).toHaveLength(before + 1); // only the coordinator's write
+    expect(coord.isOwner()).toBe(true);
+    expect(await coord.updateStage('execute', { note: 'still coherent' })).not.toBeNull(); // no re-claim needed
+  });
+});
+
 describe('watcher trigger rules', () => {
   it('ignores routine telemetry drift even when the decision epoch advances', async () => {
     const { db, plan } = await setup();

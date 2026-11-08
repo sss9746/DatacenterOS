@@ -2,3 +2,4 @@
 export * from './fake-db.js';
 export * from './fake-physics.js';
 export * from './fake-llm.js';
+export * from './plain-errors.js';

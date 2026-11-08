@@ -19,9 +19,17 @@ import { createCoordinator, DEFAULT_LEASE_MS, type Coordinator, type ExecutionRe
 import type { EventPublisher } from './events.js';
 import { LlmUnavailableError } from './llm.js';
 import { planIncidents, type PlanResult } from './planner.js';
-import type { AgentStage, DbPort, Evidence, LlmPort, PhysicsPort, ToolCallSummary, WorkflowRecord } from './ports.js';
+import { isDbError, type AgentStage, type DbPort, type Evidence, type LlmPort, type PhysicsPort, type ToolCallSummary, type WorkflowRecord } from './ports.js';
 import { createReplanWatcher, runReplan, type ReplanOutcome, type ReplanWatcher } from './replan.js';
-import { outcomesFromLedger, resumeOpenWorkflows, type ResumeContinuation, type ResumeHandoff, type ResumeReport } from './resume.js';
+import {
+  LEASE_HELD_BY_LIVE_WORKER,
+  outcomesFromLedger,
+  resumeOpenWorkflows,
+  resumeWorkflow,
+  type ResumeContinuation,
+  type ResumeHandoff,
+  type ResumeReport,
+} from './resume.js';
 import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, runTriage, SYMPTOM_BUCKET_MS } from './triage.js';
 import { verifyRecovery, type VerificationReport } from './verify.js';
 
@@ -52,6 +60,10 @@ export interface AgentLoopDeps {
   requireApproval?: boolean;
   /** After LlmUnavailableError, skip the LLM for this long (default 60 000 wall ms). */
   llmCooldownMs?: number;
+  /** Retries of a workflow whose drive threw before it is escalated (default 3). */
+  maxWorkflowRetries?: number;
+  /** First retry delay after such a throw; doubles per retry (default 2000 wall ms). */
+  retryBackoffMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -82,11 +94,21 @@ export interface AgentLoop {
 
 // ---------------------------------------------------------------------------------------------- constants
 
+/**
+ * CONTRACTS §0.11 #17: with no model the agent still EXECUTES its deterministic, safety-checked plans; they are
+ * flagged needs_approval for the UI but not held back unless `requireApproval` is true (default false).
+ */
+export const LLM_UNAVAILABLE_NOTICE = 'LLM unavailable: executing deterministic, safety-checked plans; flagged needs_approval';
+
 export const DEFAULT_POLL_MS = 2_000;
 export const DEFAULT_DEBOUNCE_MS = 1_000;
 export const DEFAULT_ACTION_POLL_MS = 500;
 export const DEFAULT_MAX_REPLANS = 3;
 export const DEFAULT_LLM_COOLDOWN_MS = 60_000;
+export const DEFAULT_MAX_WORKFLOW_RETRIES = 3;
+export const DEFAULT_RETRY_BACKOFF_MS = 2_000;
+/** Retry a lease-held workflow this long after its lease expiry (clock skew margin). */
+const LEASE_EXPIRY_MARGIN_MS = 1_000;
 const STOP_WAIT_MS = 5_000;
 const MAX_EVENT_TOOL_CALLS = 12;
 /** Max sim time to wait for an in-flight action before replanning after a restart (coordinator's action timeout). */
@@ -123,7 +145,7 @@ const NO_LLM: LlmPort = {
 };
 
 /** After an LlmUnavailableError, fail fast for `cooldownMs` instead of waiting on timeouts again. */
-export function withLlmCircuitBreaker(inner: LlmPort, cooldownMs: number, now: () => number): LlmPort {
+export function withLlmCircuitBreaker(inner: LlmPort, cooldownMs: number, now: () => number, onOpen?: (e: LlmUnavailableError) => void): LlmPort {
   let openUntil = -Infinity;
   return {
     async chat(req) {
@@ -131,7 +153,10 @@ export function withLlmCircuitBreaker(inner: LlmPort, cooldownMs: number, now: (
       try {
         return await inner.chat(req);
       } catch (e) {
-        if (e instanceof LlmUnavailableError) openUntil = now() + cooldownMs;
+        if (e instanceof LlmUnavailableError) {
+          openUntil = now() + cooldownMs;
+          onOpen?.(e);
+        }
         throw e;
       }
     },
@@ -213,15 +238,27 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   const actionPollMs = deps.actionPollMs ?? DEFAULT_ACTION_POLL_MS;
   const maxReplans = deps.maxReplans ?? DEFAULT_MAX_REPLANS;
   const log = deps.log ?? ((m: string) => console.log(`agent: ${m}`));
-  const llm = deps.llm ? withLlmCircuitBreaker(deps.llm, deps.llmCooldownMs ?? DEFAULT_LLM_COOLDOWN_MS, () => clock.unixMs()) : null;
+  const llm = deps.llm
+    ? withLlmCircuitBreaker(deps.llm, deps.llmCooldownMs ?? DEFAULT_LLM_COOLDOWN_MS, () => clock.unixMs(), (e) => log(`${LLM_UNAVAILABLE_NOTICE} (${e.message})`))
+    : null;
   const now = () => clock.unixMs();
+  const maxWorkflowRetries = deps.maxWorkflowRetries ?? DEFAULT_MAX_WORKFLOW_RETRIES;
+  const retryBackoffMs = deps.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
 
   let inflight: Promise<LoopTickReport> | null = null;
   let started = false;
   let stopping = false;
   let dirty = false;
   let resumeReport: ResumeReport | null = null;
-  let takeovers: string[] = [];
+  /**
+   * Workflows to pick up again on a later tick, keyed by id:
+   *  - `continue`: claimed by resume but not executable there, or its drive threw (retry with backoff)
+   *  - `resume`:   skipped because a live worker held its lease; retried through resume after that lease expires
+   *  - `escalate`: retry cap reached but the escalation write itself failed
+   */
+  const takeovers = new Map<string, { mode: 'continue' | 'resume' | 'escalate'; dueUnixMs: number; reason?: string }>();
+  /** Drive failures per workflow (reset when a drive completes). */
+  const failures = new Map<string, number>();
   let lastSkippedFingerprint: string | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -235,13 +272,17 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     }
   };
 
-  /** Move incidents to `state` (never back to open, never to resolved). Merges no new links. */
+  /**
+   * Move incidents to `state` (never back to open, never to resolved). Merges no new links. `investigating` only
+   * ever starts from `open`: an already-handled incident (monitoring / escalated) is never flipped back.
+   */
   async function setIncidentState(ids: readonly string[], state: Incident['state']): Promise<void> {
     if (ids.length === 0) return;
     const wanted = new Set(ids);
     const sim = clock.simTimeMs();
     for (const inc of await db.listIncidents()) {
       if (!wanted.has(inc.incident_id) || inc.state === state || inc.state === 'resolved') continue;
+      if (state === 'investigating' && inc.state !== 'open') continue;
       const next: Incident = { ...inc, state, version: inc.version + 1, updated_sim_time_ms: Math.max(sim, inc.updated_sim_time_ms) };
       await db.upsertIncident(next, []);
     }
@@ -375,11 +416,26 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         attempt += 1;
         stageRef.stage = 'replan';
         const out = await runReplan(
-          { db, physics, llm, events, workflowId: wfId, runId, workerId, fencingToken: coord.lease()!.fencing_token, now },
+          {
+            db,
+            physics,
+            llm,
+            events,
+            workflowId: wfId,
+            runId,
+            workerId,
+            fencingToken: coord.lease()!.fencing_token,
+            now,
+            // Persist through the lease owner: version + fencing token stay coherent, no re-claim needed.
+            persist: (stage, patch) => coord.updateStage(stage, patch),
+          },
           { previous: current, execution: exec, attempt, reason },
         );
         report.replans.push(out);
-        await coord.ensureWorkflow(wfId, [...out.new_plan.plan.incident_ids]); // runReplan bumped the workflow version
+        if (!coord.isOwner()) {
+          report.status = 'lost_ownership';
+          return;
+        }
         report.new_incident_ids = [...new Set([...report.new_incident_ids, ...out.new_incident_ids])];
         await setIncidentState(out.new_plan.plan.incident_ids, 'investigating');
         current = out.new_plan;
@@ -406,22 +462,128 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
 
   // ------------------------------------------------------------------ takeovers from resume
 
-  /** A workflow resume claimed but could not execute (stage triage/plan/replan): continue it here. */
+  /**
+   * Continue a workflow on the normal path: one resume claimed but could not execute (stage triage/plan/replan),
+   * or one whose earlier drive threw. A persisted plan (stage replan/execute/verify) is reused as-is, so its keys
+   * and payloads are the same: succeeded keys are skipped, running ones waited on, nothing is resubmitted.
+   */
   async function continueTakeover(wfId: string, report: LoopTickReport, stageRef: { stage: AgentStage }): Promise<void> {
     const wf = await db.getWorkflow(wfId);
     if (!wf || wf.stage === 'done' || wf.stage === 'escalated') return;
+    report.workflow_id = wfId;
     const ids = new Set(wf.incident_ids);
     const incidents = (await db.listIncidents()).filter((i) => ids.has(i.incident_id) && i.state !== 'resolved');
-    const attempt = typeof wf.state.attempt === 'number' ? wf.state.attempt : 1;
-    const persisted = wf.stage === 'replan' ? planFromWorkflow(wf) : null;
+    const persisted = wf.stage === 'replan' || wf.stage === 'execute' || wf.stage === 'verify' ? planFromWorkflow(wf) : null;
+    const attempt = persisted
+      ? attemptOf(wf.state, persisted.commands.map((c) => c.command_key))
+      : typeof wf.state.attempt === 'number'
+        ? wf.state.attempt
+        : 1;
     if (incidents.length === 0 && !persisted) {
       const coord = createCoordinator({ db, physics, events, workerId, clock, sleep, leaseMs, pollMs: actionPollMs });
       await coord.ensureWorkflow(wfId, []);
       await coord.updateStage('done', { note: 'no open incidents left after restart' });
       return;
     }
-    await safeEmit('execute', { workflowId: wfId, incidentId: wf.incident_ids[0], summary: `continuing ${wfId} from stage ${wf.stage} after agent restart` });
+    const why = takeovers.get(wfId)?.reason ?? (failures.has(wfId) ? 'after an agent error' : 'after agent restart');
+    await safeEmit('execute', { workflowId: wfId, incidentId: wf.incident_ids[0], actor: 'code', summary: `continuing ${wfId} from stage ${wf.stage} ${why}` });
     await driveWorkflow(wfId, incidents, persisted ? { attempt, plan: persisted } : { attempt }, report, stageRef);
+  }
+
+  /** Retry a workflow that resume left alone because a live worker held its lease (that lease has now expired). */
+  async function resumeTakeover(wfId: string, report: LoopTickReport): Promise<void> {
+    const wf = await db.getWorkflow(wfId);
+    if (!wf || wf.stage === 'done' || wf.stage === 'escalated') return;
+    const item = await resumeWorkflow({ db, physics, events, workerId, clock, sleep, leaseMs, continueExecute: continueResumed }, wf);
+    log(`resume retry: ${wfId} ${item.action}${item.note ? ` (${item.note})` : ''}`);
+    if (item.note === LEASE_HELD_BY_LIVE_WORKER) {
+      await requeueAfterLease(wfId);
+      return;
+    }
+    report.workflow_id = wfId;
+    if (report.status === 'idle') report.status = 'handled';
+    await settleResumed({ worker_id: workerId, items: [item], duplicates_detected: 0 });
+  }
+
+  /** Try `wfId` again (through resume) shortly after its current lease expires. */
+  async function requeueAfterLease(wfId: string): Promise<void> {
+    const wf = await db.getWorkflow(wfId);
+    if (!wf || wf.stage === 'done' || wf.stage === 'escalated') return;
+    takeovers.set(wfId, { mode: 'resume', dueUnixMs: Math.max(now(), wf.lease_expires_unix_ms) + LEASE_EXPIRY_MARGIN_MS });
+  }
+
+  /**
+   * A drive of `wfId` threw: never leave it stranded (open workflow, incidents `investigating`, never picked up
+   * again). Retry it with exponential backoff; after `maxWorkflowRetries` retries escalate it to an operator.
+   */
+  async function onWorkflowError(wfId: string, stage: AgentStage, e: unknown): Promise<void> {
+    const msg = errMsg(e);
+    if (isDbError(e, 'LEASE_HELD')) {
+      // Another (live) worker owns it: not our failure. Look again once its lease could have expired.
+      await requeueAfterLease(wfId).catch((err: unknown) => log(`requeue of ${wfId} failed: ${errMsg(err)}`));
+      return;
+    }
+    const n = (failures.get(wfId) ?? 0) + 1;
+    failures.set(wfId, n);
+    if (n > maxWorkflowRetries) {
+      await escalateStuck(wfId, `agent error during ${stage} persisted after ${maxWorkflowRetries} retries: ${msg}`);
+      return;
+    }
+    const delay = retryBackoffMs * 2 ** (n - 1);
+    takeovers.set(wfId, { mode: 'continue', dueUnixMs: now() + delay, reason: `(retry ${n}/${maxWorkflowRetries} after an agent error)` });
+    await safeEmit(stage, {
+      workflowId: wfId,
+      actor: 'code',
+      summary: `agent error during ${stage}: ${msg}; retry ${n}/${maxWorkflowRetries} in ${Math.round(delay / 1000)} s`,
+    });
+  }
+
+  /** Close a workflow that keeps failing as `escalated` (stage + incidents + feed event). Re-queued if that fails. */
+  async function escalateStuck(wfId: string, reason: string): Promise<void> {
+    try {
+      const coord = createCoordinator({ db, physics, events, workerId, clock, sleep, leaseMs, pollMs: actionPollMs });
+      await coord.ensureWorkflow(wfId, []);
+      await coord.updateStage('escalated', { escalation_reason: reason });
+      const wf = coord.lease()?.workflow ?? (await db.getWorkflow(wfId));
+      const ids = wf?.incident_ids ?? [];
+      await safeEmit('execute', { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: `escalated to operator: ${reason}` });
+      await setIncidentState(ids, 'escalated');
+      takeovers.delete(wfId);
+      failures.delete(wfId);
+      log(`escalated ${wfId}: ${reason}`);
+    } catch (err) {
+      log(`escalation of ${wfId} failed: ${errMsg(err)}; retrying next tick`);
+      if (isDbError(err, 'LEASE_HELD')) await requeueAfterLease(wfId).catch(() => undefined);
+      else takeovers.set(wfId, { mode: 'escalate', dueUnixMs: now(), reason });
+    }
+  }
+
+  /** Run every due takeover, each isolated: one failing workflow never drops the others. */
+  async function runTakeovers(report: LoopTickReport, stageRef: { stage: AgentStage }): Promise<void> {
+    const t = now();
+    const due = [...takeovers].filter(([, p]) => p.dueUnixMs <= t);
+    for (const [wfId, p] of due) {
+      if (stopping) return;
+      try {
+        if (p.mode === 'escalate') {
+          await escalateStuck(wfId, p.reason ?? 'agent error');
+          continue;
+        }
+        if (p.mode === 'resume') {
+          takeovers.delete(wfId);
+          await resumeTakeover(wfId, report);
+          continue;
+        }
+        stageRef.stage = 'plan';
+        await continueTakeover(wfId, report, stageRef);
+        takeovers.delete(wfId);
+        failures.delete(wfId);
+      } catch (e) {
+        takeovers.delete(wfId);
+        log(`takeover of ${wfId} failed during ${stageRef.stage}: ${errMsg(e)}`);
+        await onWorkflowError(wfId, stageRef.stage, e);
+      }
+    }
   }
 
   /** Wait (DB-supervised) until the given in-flight keys are terminal, keeping the workflow lease alive. */
@@ -466,18 +628,23 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       await driveWorkflow(wfId, incidents, start, report, stageRef);
     } catch (e) {
       log(`resume continuation of ${wfId} failed during ${stageRef.stage}: ${errMsg(e)}`);
-      await safeEmit(stageRef.stage, { workflowId: wfId, summary: `agent error during ${stageRef.stage} after restart: ${errMsg(e)}` });
+      await onWorkflowError(wfId, stageRef.stage, e); // queued for retry (or escalated after the cap)
       return { escalated: false, aborted: true, note: 'CONTINUATION_ERROR' };
     }
+    failures.delete(wfId);
     const aborted = report.status === 'lost_ownership' || report.status === 'stopped';
     return { escalated: report.escalated, aborted, ...(report.replans.length > 0 ? { note: `REPLANNED x${report.replans.length}` } : {}) };
   }
 
-  /** Mark incidents of workflows that resume finished (done/escalated). */
+  /** Mark incidents of workflows that resume finished (done/escalated); queue the ones it handed over or skipped. */
   async function settleResumed(r: ResumeReport): Promise<void> {
     for (const item of r.items) {
       if (item.action === 'took_over') {
-        takeovers.push(item.workflow_id);
+        takeovers.set(item.workflow_id, { mode: 'continue', dueUnixMs: now(), reason: 'after agent restart' });
+        continue;
+      }
+      if (item.note === LEASE_HELD_BY_LIVE_WORKER) {
+        await requeueAfterLease(item.workflow_id);
         continue;
       }
       if (item.action !== 'resumed_execute' && item.action !== 'resumed_verify' && item.action !== 'escalated') continue;
@@ -508,12 +675,12 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   async function tick(): Promise<LoopTickReport> {
     const report = emptyReport('idle');
     const stageRef: { stage: AgentStage } = { stage: 'triage' };
+    let activeWf: string | null = null;
     try {
-      const pending = takeovers;
-      takeovers = [];
-      for (const wfId of pending) await continueTakeover(wfId, report, stageRef);
+      await runTakeovers(report, stageRef);
       if (report.workflow_id) report.status = report.status === 'idle' ? 'handled' : report.status;
       if (stopping) return report;
+      stageRef.stage = 'triage';
 
       const gate = await precheck();
       if (!gate.needed) return report;
@@ -553,12 +720,15 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         return report;
       }
       report.status = 'handled';
+      activeWf = wfId;
       await driveWorkflow(wfId, batch, { attempt: 1 }, report, stageRef);
+      failures.delete(wfId);
       return report;
     } catch (e) {
       const msg = errMsg(e);
       log(`error during ${stageRef.stage}: ${msg}`);
-      await safeEmit(stageRef.stage, { workflowId: report.workflow_id, summary: `agent error during ${stageRef.stage}: ${msg}` });
+      if (activeWf) await onWorkflowError(activeWf, stageRef.stage, e); // retry with backoff, escalate after the cap
+      else await safeEmit(stageRef.stage, { workflowId: report.workflow_id, actor: 'code', summary: `agent error during ${stageRef.stage}: ${msg}` });
       return { ...report, status: 'error', error: msg };
     }
   }

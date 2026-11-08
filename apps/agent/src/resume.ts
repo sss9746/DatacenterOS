@@ -96,6 +96,8 @@ export interface ResumeContinuation {
 const POLL_MS = 500;
 /** DB claim lease on a claimed-but-never-started action (ARCHITECTURE §6 lease crash rule). */
 export const CLAIM_LEASE_MS = 15_000;
+/** Note on a ResumeItem whose workflow lease is held by a live worker (it was left alone). */
+export const LEASE_HELD_BY_LIVE_WORKER = 'LEASE_HELD_BY_LIVE_WORKER';
 
 const realSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -321,7 +323,7 @@ async function resumeOne(ctx: Ctx, wf: WorkflowRecord): Promise<ResumeItem> {
   if (wf.stage === 'escalated' || wf.stage === 'done') return { ...base, action: 'nothing_to_do', note: 'WAITING_FOR_OPERATOR' };
 
   const coord = createCoordinator({ db: ctx.db, physics: ctx.physics, events: ctx.events, workerId: ctx.workerId, clock: ctx.clock, sleep: ctx.sleep, leaseMs: ctx.leaseMs });
-  if (!(await acquire(ctx, coord, wf))) return { ...base, action: 'nothing_to_do', note: 'LEASE_HELD_BY_LIVE_WORKER' };
+  if (!(await acquire(ctx, coord, wf))) return { ...base, action: 'nothing_to_do', note: LEASE_HELD_BY_LIVE_WORKER };
 
   const stage = coord.lease()?.workflow.stage ?? wf.stage;
   const state = coord.state();
@@ -394,6 +396,14 @@ async function countDuplicates(db: DbPort, keys: string[]): Promise<number> {
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
+
+/**
+ * Resume ONE open workflow (same rules as resumeOpenWorkflows). The agent loop uses it to retry a workflow that
+ * was skipped as LEASE_HELD_BY_LIVE_WORKER once that lease has expired.
+ */
+export async function resumeWorkflow(deps: ResumeDeps, wf: WorkflowRecord): Promise<ResumeItem> {
+  return resumeOne({ ...deps, sleep: deps.sleep ?? realSleep, leaseMs: deps.leaseMs ?? DEFAULT_LEASE_MS }, wf);
+}
 
 export async function resumeOpenWorkflows(deps: ResumeDeps): Promise<ResumeReport> {
   const ctx: Ctx = { ...deps, sleep: deps.sleep ?? realSleep, leaseMs: deps.leaseMs ?? DEFAULT_LEASE_MS };

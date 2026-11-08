@@ -13,7 +13,7 @@ import { validatePayload, type ActionCommand, type Checkpoint, type Incident, ty
 import { z } from 'zod';
 import { summarizeToolCall } from './events.js';
 import type { AgentActor, DbPort, Evidence, LlmChatResponse, LlmPort, PhysicsPort, PlanMetrics, ToolCallSummary } from './ports.js';
-import { CHOOSE_OPTIONS_TOOL, CHOOSE_OPTIONS_TOOL_NAME, PLANNER_SYSTEM_PROMPT, buildPlannerUserMessage } from './prompts/planner.js';
+import { CHOOSE_OPTIONS_TOOL, CHOOSE_OPTIONS_TOOL_NAME, PLANNER_MAX_TOKENS, PLANNER_SYSTEM_PROMPT, buildPlannerUserMessage } from './prompts/planner.js';
 import { buildCommand, commandKey, type PartialCommand } from './tools/command.js';
 import { placementCandidates } from './tools/placement-tool.js';
 import { GPU_THROTTLE_TEMP_C, indexSnapshot, type SnapshotIndex } from './tools/snapshot-index.js';
@@ -356,19 +356,39 @@ export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]):
 
 // ---------------------------------------------------------------------------------------------- Nemotron choice
 
-const choiceSchema = z.object({
-  choices: z
-    .array(
-      z.object({
-        job_id: z.string().min(1),
-        option_id: z.string().min(1),
-        needs_approval: z.boolean(),
-        explanation: z.string().min(1),
-      }),
-    )
-    .min(1),
+const choiceItemSchema = z.object({
+  job_id: z.string().min(1),
+  option_id: z.string().min(1),
+  needs_approval: z.boolean(),
+  explanation: z.string().min(1),
 });
-type Choice = z.infer<typeof choiceSchema>['choices'][number];
+const choiceSchema = z.object({ choices: z.array(z.unknown()).min(1) });
+type Choice = z.infer<typeof choiceItemSchema>;
+
+/**
+ * Collapse every choose_options call into one choice list (Nemotron sometimes repeats the call): each call is
+ * parsed, invalid calls / items are dropped individually, and per job_id the first valid choice wins. Same rule
+ * as triage's collectAssessmentItems.
+ */
+export function collectChoices(calls: readonly { name: string; argumentsJson: string }[]): Choice[] {
+  const byJob = new Map<string, Choice>();
+  for (const call of calls) {
+    if (call.name !== CHOOSE_OPTIONS_TOOL_NAME) continue;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(call.argumentsJson);
+    } catch {
+      continue;
+    }
+    const parsed = choiceSchema.safeParse(raw);
+    if (!parsed.success) continue;
+    for (const item of parsed.data.choices) {
+      const c = choiceItemSchema.safeParse(item);
+      if (c.success && !byJob.has(c.data.job_id)) byJob.set(c.data.job_id, c.data);
+    }
+  }
+  return [...byJob.values()];
+}
 
 const round = (n: number) => Math.round(n * 10) / 10;
 const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 1)}…`);
@@ -426,25 +446,17 @@ async function askNemotron(
       ],
       tools: [CHOOSE_OPTIONS_TOOL],
       toolChoice: 'required',
+      maxTokens: PLANNER_MAX_TOKENS,
     });
   } catch (e) {
     calls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, `LLM unavailable: ${e instanceof Error ? e.name : 'error'}`, 'code'));
     return null;
   }
-  const call = res.toolCalls.find((c) => c.name === CHOOSE_OPTIONS_TOOL_NAME);
-  let parsed: ReturnType<typeof choiceSchema.safeParse> | null = null;
-  if (call) {
-    try {
-      parsed = choiceSchema.safeParse(JSON.parse(call.argumentsJson));
-    } catch {
-      parsed = null;
-    }
-  }
-  if (!parsed?.success) {
+  const choices = collectChoices(res.toolCalls);
+  if (choices.length === 0) {
     calls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, 'invalid or missing choose_options call', 'code'));
     return null;
   }
-  const choices = parsed.data.choices;
   calls.push(
     summarizeToolCall(
       CHOOSE_OPTIONS_TOOL_NAME,
@@ -503,20 +515,43 @@ function decideJob(opts: RankedOption[], choice: Choice | undefined, llmUp: bool
   };
 }
 
-/** No two jobs may move onto the same GPUs: lower-priority jobs fall back to their next non-conflicting option. */
-function resolveConflicts(plans: JobPlan[], ranked: Map<string, RankedOption[]>): JobPlan[] {
+const isOp = (o: RankedOption, op: ActionCommand['operation']): boolean => o.commands.some((c) => c.operation === op);
+
+/**
+ * No two jobs may move onto the same GPUs: lower-priority jobs fall back to their next non-conflicting safe
+ * option. If none is left, the job never takes a clashing choice: it falls back to keep_running (no commands),
+ * else pause, else escalate, flagged needs_approval with the reason in the explanation.
+ */
+export function resolveConflicts(plans: JobPlan[], ranked: Map<string, RankedOption[]>): JobPlan[] {
   const claimed = new Set<string>();
   return plans.map((p) => {
     const clash = (o: RankedOption) => destinations(o).some((g) => claimed.has(g));
+    const opts = ranked.get(p.job_id) ?? [p.chosen, ...p.alternatives];
     let jp = p;
     if (clash(p.chosen)) {
-      const alt = (ranked.get(p.job_id) ?? []).find((o) => !o.excluded_reason && !clash(o)) ?? p.chosen;
-      jp = {
-        ...p,
-        chosen: alt,
-        decided_by: 'deterministic',
-        explanation: `${p.chosen.label} conflicts with a higher-priority job's destination; using ${alt.label}`,
-      };
+      const alt = opts.find((o) => !o.excluded_reason && !clash(o));
+      if (alt) {
+        jp = {
+          ...p,
+          chosen: alt,
+          decided_by: 'deterministic',
+          needs_approval: p.needs_approval || requiresApproval(alt),
+          explanation: `${p.chosen.label} conflicts with a higher-priority job's destination; using ${alt.label}`,
+        };
+      } else {
+        const floor =
+          opts.find((o) => o.commands.length === 0) ??
+          opts.find((o) => isOp(o, 'pause_job') && !clash(o)) ??
+          opts.find((o) => isOp(o, 'escalate') && !clash(o));
+        const chosen: RankedOption = floor ?? { ...p.chosen, option_id: `${p.job_id}:keep`, label: `${p.job_id} keep running`, commands: [] };
+        jp = {
+          ...p,
+          chosen,
+          decided_by: 'deterministic',
+          needs_approval: true,
+          explanation: `${p.chosen.label} conflicts with a higher-priority job's destination and no safe non-conflicting option is left; ${chosen.label}, operator approval needed`,
+        };
+      }
     }
     for (const g of destinations(jp.chosen)) claimed.add(g);
     return { ...jp, alternatives: (ranked.get(p.job_id) ?? []).filter((o) => o.option_id !== jp.chosen.option_id) };

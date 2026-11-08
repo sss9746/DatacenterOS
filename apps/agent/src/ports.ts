@@ -92,7 +92,7 @@ export type AgentStage = 'triage' | 'diagnose' | 'plan' | 'safety' | 'execute' |
  */
 export type WorkflowStage = 'idle' | AgentStage | 'escalated' | 'done';
 
-/** F-NV1 actor tag (CONTRACTS �0.8). */
+/** F-NV1 actor tag (CONTRACTS �0.8). */
 export type AgentActor = 'nemotron' | 'code';
 
 /** One tool call shown in the F-NV1 feed (CONTRACTS §0.8 `tool_calls_json` item). Local until @dcos/db-client exists. */
@@ -191,18 +191,36 @@ export type DbChange =
   | { kind: 'signal'; signal: SignalEvent }
   | { kind: 'action_status'; status: ActionStatus };
 
-/** Error codes a DbPort implementation throws (as DbError). Local until @dcos/db-client exists. */
-export type DbErrorCode =
-  | 'COMMAND_KEY_COLLISION' // same command_key, different payload hash
-  | 'SAFETY_REJECTED' // legacy/unused since §0.11 #3: a safety deny is RETURNED as a failed ActionStatus, not thrown
-  | 'VERSION_CONFLICT' // CAS expected_version mismatch
-  | 'STALE_FENCING_TOKEN' // token older than the current lease
-  | 'LEASE_HELD' // another worker holds an unexpired workflow lease
-  | 'LEASE_EXPIRED' // caller's workflow lease has expired
-  | 'INVALID_TRANSITION' // lifecycle step not allowed from the current status
-  | 'NOT_FOUND'
-  | 'INVALID_PAYLOAD'; // failed validatePayload
+/**
+ * Error codes a DbPort implementation rejects with (CONTRACTS §0.11 #14). Local until @dcos/db-client exists.
+ *  - COMMAND_KEY_COLLISION: same command_key, different payload hash
+ *  - SAFETY_REJECTED: legacy/unused since §0.11 #3 (a safety deny is RETURNED as a failed ActionStatus, not thrown)
+ *  - VERSION_CONFLICT: CAS expected_version mismatch
+ *  - STALE_FENCING_TOKEN: token older than the current lease
+ *  - LEASE_HELD: another worker holds an unexpired workflow lease
+ *  - LEASE_EXPIRED: caller's workflow lease has expired
+ *  - INVALID_TRANSITION: lifecycle step not allowed from the current status
+ *  - NOT_FOUND
+ *  - INVALID_PAYLOAD: failed validatePayload
+ *  - UNAUTHORIZED: caller's role may not call this reducer
+ */
+export const DB_ERROR_CODES = [
+  'COMMAND_KEY_COLLISION',
+  'SAFETY_REJECTED',
+  'VERSION_CONFLICT',
+  'STALE_FENCING_TOKEN',
+  'LEASE_HELD',
+  'LEASE_EXPIRED',
+  'INVALID_TRANSITION',
+  'NOT_FOUND',
+  'INVALID_PAYLOAD',
+  'UNAUTHORIZED',
+] as const;
+export type DbErrorCode = (typeof DB_ERROR_CODES)[number];
 
+const DB_ERROR_CODE_SET: ReadonlySet<string> = new Set(DB_ERROR_CODES);
+
+/** Test/fake implementation of a coded DB error. Real @dcos/db-client errors are plain Errors with `.code`. */
 export class DbError extends Error {
   readonly code: DbErrorCode;
   readonly violations: string[];
@@ -221,8 +239,40 @@ export class DbError extends Error {
 export const isSafetyRejected = (status: ActionStatus): boolean =>
   status.status === 'failed' && status.reason_code === 'SAFETY_REJECTED';
 
-export const isDbError = (e: unknown, code?: DbErrorCode): e is DbError =>
-  e instanceof DbError && (code === undefined || e.code === code);
+/** Structural shape of any coded DB rejection (DbError, a db-client Error with `.code`, or a reducer message). */
+export interface DbErrorLike {
+  message?: string;
+  code?: unknown;
+  violations?: unknown;
+}
+
+/** `"<CODE>: ..."` (optionally behind an `Error: ` prefix), the reducer error-string convention (§0.11 #14). */
+const CODE_PREFIX = /^\s*(?:[A-Za-z]*Error:\s*)?([A-Z][A-Z_]+):/;
+
+/**
+ * The DbErrorCode of `e`, or null. Duck-typed, never `instanceof` (CONTRACTS §0.11 #14): a string `code` in the
+ * known set wins; when `code` is absent the code is parsed from a message shaped `"<CODE>: ..."`. A plain
+ * string rejection is parsed the same way.
+ */
+export function dbErrorCode(e: unknown): DbErrorCode | null {
+  if (typeof e === 'string') {
+    const m = CODE_PREFIX.exec(e);
+    return m && DB_ERROR_CODE_SET.has(m[1]!) ? (m[1] as DbErrorCode) : null;
+  }
+  if (typeof e !== 'object' || e === null) return null;
+  const { code, message } = e as DbErrorLike;
+  if (typeof code === 'string' && DB_ERROR_CODE_SET.has(code)) return code as DbErrorCode;
+  if (code !== undefined && code !== null && code !== '') return null; // some other coded error (e.g. ECONNRESET)
+  if (typeof message !== 'string') return null;
+  const m = CODE_PREFIX.exec(message);
+  return m && DB_ERROR_CODE_SET.has(m[1]!) ? (m[1] as DbErrorCode) : null;
+}
+
+/** True when `e` is a coded DB rejection (optionally with exactly `code`). Use `dbErrorCode(e)` to read the code. */
+export const isDbError = (e: unknown, code?: DbErrorCode): e is DbErrorLike => {
+  const c = dbErrorCode(e);
+  return c !== null && (code === undefined || c === code);
+};
 
 // ---------------------------------------------------------------------------
 // DbPort — the agent-facing @dcos/db-client wrapper names (CONTRACTS §0.6, frozen)

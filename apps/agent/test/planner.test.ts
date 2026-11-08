@@ -6,12 +6,15 @@ import {
   PLANNER_HORIZON_ASSUMPTION,
   RANKING_ASSUMPTION,
   planIncidents,
+  resolveConflicts,
   riskTier,
   riskTolerance,
+  type JobPlan,
   type PlanResult,
+  type RankedOption,
 } from '../src/planner.js';
 import type { LlmChatRequest } from '../src/ports.js';
-import { CHOOSE_OPTIONS_TOOL_NAME } from '../src/prompts/planner.js';
+import { CHOOSE_OPTIONS_TOOL_NAME, PLANNER_MAX_TOKENS } from '../src/prompts/planner.js';
 import { FakeDb, FakeLlm, FakePhysics } from './fakes/index.js';
 import { RUN_ID, loadPumpDegradedSnapshot } from './fixtures/index.js';
 
@@ -436,5 +439,104 @@ describe('F-NV1 actor tags (planner)', () => {
       expect(r.summary!.startsWith('deterministic:')).toBe(true);
       expect(r.summary!.length).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+describe('choose_options robustness (review P3 #8)', () => {
+  const choice = (job_id: string, option_id: string) => ({ job_id, option_id, needs_approval: false, explanation: `test ${option_id}` });
+
+  it('dedupes duplicate choose_options calls: per job the first valid choice wins', async () => {
+    let firstA = '';
+    let secondA = '';
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) => {
+        const jobs = parseInput(req).jobs;
+        const a = jobs.find((j) => j.job_id === 'job-a')!;
+        const b = jobs.find((j) => j.job_id === 'job-b')!;
+        firstA = a.options[1]!.option_id;
+        secondA = a.options[0]!.option_id;
+        return FakeLlm.toolCalls([
+          { name: CHOOSE_OPTIONS_TOOL_NAME, args: { choices: [choice('job-a', firstA)] } },
+          { name: CHOOSE_OPTIONS_TOOL_NAME, args: { choices: [choice('job-a', secondA), choice('job-b', b.options[0]!.option_id)] } },
+        ]);
+      },
+    ]);
+    const r = await run(llm);
+    expect(firstA).not.toBe(secondA);
+    expect(jobPlan(r, 'job-a').chosen.option_id).toBe(firstA);
+    expect(jobPlan(r, 'job-a').decided_by).toBe('nemotron');
+    expect(jobPlan(r, 'job-b').decided_by).toBe('nemotron');
+  });
+
+  it('an invalid first call does not hide a valid second one', async () => {
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) =>
+        FakeLlm.toolCalls([
+          { name: CHOOSE_OPTIONS_TOOL_NAME, args: '{"choices": "nope"' },
+          { name: CHOOSE_OPTIONS_TOOL_NAME, args: { choices: parseInput(req).jobs.map((j) => choice(j.job_id, j.options[0]!.option_id)) } },
+        ]),
+    ]);
+    const r = await run(llm);
+    expect(r.used_llm).toBe(true);
+    expect(r.job_plans.every((p) => p.decided_by === 'nemotron')).toBe(true);
+  });
+
+  it('passes maxTokens: PLANNER_MAX_TOKENS to the LLM', async () => {
+    const llm = new FakeLlm([pickTop()]);
+    await run(llm);
+    expect(llm.requests[0]!.maxTokens).toBe(PLANNER_MAX_TOKENS);
+  });
+});
+
+describe('resolveConflicts never falls back to a clashing choice (review P3 #7)', () => {
+  const metrics = { expected_completion_delay_sim_s: 0, expected_lost_work_units: 0, expected_gpu_busy_waste_s: 0, failure_risk_estimate: 0, violations: [], assumptions: [] };
+  const opt = (job_id: string, suffix: string, commands: Array<{ operation: string; dest?: string[] }>, extra: Partial<RankedOption> = {}): RankedOption =>
+    ({
+      option_id: `${job_id}:${suffix}`,
+      label: `${job_id} ${suffix}`,
+      job_id,
+      commands: commands.map((c) => ({ operation: c.operation, job_id, arguments: c.dest ? { destination_gpu_ids: c.dest } : {} })),
+      metrics,
+      safety: [],
+      rank: 1,
+      job_risk: 0,
+      ...extra,
+    }) as unknown as RankedOption;
+  const plan = (chosen: RankedOption, needs_approval = false): JobPlan => ({
+    job_id: chosen.job_id,
+    chosen,
+    alternatives: [],
+    decided_by: 'nemotron',
+    needs_approval,
+    explanation: 'x',
+  });
+  const destsOf = (o: RankedOption) => o.commands.flatMap((c) => (c.arguments.destination_gpu_ids as string[] | undefined) ?? []);
+
+  it('when every safe option clashes and keep_running is excluded, falls back to keep_running with needs_approval', () => {
+    const aMove = opt('job-a', 'move', [{ operation: 'migrate_restart', dest: ['g1', 'g2'] }]);
+    const bMove = opt('job-b', 'move', [{ operation: 'migrate_restart', dest: ['g2'] }]);
+    const bKeep = opt('job-b', 'keep', [], { excluded_reason: 'HORIZON_VIOLATION', rank: 2 });
+    const ranked = new Map([
+      ['job-a', [aMove]],
+      ['job-b', [bMove, bKeep]],
+    ]);
+    const out = resolveConflicts([plan(aMove), plan(bMove)], ranked);
+    const b = out.find((p) => p.job_id === 'job-b')!;
+    expect(destsOf(b.chosen).some((g) => destsOf(aMove).includes(g))).toBe(false);
+    expect(b.chosen.option_id).toBe('job-b:keep');
+    expect(b.needs_approval).toBe(true);
+    expect(b.decided_by).toBe('deterministic');
+    expect(b.explanation).toMatch(/conflicts with a higher-priority job's destination/);
+    expect(b.explanation).toMatch(/approval/);
+  });
+
+  it('without a keep option it falls back to pause (never the clashing move)', () => {
+    const aMove = opt('job-a', 'move', [{ operation: 'migrate_restart', dest: ['g1'] }]);
+    const bMove = opt('job-b', 'move', [{ operation: 'migrate_restart', dest: ['g1'] }]);
+    const bPause = opt('job-b', 'pause', [{ operation: 'pause_job' }], { excluded_reason: 'NEEDS_OPERATOR', rank: 2 });
+    const out = resolveConflicts([plan(aMove), plan(bMove)], new Map([['job-a', [aMove]], ['job-b', [bMove, bPause]]]));
+    const b = out.find((p) => p.job_id === 'job-b')!;
+    expect(b.chosen.option_id).toBe('job-b:pause');
+    expect(b.needs_approval).toBe(true);
   });
 });

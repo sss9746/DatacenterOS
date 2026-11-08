@@ -21,7 +21,16 @@ import type { ActionCommand, ActionStatus, Incident, ObservedSnapshot, SignalEve
 import type { CommandOutcome, ExecutablePlan, ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
 import { planIncidents, planNarrative, type JobPlan, type PlanResult, type RankedOption } from './planner.js';
-import { isDbError, type DbChange, type DbPort, type LlmPort, type PhysicsPort, type ToolCallSummary } from './ports.js';
+import {
+  dbErrorCode,
+  type DbChange,
+  type DbPort,
+  type LlmPort,
+  type PhysicsPort,
+  type ToolCallSummary,
+  type WorkflowRecord,
+  type WorkflowStage,
+} from './ports.js';
 import { runTriage } from './triage.js';
 
 // ---------------------------------------------------------------------------------------------- watcher
@@ -285,6 +294,12 @@ export interface ReplanDeps {
   workerId: string;
   fencingToken: bigint;
   now: () => number;
+  /**
+   * Persist the supersession through the workflow owner (the coordinator's `updateStage`), so version and
+   * fencing token stay coherent with its cached lease. Returns null when ownership was lost. Without it,
+   * runReplan writes the workflow itself (db.getWorkflow + db.updateWorkflow with `fencingToken`).
+   */
+  persist?: (stage: WorkflowStage, patch: Record<string, unknown>) => Promise<WorkflowRecord | null>;
 }
 
 export interface ReplanInput {
@@ -345,7 +360,7 @@ async function cancelSuperseded(deps: ReplanDeps, commands: ActionCommand[]): Pr
       if (c.status === 'running' || c.status === 'claimed') reserve(cmd);
     } catch (e) {
       // It moved on (started) or our token does not match its claim: treat it as still holding its GPUs.
-      out.calls.push({ tool: 'cancel_action', args_summary: cmd.command_key, result_summary: isDbError(e) ? e.code : 'error' });
+      out.calls.push({ tool: 'cancel_action', args_summary: cmd.command_key, result_summary: dbErrorCode(e) ?? 'error' });
       const re = await deps.db.getActionStatus(cmd.command_key).catch(() => null);
       if (re?.status === 'succeeded') out.succeeded.push(cmd.command_key);
       else if (re?.status !== 'cancelled' && re?.status !== 'failed') reserve(cmd);
@@ -380,6 +395,12 @@ async function enforceNoDoubleAllocation(db: DbPort, result: PlanResult, reserve
   return { ...result, plan, commands, job_plans: jobPlans };
 }
 
+/** Incident ids listed by open workflows other than `workflowId`. */
+async function incidentsOfOtherWorkflows(db: DbPort, workflowId: string): Promise<Set<string>> {
+  const open = await db.listOpenWorkflows().catch(() => [] as WorkflowRecord[]);
+  return new Set(open.filter((w) => w.workflow_id !== workflowId).flatMap((w) => w.incident_ids));
+}
+
 const succeededKeys = (outcomes: CommandOutcome[]): string[] =>
   outcomes.filter((o) => o.status === 'succeeded').map((o) => o.command_key);
 
@@ -402,14 +423,20 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
   // (3) triage again: the new failure becomes its own incident
   const triage = await runTriage({ db, llm: deps.llm, now: deps.now });
   const previousIds = new Set<string>(input.previous.plan.incident_ids);
-  const newIncidentIds = triage.incidents.map((i) => i.incident_id).filter((id) => !previousIds.has(id));
-
-  // (4) plan over every open incident of this workflow, with new command keys
-  const wanted = new Set<string>([...previousIds, ...newIncidentIds]);
   const all = await db.listIncidents();
   const byId = new Map<string, Incident>(all.map((i) => [i.incident_id, i]));
   for (const i of triage.incidents) if (!byId.has(i.incident_id)) byId.set(i.incident_id, i);
+  // Fold in only genuinely new work: incidents still `open` that no other open workflow lists (the same filter
+  // the loop's tick uses). Already-handled ones (monitoring / escalated by a finished workflow) stay out.
+  const otherListed = await incidentsOfOtherWorkflows(db, workflowId);
+  const newIncidentIds = [...new Set(triage.incidents.map((i) => i.incident_id))].filter(
+    (id) => !previousIds.has(id) && !otherListed.has(id) && byId.get(id)?.state === 'open',
+  );
+
+  // (4) plan over every open incident of this workflow, with new command keys
+  const wanted = new Set<string>([...previousIds, ...newIncidentIds]);
   const open = [...wanted].map((id) => byId.get(id)).filter((i): i is Incident => !!i && i.state !== 'resolved');
+  const previousAny = [...previousIds].map((id) => byId.get(id)).filter((i): i is Incident => !!i);
   const planned = await planIncidents(
     {
       db,
@@ -420,7 +447,7 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
       attempt: input.attempt,
       reservedGpuIds: [...pass.reserved].sort(),
     },
-    { incidents: open.length > 0 ? open : [...triage.incidents] },
+    { incidents: open.length > 0 ? open : previousAny.length > 0 ? previousAny : [...triage.incidents] },
   );
   const newPlan = await enforceNoDoubleAllocation(db, planned, pass.reserved);
 
@@ -430,23 +457,23 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
   // (6) persist the supersession
   const wf = await db.getWorkflow(workflowId);
   const incidentIds = [...new Set([...(wf?.incident_ids ?? []), ...newPlan.plan.incident_ids])];
-  if (wf) {
-    await db.updateWorkflow(workflowId, wf.version, deps.fencingToken, 'replan', {
-      previous_plan_id: previousPlanId,
-      superseded: true,
-      cancelled_keys: pass.cancelled,
-      kept_keys: kept,
-      unsubmitted_keys: pass.unsubmitted,
-      new_plan_id: newPlan.plan.plan_id,
-      plan_id: newPlan.plan.plan_id,
-      incident_ids: incidentIds,
-      new_incident_ids: newIncidentIds,
-      attempt: input.attempt,
-      reason: input.reason,
-      command_keys: newPlan.commands.map((c) => c.command_key),
-      commands: newPlan.commands,
-    });
-  }
+  const patch = {
+    previous_plan_id: previousPlanId,
+    superseded: true,
+    cancelled_keys: pass.cancelled,
+    kept_keys: kept,
+    unsubmitted_keys: pass.unsubmitted,
+    new_plan_id: newPlan.plan.plan_id,
+    plan_id: newPlan.plan.plan_id,
+    incident_ids: incidentIds,
+    new_incident_ids: newIncidentIds,
+    attempt: input.attempt,
+    reason: input.reason,
+    command_keys: newPlan.commands.map((c) => c.command_key),
+    commands: newPlan.commands,
+  };
+  if (deps.persist) await deps.persist('replan', patch);
+  else if (wf) await db.updateWorkflow(workflowId, wf.version, deps.fencingToken, 'replan', patch);
 
   const ledgerSummary =
     `superseded ${previousPlanId} -> ${newPlan.plan.plan_id}; cancelled ${pass.cancelled.length}, kept ${kept.length}` +

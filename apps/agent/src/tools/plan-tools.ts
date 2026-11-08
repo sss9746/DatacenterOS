@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { validatePayload, type ActionCommand, type PlanCandidate } from '@dcos/contracts';
 import { z } from 'zod';
-import { isDbError } from '../ports.js';
+import { dbErrorCode, isDbError } from '../ports.js';
 import { CommandBuildError, buildCommand, type ActionOperation } from './command.js';
 import { indexSnapshot } from './snapshot-index.js';
 import { ToolError, clipSummary, type ToolSpec } from './types.js';
@@ -159,7 +159,7 @@ export const proposePlanTool: ToolSpec<z.infer<typeof proposeSchema>> = {
     try {
       await db.submitPlan(plan);
     } catch (e) {
-      if (isDbError(e)) throw new ToolError(e.message);
+      if (isDbError(e)) throw new ToolError(e.message ?? String(dbErrorCode(e)));
       throw e;
     }
     return {

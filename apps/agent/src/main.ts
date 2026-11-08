@@ -2,7 +2,7 @@
 // Exit codes: 0 clean stop, 1 config error / crash, 3 a lane's real adapter is not shipped yet.
 
 import { hostname } from 'node:os';
-import { createAgentLoop } from './agent-loop.js';
+import { createAgentLoop, LLM_UNAVAILABLE_NOTICE } from './agent-loop.js';
 import { isAdapterNotReady } from './adapters/errors.js';
 import { createDbPort, loadDbClient } from './adapters/db.js';
 import { createPhysicsPort } from './adapters/physics.js';
@@ -19,7 +19,7 @@ const log = (m: string) => console.log(`agent: ${m}`);
 
 function buildLlm(cfg: AgentConfig): LlmPort | null {
   if (!cfg.NIM_API_KEY || !cfg.NIM_MODEL) {
-    log('WARNING: NIM_API_KEY / NIM_MODEL not set; running deterministic (no Nemotron), plans flagged needs_approval');
+    log(`WARNING: NIM_API_KEY / NIM_MODEL not set. ${LLM_UNAVAILABLE_NOTICE} (requireApproval=false)`);
     return null;
   }
   const nim = createNimLlm(cfg, { onEvent: (e) => log(`nim ${e.type} (${e.endpoint} ${e.model})`) });

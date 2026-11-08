@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { ActionCommand, SignalEvent } from '@dcos/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createAgentLoop, withLlmCircuitBreaker, type AgentLoop, type AgentLoopDeps } from '../src/agent-loop.js';
+import { createAgentLoop, LLM_UNAVAILABLE_NOTICE, withLlmCircuitBreaker, type AgentLoop, type AgentLoopDeps } from '../src/agent-loop.js';
 import { AdapterNotReadyError } from '../src/adapters/errors.js';
 import { createDbPort, DB_PORT_METHODS } from '../src/adapters/db.js';
 import { createPhysicsPort, PHYSICS_NOT_READY_MESSAGE } from '../src/adapters/physics.js';
@@ -16,15 +18,16 @@ import { RUN_ID, loadDemoSnapshot, loadPumpDegradedSnapshot, loadSignalXid79Dest
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
-function world() {
+/** `wallNow`: one wall clock shared by the DB leases and the loop (default: DB leases on FakeDb's clock, loop at 0). */
+function world(wallNow?: () => number) {
   const physics = new FakePhysics();
-  const db = new FakeDb({ snapshot: loadPumpDegradedSnapshot(), physics });
+  const db = new FakeDb({ snapshot: loadPumpDegradedSnapshot(), physics, ...(wallNow ? { now: wallNow } : {}) });
   const simNow = () => {
     let t = 0;
     db.mutateSnapshot((s) => (t = s.clock.sim_time_ms));
     return t;
   };
-  const clock = { unixMs: () => 0, simTimeMs: simNow };
+  const clock = { unixMs: wallNow ?? (() => 0), simTimeMs: simNow };
   const hooks: Array<() => Promise<void> | void> = [];
   const sleep = async () => {
     db.tick(1000);
@@ -346,6 +349,116 @@ describe('createAgentLoop.start (resume on boot)', () => {
     w.db.bumpDecisionEpoch();
     await new Promise((r) => setTimeout(r, 40));
     expect(w.db.calls.length).toBe(m);
+  });
+});
+
+/** `db` whose `method` rejects for its first `times` calls (Infinity = always). */
+function failing(db: FakeDb, method: keyof DbPort, times: number): DbPort {
+  let left = times;
+  return new Proxy(db, {
+    get(target, prop, receiver) {
+      const v = Reflect.get(target, prop, receiver) as unknown;
+      if (prop === method) {
+        return async (...args: unknown[]) => {
+          if (left > 0) {
+            left -= 1;
+            throw new Error(`${String(method)} blew up`);
+          }
+          return (v as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      }
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  }) as DbPort;
+}
+
+describe('review P3 regressions (agent loop)', () => {
+  it('#2 a throw inside the workflow drive is queued for retry (not stranded) and then completes', async () => {
+    const w = world();
+    const loop = makeLoop(w, { db: failing(w.db, 'submitPlan', 1), retryBackoffMs: 0 });
+    const r1 = await loop.runOnce();
+    expect(r1.status).toBe('error');
+    const wfId = r1.workflow_id!;
+    expect(wfId).toBeTruthy();
+    expect((await w.db.getWorkflow(wfId))?.stage).not.toBe('done');
+    expect(w.db.agentEvents.some((e) => e.workflow_id === wfId && /retry 1\/3/.test(e.summary))).toBe(true);
+    const r2 = await loop.runOnce();
+    expect(r2.status).toBe('handled');
+    expect(r2.workflow_id).toBe(wfId);
+    expect((await w.db.getWorkflow(wfId))?.stage).toBe('done');
+    expect([...w.db.incidents.values()].map((i) => i.state)).toEqual(['monitoring']);
+  });
+
+  it('#2 after 3 failed retries the workflow is escalated (stage, incident state, feed event)', async () => {
+    const w = world();
+    const loop = makeLoop(w, { db: failing(w.db, 'submitPlan', Infinity), retryBackoffMs: 0 });
+    const first = await loop.runOnce();
+    const wfId = first.workflow_id!;
+    for (let i = 0; i < 3; i++) await loop.runOnce();
+    expect((await w.db.getWorkflow(wfId))?.stage).toBe('escalated');
+    expect([...w.db.incidents.values()].map((i) => i.state)).toEqual(['escalated']);
+    expect(w.db.agentEvents.some((e) => e.workflow_id === wfId && e.actor === 'code' && /escalated to operator: .*after 3 retries/.test(e.summary))).toBe(true);
+    const claims = w.db.calls.filter((c) => c.method === 'claimWorkflow').length;
+    expect((await loop.runOnce()).status).toBe('idle'); // nothing left queued
+    expect(w.db.calls.filter((c) => c.method === 'claimWorkflow').length).toBe(claims);
+  });
+
+  it('#2 retries back off: a retry is not attempted before its delay', async () => {
+    let wall = 1_000;
+    const w = world(() => wall);
+    const loop = makeLoop(w, { db: failing(w.db, 'submitPlan', 1), retryBackoffMs: 10_000 });
+    const wfId = (await loop.runOnce()).workflow_id!;
+    await loop.runOnce();
+    expect((await w.db.getWorkflow(wfId))?.stage).not.toBe('done');
+    wall += 10_000;
+    await loop.runOnce();
+    expect((await w.db.getWorkflow(wfId))?.stage).toBe('done');
+  });
+
+  it('#4 with the LLM down the loop logs the honest deterministic-execution notice and still executes', async () => {
+    const w = world();
+    const logs: string[] = [];
+    const down: LlmPort = { chat: async () => Promise.reject(new LlmUnavailableError('both endpoints down', [])) };
+    const r = await makeLoop(w, { llm: down, log: (m) => logs.push(m) }).runOnce();
+    expect(r.verification?.verified).toBe(true);
+    expect(w.db.listActions().length).toBeGreaterThan(0);
+    expect(logs.some((l) => l.includes(LLM_UNAVAILABLE_NOTICE))).toBe(true);
+    expect(LLM_UNAVAILABLE_NOTICE).toBe('LLM unavailable: executing deterministic, safety-checked plans; flagged needs_approval');
+    const main = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+    expect(main).toContain('LLM_UNAVAILABLE_NOTICE');
+    expect(main).not.toMatch(/running deterministic \(no Nemotron\)/);
+  });
+
+  it('#5 replan persists through the coordinator: the workflow is claimed once, never re-claimed', async () => {
+    const w = world();
+    armXid(w);
+    const r = await makeLoop(w).runOnce();
+    expect(r.replans).toHaveLength(1);
+    expect(r.verification?.verified).toBe(true);
+    expect(w.db.calls.filter((c) => c.method === 'claimWorkflow' && c.args[0] === r.workflow_id)).toHaveLength(1);
+  });
+
+  it('#6 a workflow skipped as LEASE_HELD_BY_LIVE_WORKER is taken over once that lease expires', async () => {
+    let wall = 1_794_091_200_000;
+    const w = world(() => wall);
+    const k = killable(w.db, (m, args, phase) => m === 'startAction' && phase === 'after' && String(args[0]).includes(':checkpoint:'));
+    const loop1 = makeLoop(w, { db: k.db, workerId: 'worker-1' });
+    loops.pop(); // dead worker: never await its stop
+    void loop1.runOnce();
+    await k.killed;
+
+    const events = createEventPublisher({ db: w.db, runId: RUN_ID, clock: w.clock, redact: (s) => s, startSeq: 1000 });
+    const loop2 = makeLoop(w, { workerId: 'worker-2', events, pollMs: 1e8, debounceMs: 1e8 });
+    await loop2.start(); // worker-1's lease has not expired yet
+    expect(loop2.lastResume()!.items[0]).toMatchObject({ action: 'nothing_to_do', note: 'LEASE_HELD_BY_LIVE_WORKER' });
+    expect(await w.db.listOpenWorkflows()).toHaveLength(1);
+
+    wall += DEFAULT_LEASE_MS + 5_000; // worker-1 never heartbeats again
+    const r = await loop2.runOnce();
+    expect(r.status).toBe('handled');
+    expect(await w.db.listOpenWorkflows()).toHaveLength(0);
+    for (const n of requestsPerKey(w.db).values()) expect(n).toBe(1);
+    expect([...w.db.incidents.values()].every((i) => i.state === 'monitoring')).toBe(true);
   });
 });
 
