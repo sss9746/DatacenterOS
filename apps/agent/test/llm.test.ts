@@ -3,10 +3,14 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type AgentConfig } from '../src/config.js';
 import {
+  DEFAULT_TOOL_CALL_MAX_TOKENS,
   LlmUnavailableError,
   capMaxTokens,
   createLoggingLlm,
   createNimLlm,
+  debugEnabled,
+  effectiveMaxTokens,
+  requestBytes,
   type LlmCallLog,
   type NimLlmEvent,
 } from '../src/llm.js';
@@ -264,6 +268,49 @@ describe('createNimLlm', () => {
     expect(recorded.map((r) => r.body.max_tokens)).toEqual([512, 64]);
     expect(capMaxTokens(512, undefined)).toBe(512);
     expect(capMaxTokens(512, 0)).toBe(1);
+  });
+
+  it('defaults tool-calling requests to DEFAULT_TOOL_CALL_MAX_TOKENS under a large LLM_MAX_TOKENS', async () => {
+    queues.primary!.push(textReply('nvidia/primary-model', 'a'), textReply('nvidia/primary-model', 'b'), textReply('nvidia/primary-model', 'c'));
+    const llm = createNimLlm(cfg({ LLM_MAX_TOKENS: '16384' }), { sleep: noSleep });
+    await llm.chat(REQ); // tools, no maxTokens
+    await llm.chat({ messages: REQ.messages.slice(0, 2) }); // no tools
+    await llm.chat({ ...REQ, maxTokens: 2048 }); // explicit wins (still capped)
+    expect(recorded.map((r) => r.body.max_tokens)).toEqual([DEFAULT_TOOL_CALL_MAX_TOKENS, 16384, 2048]);
+    expect(effectiveMaxTokens(512, { tools: REQ.tools })).toBe(512);
+  });
+
+  it('sends enable_thinking=false by default (NIM_ENABLE_THINKING unset or "false")', async () => {
+    queues.primary!.push(textReply('nvidia/primary-model', 'a'), textReply('nvidia/primary-model', 'b'));
+    await createNimLlm(cfg(), { sleep: noSleep }).chat(REQ);
+    await createNimLlm(cfg({ NIM_ENABLE_THINKING: 'false' }), { sleep: noSleep }).chat(REQ);
+    expect(recorded.map((r) => r.body.chat_template_kwargs)).toEqual([{ enable_thinking: false }, { enable_thinking: false }]);
+  });
+
+  it('DCOS_LLM_DEBUG=1 logs sizes and latency per attempt to stderr, never content or keys', async () => {
+    queues.primary!.push(toolCallReply('nvidia/primary-model', '{"job_ids":["job-a"]}'));
+    const lines: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    const prev = process.env.DCOS_LLM_DEBUG;
+    process.env.DCOS_LLM_DEBUG = '1';
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      await createNimLlm(cfg(), { sleep: noSleep }).chat(REQ);
+    } finally {
+      process.stderr.write = orig;
+      if (prev === undefined) delete process.env.DCOS_LLM_DEBUG;
+      else process.env.DCOS_LLM_DEBUG = prev;
+    }
+    const dbg = lines.filter((l) => l.startsWith('[llm-debug]'));
+    expect(dbg).toHaveLength(1);
+    expect(dbg[0]).toMatch(/primary nvidia\/primary-model ok \d+ ms prompt=\d+ B max_tokens=512 thinking=disabled tool_calls=1/);
+    expect(dbg[0]).not.toContain('job-a');
+    expect(dbg[0]).not.toContain(KEY);
+    expect(requestBytes({ messages: [{ a: 'é' }] })).toBe(Buffer.byteLength('[{"a":"é"}]'));
+    expect(debugEnabled({})).toBe(false);
   });
 
   it('drops chat_template_kwargs when the server rejects it with 400', async () => {

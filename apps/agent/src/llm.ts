@@ -184,6 +184,54 @@ export function capMaxTokens(cfgMax: number, requested: number | undefined): num
   return Math.max(1, Math.min(cfgMax, Math.floor(requested)));
 }
 
+/**
+ * Default per-call budget for tool-calling requests that do not pass maxTokens. A single structured tool call
+ * (triage / planner) fits in well under 1k tokens with thinking disabled; a huge LLM_MAX_TOKENS (e.g. 16384)
+ * only lets a misbehaving model ramble (duplicate tool calls) and adds latency. Still capped by LLM_MAX_TOKENS.
+ */
+export const DEFAULT_TOOL_CALL_MAX_TOKENS = 1024;
+
+/** max_tokens for one request: explicit request value, else the tool-call default when tools are present. */
+export function effectiveMaxTokens(cfgMax: number, req: Pick<LlmChatRequest, 'maxTokens' | 'tools'>): number {
+  const hasTools = (req.tools?.length ?? 0) > 0;
+  return capMaxTokens(cfgMax, req.maxTokens ?? (hasTools ? DEFAULT_TOOL_CALL_MAX_TOKENS : undefined));
+}
+
+// ---------------------------------------------------------------------------
+// Debug log (DCOS_LLM_DEBUG=1): sizes, budgets and latency per HTTP attempt. Never content or keys.
+// ---------------------------------------------------------------------------
+
+export interface LlmDebugEntry {
+  endpoint: NimEndpointLabel;
+  model: string;
+  /** UTF-8 bytes of messages + tools as sent. */
+  promptBytes: number;
+  maxTokens: number | null;
+  thinkingFlag: 'enabled' | 'disabled' | 'not_sent';
+  latencyMs: number;
+  outcome: string;
+  finishReason?: string | null;
+  toolCalls?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+export function debugEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.DCOS_LLM_DEBUG === '1';
+}
+
+export function requestBytes(body: { messages: unknown; tools?: unknown }): number {
+  return Buffer.byteLength(JSON.stringify(body.messages), 'utf8') + (body.tools ? Buffer.byteLength(JSON.stringify(body.tools), 'utf8') : 0);
+}
+
+function debugLog(e: LlmDebugEntry): void {
+  const usage = e.promptTokens !== undefined ? ` tokens=${e.promptTokens}/${e.completionTokens}` : '';
+  const tc = e.toolCalls !== undefined ? ` tool_calls=${e.toolCalls} finish=${e.finishReason ?? '-'}` : '';
+  process.stderr.write(
+    `[llm-debug] ${e.endpoint} ${e.model} ${e.outcome} ${e.latencyMs} ms prompt=${e.promptBytes} B max_tokens=${e.maxTokens} thinking=${e.thinkingFlag}${tc}${usage}\n`,
+  );
+}
+
 const CORRECTIVE_NUDGE =
   'Your previous tool call had arguments that were not a valid JSON object. ' +
   'Call the tool again with arguments as a single valid JSON object matching its schema. No prose.';
@@ -261,7 +309,7 @@ export function createNimLlm(cfg: AgentConfig, opts: NimLlmOptions = {}): NimLlm
     const body: ChatCompletionCreateParamsNonStreaming & { chat_template_kwargs?: { enable_thinking: boolean } } = {
       model: ep.model,
       messages,
-      max_tokens: capMaxTokens(cfg.LLM_MAX_TOKENS, req.maxTokens),
+      max_tokens: effectiveMaxTokens(cfg.LLM_MAX_TOKENS, req),
       temperature,
       top_p: topP,
     };
@@ -278,10 +326,33 @@ export function createNimLlm(cfg: AgentConfig, opts: NimLlmOptions = {}): NimLlm
       timedOut = true;
       controller.abort();
     }, cfg.LLM_TIMEOUT_MS);
+    const t0 = performance.now();
+    const debug = (outcome: string, response?: LlmChatResponse) => {
+      if (!debugEnabled()) return;
+      debugLog({
+        endpoint: ep.label,
+        model: ep.model,
+        promptBytes: requestBytes(body),
+        maxTokens: body.max_tokens ?? null,
+        thinkingFlag: sendFlag ? (thinking === 'enabled' ? 'enabled' : 'disabled') : 'not_sent',
+        latencyMs: Math.round(performance.now() - t0),
+        outcome,
+        ...(response
+          ? {
+              finishReason: response.finishReason ?? null,
+              toolCalls: response.toolCalls.length,
+              ...(response.usage ? { promptTokens: response.usage.promptTokens, completionTokens: response.usage.completionTokens } : {}),
+            }
+          : {}),
+      });
+    };
     try {
       const completion = await ep.client.chat.completions.create(body, { signal: controller.signal });
-      return { ok: true, response: fromOpenAiCompletion(completion, ep.model), thinkingFlagSent: sendFlag };
+      const response = fromOpenAiCompletion(completion, ep.model);
+      debug('ok', response);
+      return { ok: true, response, thinkingFlagSent: sendFlag };
     } catch (err) {
+      debug(timedOut ? 'timeout' : err instanceof APIError ? `http_${err.status ?? '?'}` : 'error');
       if (timedOut || err instanceof APIUserAbortError) {
         return { ok: false, retryable: true, reason: `timeout after ${cfg.LLM_TIMEOUT_MS} ms` };
       }

@@ -6,26 +6,29 @@ import type { LlmToolDef } from '../ports.js';
 
 export const CHOOSE_OPTIONS_TOOL_NAME = 'choose_options';
 
+/**
+ * Output budget for the choose_options call. llm.ts already defaults tool-calling requests to 1024 tokens
+ * (DEFAULT_TOOL_CALL_MAX_TOKENS); planner.ts may pass this explicitly as `maxTokens`.
+ */
+export const PLANNER_MAX_TOKENS = 1024;
+
 export const PLANNER_SYSTEM_PROMPT = [
   'You are a GPU-cluster incident engineer choosing mitigation options during an active incident.',
-  'Use only the data in the user message. It lists, per affected job, the top options already scored by a deterministic',
-  'physics simulator (expected lost work units, completion delay in sim-seconds, GPU-busy waste, failure risk) and',
-  'ranked by: no unsafe actions, then least irreversible work loss, then least completion delay, then least GPU-busy waste,',
-  'then fewest preemptions. Options under "excluded" failed a hard safety check: never choose them.',
-  'For every job, call choose_options once with exactly one option_id from that job\'s "options" list.',
-  'Prefer rank 1 unless the data gives a concrete reason to prefer another listed option; say that reason.',
-  'Write each explanation as ONE sentence (max 200 characters): evidence -> choice, citing the numbers you used. Example:',
-  '"job-a: checkpoint 9 min old, r2-r3 heading to throttle -> checkpoint + move to r1+r5 (lost 0 wu vs 96 if kept)".',
-  'State your conclusion, not step-by-step reasoning.',
-  'Never claim a GPU, pump or cooling loop is repaired; checkpoint, migrate and cordon only mitigate.',
+  'Use only the input. Per affected job it lists the top options scored by a physics simulator (lost_wu = expected lost',
+  'work units, delay_s = completion delay, waste_s = GPU-busy waste, risk = failure risk), ranked by: no unsafe actions,',
+  'least work loss, least delay, least waste, fewest preemptions. "excluded" options failed a safety check: never choose them.',
+  `Call ${CHOOSE_OPTIONS_TOOL_NAME} EXACTLY ONCE, with one entry per job, each with one option_id from that job's "options".`,
+  'Prefer rank 1 unless the data gives a concrete reason for another listed option; say that reason.',
+  'explanation = ONE sentence <= 200 chars: evidence -> choice, citing the numbers used. Example:',
+  '"job-a: r2-r3 throttling -> checkpoint + move to r1+r5 (lost 0 wu vs 96 if kept)". No step-by-step reasoning.',
+  'Never claim a GPU, pump or loop is repaired; checkpoint, migrate and cordon only mitigate.',
   'If the evidence looks stale, the options look wrong, or you are unsure, set needs_approval to true.',
 ].join('\n');
 
 export const CHOOSE_OPTIONS_TOOL: LlmToolDef = {
   name: CHOOSE_OPTIONS_TOOL_NAME,
   description:
-    'Choose one pre-scored, safety-checked option per affected job and explain the choice briefly. ' +
-    'This only records a proposal: deterministic code re-checks safety and executes nothing itself.',
+    'Record ONE proposal (call once): one pre-scored, safety-checked option per job. Code re-checks safety; this executes nothing.',
   parameters: {
     type: 'object',
     properties: {
