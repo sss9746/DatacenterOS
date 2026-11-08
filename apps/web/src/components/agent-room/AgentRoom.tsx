@@ -36,6 +36,16 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
     const el = logRef.current;
     if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [itemCount, active?.id]);
+  // Keep the selected tab visible inside the (horizontally scrollable) tab row without moving the page.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = tabsRef.current;
+    const tab = row?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!row || !tab) return;
+    const left = tab.offsetLeft - row.offsetLeft;
+    if (left < row.scrollLeft) row.scrollLeft = left - 8;
+    else if (left + tab.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = left + tab.offsetWidth - row.clientWidth + 8;
+  }, [active?.id]);
   const onScroll = () => { const el = logRef.current; if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_SLACK_PX; };
 
   const counts = new Map<string, number>();
@@ -60,7 +70,7 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
       </ul>
 
       {view.threads.length > 1 && (
-        <div className="ar-tabs" role="tablist" aria-label="Incident threads">
+        <div ref={tabsRef} className="ar-tabs" role="tablist" aria-label="Incident threads">
           {view.threads.map((t) => {
             const selected = t.id === active?.id;
             const n = t.items.filter((i) => i.kind === 'bubble').length;
