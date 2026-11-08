@@ -1,4 +1,4 @@
-// P1-9: seeded evaluation scenarios (ARCHITECTURE §9). Every scenario loads, validates, steps from t=0 to its
+// P1-9: seeded evaluation scenarios (ARCHITECTURE §9). Every scenario loads, validates, steps from the run start to its
 // horizon with no commands, deterministically, and its faults visibly bite.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,13 +28,14 @@ import {
   type Scenario,
 } from '../src/index.js';
 import { SCENARIO_DATA_FILE, SCENARIO_DIR, readScenarioJson, renderScenarioData, scenarioFiles } from '../scripts/make-scenarios.js';
-import { gpusOn } from './gpu-helpers.js';
+import { T0, gpusOn } from './gpu-helpers.js';
 
 const scenarios = loadScenarios();
 const byId = new Map(scenarios.map((s) => [s.scenario_id, s]));
 
 /** One observed tick, kept small (the full world is ~100 KB, so a 600-tick run keeps only these rows). */
 interface Frame {
+  /** ms since the run start (sim_time_ms − T0; CONTRACTS §0.12 #2) */
   t: number;
   gpus: Map<string, GpuCurrent>;
   jobs: Map<string, JobState>;
@@ -47,7 +48,7 @@ interface Frame {
 interface Trace { frames: Frame[]; final: PhysicsWorld; invalid: string[] }
 
 const frameOf = (w: PhysicsWorld, telemetry: TelemetryEvent[]): Frame => ({
-  t: w.observable.clock.sim_time_ms,
+  t: w.observable.clock.sim_time_ms - T0,
   gpus: new Map(w.observable.gpus.map((g) => [g.resource_id, g])),
   jobs: new Map(w.observable.job_states.map((j) => [j.job_id, j])),
   nodes: new Map(w.observable.nodes.map((n) => [n.resource_id, n])),
@@ -57,12 +58,12 @@ const frameOf = (w: PhysicsWorld, telemetry: TelemetryEvent[]): Frame => ({
   telemetry,
 });
 
-/** Step a scenario from t=0 to horizon_s with no commands; validate every tick result. */
+/** Step a scenario from the run start to start + horizon_s with no commands; validate every tick result. */
 function runScenarioNoAction(s: Scenario, validate: boolean): Trace {
   let w = scenarioWorld(s);
   const frames: Frame[] = [frameOf(w, [])];
   const invalid: string[] = [];
-  while (w.observable.clock.sim_time_ms < s.horizon_s * 1000) {
+  while (w.observable.clock.sim_time_ms < T0 + s.horizon_s * 1000) {
     const r = step(scenarioTickInput(s, w));
     if (validate) {
       const v = validatePayload('PhysicsTickResult', r);
@@ -171,7 +172,9 @@ describe('scenarios: faults', () => {
         expect(v, `${s.scenario_id} ${f.fault_id}`).toEqual({ ok: true });
         expect(f.run_id).toBe('run-demo-1');
         expect(f.start_sim_time_ms % 1000).toBe(0); // lands on a tick boundary
-        expect(f.start_sim_time_ms).toBeLessThan(s.horizon_s * 1000);
+        // absolute sim time inside [run start, run start + horizon)
+        expect(f.start_sim_time_ms).toBeGreaterThanOrEqual(T0);
+        expect(f.start_sim_time_ms - T0).toBeLessThan(s.horizon_s * 1000);
       }
     }
   });
@@ -197,19 +200,19 @@ describe('scenarios: faults', () => {
   });
 
   it('dueFaults: a fault is due on the tick whose end reaches its start, once, and never after it ends', () => {
-    const s = byId.get('sc14-preventive-move-hurts')!; // pump-a fault 30 s – 120 s
+    const s = byId.get('sc14-preventive-move-hurts')!; // pump-a fault start + 30 s – start + 120 s
     const f = s.faults[0]!;
     let w = scenarioWorld(s);
     const dueAt: number[] = [];
-    while (w.observable.clock.sim_time_ms < 200_000) {
+    while (w.observable.clock.sim_time_ms < T0 + 200_000) {
       const due = dueFaults(s, w);
       if (due.length > 0) dueAt.push(w.observable.clock.sim_time_ms + 1000);
       w = step(scenarioTickInput(s, w)).world_after;
       const t = w.observable.clock.sim_time_ms;
       const active = w.active_faults_private.some((a) => a.fault_id === f.fault_id);
-      expect(active, `t=${t}`).toBe(t >= 30_000 && t < 120_000);
+      expect(active, `t=${t}`).toBe(t >= T0 + 30_000 && t < T0 + 120_000);
     }
-    expect(dueAt).toEqual([30_000]);
+    expect(dueAt).toEqual([T0 + 30_000]);
   });
 });
 
@@ -231,7 +234,11 @@ describe('scenarios: scenarioWorld()', () => {
     expect(b.progress_work_units).toBe(58_000);
     expect(b.durable_work_units).toBe(57_600);
     expect(w.observable.checkpoints.find((c) => c.checkpoint_id === b.latest_checkpoint_id)!.progress_work_units).toBe(57_600);
-    expect((w.hidden_physics_state_json as { last_checkpoint_sim_ms: Record<string, number> }).last_checkpoint_sim_ms['job-b']).toBe(-50_000);
+    // the checkpoint's age (now − complete) matches progress − durable: 400 units / 8 GPUs = 50 s before the run start
+    expect(w.observable.checkpoints.find((c) => c.checkpoint_id === b.latest_checkpoint_id)).toMatchObject({
+      complete_sim_time_ms: T0 - 50_000, requested_sim_time_ms: T0 - 80_000,
+    });
+    expect(Object.keys(w.hidden_physics_state_json)).not.toContain('last_checkpoint_sim_ms');
     // other jobs untouched
     const base = buildPreset('gpu_demo_8', 'run-demo-1', 113);
     expect(w.observable.job_states.filter((j) => j.job_id !== 'job-b')).toEqual(base.observable.job_states.filter((j) => j.job_id !== 'job-b'));
@@ -250,11 +257,11 @@ describe('scenarios: scenarioWorld()', () => {
 // ---- stepping --------------------------------------------------------------------------------------
 
 describe.each(scenarios.map((s) => [s.scenario_id, s] as const))('scenario %s', (id, s) => {
-  it('steps t=0 → horizon_s with no commands; every tick result validates as PhysicsTickResult', () => {
+  it('steps the run start → start + horizon_s with no commands; every tick result validates as PhysicsTickResult', () => {
     const tr = runScenarioNoAction(s, true);
     traces.set(id, tr);
     expect(tr.invalid).toEqual([]);
-    expect(tr.final.observable.clock.sim_time_ms).toBe(s.horizon_s * 1000);
+    expect(tr.final.observable.clock.sim_time_ms).toBe(T0 + s.horizon_s * 1000);
     expect(tr.final.observable.clock.tick_index).toBe(s.horizon_s);
     // every fault that started was applied exactly once
     const applied = tr.frames.flatMap((f, i) => f.active.filter((x) => !(tr.frames[i - 1]?.active ?? []).includes(x)));

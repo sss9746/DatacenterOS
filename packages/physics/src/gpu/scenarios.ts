@@ -4,12 +4,16 @@
 // (this code also runs inside the SpacetimeDB module), so `scripts/make-scenarios.ts` bundles the JSON into
 // ./scenarios.data.ts; test/gpu-scenarios.test.ts fails if that generated file drifts from the JSON.
 //
+// TIMES: every scenario starts at the gpu_demo_8 run start (RUN_START_SIM_MS = 600 000, CONTRACTS §0.12 #2). A fault's
+// start_sim_time_ms is an ABSOLUTE sim time (≥ the run start; "pump-a degrades at 10 s" is 610 000); horizon_s is
+// relative to the run start (the run ends at RUN_START_SIM_MS + horizon_s × 1000, tick_index = horizon_s).
+//
 // Pure: no fs, clock, randomness or I/O. Only `import type` from @dcos/contracts.
 import type { FaultInjection, JobState, PhysicsWorld, SimulationTickInput } from '@dcos/contracts';
 import { STEP_MS, WIRE_SCHEMA_VERSION } from './constants.js';
 import { buildPreset, type PresetId } from './preset.js';
 import { SCENARIO_DATA } from './scenarios.data.js';
-import { cloneJson, hiddenOf, specOf } from './world.js';
+import { cloneJson, specOf } from './world.js';
 
 /**
  * Optional starting-state changes for cases the faults cannot express (CONTRACT ADDITION, additive and optional).
@@ -17,9 +21,9 @@ import { cloneJson, hiddenOf, specOf } from './world.js';
  */
 export interface ScenarioInitialOverrides {
   jobs?: Record<string, {
-    /** Progress at t=0 (≤ total_work_units, ≥ the durable value). */
+    /** Progress at the run start (≤ total_work_units, ≥ the durable value). */
     progress_work_units?: number;
-    /** Durable work at t=0 (the latest completed checkpoint's progress; ≤ progress). */
+    /** Durable work at the run start (the latest completed checkpoint's progress; ≤ progress). */
     durable_work_units?: number;
   }>;
 }
@@ -54,7 +58,7 @@ export function scenarioRunId(s: Scenario): string {
 export function scenarioWorld(s: Scenario, runId: string = scenarioRunId(s)): PhysicsWorld {
   const world = buildPreset(s.preset_id, runId, s.seed);
   const jobs = s.initial_overrides?.jobs ?? {};
-  const h = hiddenOf(world);
+  const now = world.observable.clock.sim_time_ms;
   for (const jobId of Object.keys(jobs).sort()) {
     const o = jobs[jobId]!;
     const job: JobState | undefined = world.observable.job_states.find((j) => j.job_id === jobId);
@@ -73,9 +77,13 @@ export function scenarioWorld(s: Scenario, runId: string = scenarioRunId(s)): Ph
     const ckpt = world.observable.checkpoints.find((c) => c.checkpoint_id === job.latest_checkpoint_id);
     if (ckpt) {
       ckpt.progress_work_units = durable;
-      // keep the hidden checkpoint age consistent with progress − durable at the nominal rate
+      // keep the checkpoint's age (now − complete_sim_time_ms) consistent with progress − durable at the nominal
+      // rate; an age reaching back past sim time 0 is clamped so the write still starts at ≥ 0
       const rate = spec.gpus_required * spec.work_rate_per_gpu_per_sim_s;
-      h.last_checkpoint_sim_ms[jobId] = rate > 0 ? -Math.round(((progress - durable) / rate) * 1000) : 0;
+      const ageMs = rate > 0 ? Math.round(((progress - durable) / rate) * 1000) : 0;
+      const complete = Math.max(spec.checkpoint_duration_ms, now - ageMs);
+      ckpt.complete_sim_time_ms = complete;
+      ckpt.requested_sim_time_ms = complete - spec.checkpoint_duration_ms;
     }
   }
   return world;

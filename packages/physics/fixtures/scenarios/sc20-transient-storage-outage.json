@@ -11,7 +11,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "pump-a",
       "kind": "cooling_pump_degradation",
-      "start_sim_time_ms": 10000,
+      "start_sim_time_ms": 610000,
       "duration_sim_ms": null,
       "severity": 0.6,
       "parameters": {
@@ -25,7 +25,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "ckpt-store-1",
       "kind": "node_crash",
-      "start_sim_time_ms": 20000,
+      "start_sim_time_ms": 620000,
       "duration_sim_ms": 180000,
       "severity": 1,
       "parameters": {},

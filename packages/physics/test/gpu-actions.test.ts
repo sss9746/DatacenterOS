@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { validatePayload, type ActionCommand, type ObservedSnapshot, type PhysicsTickResult, type PhysicsWorld } from '@dcos/contracts';
 import { commandOutcome, enqueueCommands, inFlightCommands, step } from '../src/index.js';
-import { demoWorld, fault, gpusOn, runUntil, tickInput, type RunOpts } from './gpu-helpers.js';
+import { T0, demoWorld, fault, gpusOn, runUntil, tickInput, type RunOpts } from './gpu-helpers.js';
 
 let seq = 0;
 function cmd(operation: ActionCommand['operation'], target: string, opts: Partial<ActionCommand> = {}): ActionCommand {
@@ -11,7 +11,7 @@ function cmd(operation: ActionCommand['operation'], target: string, opts: Partia
     schema_version: '1.1.0', run_id: 'run-demo-1', action_id: `act-${seq}`, command_key: `ck-${operation}-${seq}`,
     workflow_id: 'wf-1', plan_id: 'plan-1', incident_ids: ['inc-1'], operation, target_resource_id: target,
     job_id: null, arguments: {}, depends_on_command_keys: [], expected_decision_epoch: 0,
-    expected_resource_versions: {}, requested_sim_time_ms: 0, ...opts,
+    expected_resource_versions: {}, requested_sim_time_ms: T0, ...opts,
   };
   expect(validatePayload('ActionCommand', c)).toEqual({ ok: true });
   return c;
@@ -19,13 +19,14 @@ function cmd(operation: ActionCommand['operation'], target: string, opts: Partia
 
 const job = (s: ObservedSnapshot, id: string) => s.job_states.find((j) => j.job_id === id)!;
 const gpu = (s: ObservedSnapshot, id: string) => s.gpus.find((g) => g.resource_id === id)!;
-const at = (results: PhysicsTickResult[], ms: number) => results.find((r) => r.world_after.observable.clock.sim_time_ms === ms)!;
+// Times in run() / at() are OFFSETS from the run start T0 (CONTRACTS §0.12 #2); absolute sim times are written T0 + x.
+const at = (results: PhysicsTickResult[], ms: number) => results.find((r) => r.world_after.observable.clock.sim_time_ms === T0 + ms)!;
 
 /** Enqueue commands up front and request each on the tick ending at its time; validates every tick result. */
 function run(untilMs: number, schedule: [number, ActionCommand][], opts: RunOpts = {}, world: PhysicsWorld = demoWorld()) {
   const requestAt: Record<number, string[]> = {};
-  for (const [t, c] of schedule) (requestAt[t] ??= []).push(c.action_id);
-  const out = runUntil(enqueueCommands(world, schedule.map(([, c]) => c)), untilMs, { ...opts, requestAt });
+  for (const [t, c] of schedule) (requestAt[T0 + t] ??= []).push(c.action_id);
+  const out = runUntil(enqueueCommands(world, schedule.map(([, c]) => c)), T0 + untilMs, { ...opts, requestAt });
   for (const r of out.results) expect(validatePayload('PhysicsTickResult', r)).toEqual({ ok: true });
   return out;
 }
@@ -37,7 +38,7 @@ describe('checkpoint', () => {
   it('starts writing at 20 s and is NOT durable mid-write', () => {
     const s20 = at(results, 20_000).world_after.observable;
     const row = s20.checkpoints.find((c) => c.command_key === ck.command_key)!;
-    expect(row).toMatchObject({ checkpoint_id: 'ckpt-job-b-2', status: 'writing', requested_sim_time_ms: 20_000, complete_sim_time_ms: null });
+    expect(row).toMatchObject({ checkpoint_id: 'ckpt-job-b-2', status: 'writing', requested_sim_time_ms: T0 + 20_000, complete_sim_time_ms: null });
     expect(row.progress_work_units).toBe(40_480 + 8 * 20);
     expect(job(s20, 'job-b')).toMatchObject({ status: 'checkpointing', durable_work_units: 40_000, latest_checkpoint_id: 'ckpt-job-b-1' });
     for (let t = 20_000; t < 50_000; t += 1000) {
@@ -47,7 +48,7 @@ describe('checkpoint', () => {
     }
     expect(at(results, 20_000).material_change).toBe(true);
     expect(inFlightCommands(at(results, 30_000).world_after)).toEqual([
-      expect.objectContaining({ command_key: ck.command_key, started_sim_ms: 20_000, due_sim_time_ms: 50_000 }),
+      expect.objectContaining({ command_key: ck.command_key, started_sim_ms: T0 + 20_000, due_sim_time_ms: T0 + 50_000 }),
     ]);
   });
 
@@ -57,14 +58,14 @@ describe('checkpoint', () => {
     const s = r50.world_after.observable;
     expect(job(s, 'job-b')).toMatchObject({ status: 'running', durable_work_units: 40_640, latest_checkpoint_id: 'ckpt-job-b-2' });
     expect(job(s, 'job-b').progress_work_units).toBe(40_640); // no training progress during the synchronous write
-    expect(s.checkpoints.find((c) => c.checkpoint_id === 'ckpt-job-b-2')).toMatchObject({ status: 'complete', complete_sim_time_ms: 50_000, accessible: true });
+    expect(s.checkpoints.find((c) => c.checkpoint_id === 'ckpt-job-b-2')).toMatchObject({ status: 'complete', complete_sim_time_ms: T0 + 50_000, accessible: true });
     expect(job(world.observable, 'job-b').progress_work_units).toBe(40_640 + 8 * 2);
-    expect(commandOutcome(world, ck.command_key)).toEqual({ ok: true, reason_code: null, sim_time_ms: 50_000 });
+    expect(commandOutcome(world, ck.command_key)).toEqual({ ok: true, reason_code: null, sim_time_ms: T0 + 50_000 });
   });
 
   it('an XID mid-write fails the job and the checkpoint never becomes durable', () => {
     const c = cmd('checkpoint', 'job-a', { job_id: 'job-a' });
-    const { results: rs } = run(60_000, [[20_000, c]], { faults: [fault('gpu_xid_79', 'gpu-r2-n1-5', 35_000)] });
+    const { results: rs } = run(60_000, [[20_000, c]], { faults: [fault('gpu_xid_79', 'gpu-r2-n1-5', T0 + 35_000)] });
     const r35 = at(rs, 35_000);
     expect(r35.failed_command_keys).toEqual([c.command_key]);
     const s = r35.world_after.observable;
@@ -76,7 +77,7 @@ describe('checkpoint', () => {
 
   it('storage lost mid-write: the write fails at completion, durable unchanged, job keeps running', () => {
     const c = cmd('checkpoint', 'job-b', { job_id: 'job-b' });
-    const { results: rs } = run(51_000, [[20_000, c]], { faults: [fault('network_link_down', 'ckpt-store-1', 30_000)] });
+    const { results: rs } = run(51_000, [[20_000, c]], { faults: [fault('network_link_down', 'ckpt-store-1', T0 + 30_000)] });
     expect(at(rs, 30_000).world_after.observable.checkpoints.every((x) => !x.accessible)).toBe(true);
     const r50 = at(rs, 50_000);
     expect(r50.failed_command_keys).toEqual([c.command_key]);
@@ -87,7 +88,7 @@ describe('checkpoint', () => {
   it('cannot start while storage is down, or on a job without checkpoint support', () => {
     const down = cmd('checkpoint', 'job-b', { job_id: 'job-b' });
     const noCk = cmd('checkpoint', 'job-c', { job_id: 'job-c' });
-    const { results: rs } = run(21_000, [[20_000, down], [20_000, noCk]], { faults: [fault('node_crash', 'ckpt-store-1', 5_000)] });
+    const { results: rs } = run(21_000, [[20_000, down], [20_000, noCk]], { faults: [fault('node_crash', 'ckpt-store-1', T0 + 5_000)] });
     const r20 = at(rs, 20_000);
     expect(r20.failed_command_keys).toEqual([down.command_key, noCk.command_key]);
     expect(commandOutcome(r20.world_after, down.command_key)?.reason_code).toBe('CHECKPOINT_NOT_ACCESSIBLE');
@@ -124,7 +125,7 @@ describe('migrate_restart', () => {
     const cordoned = cmd('migrate_restart', 'job-a', { job_id: 'job-a', arguments: { destination_gpu_ids: gpusOn(7, 8) } });
     const jobC = cmd('migrate_restart', 'job-c', { job_id: 'job-c', arguments: { destination_gpu_ids: gpusOn(7) } });
     const { results } = run(23_000, [[10_000, cordon], ...schedule, [22_000, cordoned], [22_000, jobC]], {
-      faults: [fault('gpu_xid_79', 'gpu-r1-n1-0', 5_000)],
+      faults: [fault('gpu_xid_79', 'gpu-r1-n1-0', T0 + 5_000)],
     });
     const w = results.at(-1)!.world_after;
     cases.forEach(([name, , reason], i) => expect(commandOutcome(w, schedule[i]![1].command_key)?.reason_code, name).toBe(reason));
@@ -144,7 +145,7 @@ describe('migrate_restart', () => {
     const s51 = at(results, 51_000).world_after.observable;
     expect(job(s51, 'job-a')).toMatchObject({ status: 'restarting', allocated_gpu_ids: gpusOn(7, 8), progress_work_units: durable, durable_work_units: durable });
     expect(s51.allocations.filter((a) => a.job_id === 'job-a').map((a) => [a.gpu_id, a.since_sim_time_ms]))
-      .toEqual(gpusOn(7, 8).map((g) => [g, 51_000]));
+      .toEqual(gpusOn(7, 8).map((g) => [g, T0 + 51_000]));
     for (let t = 51_000; t < 171_000; t += 1000) expect(at(results, t).completed_command_keys).toEqual([]);
     const r171 = at(results, 171_000);
     expect(r171.completed_command_keys).toEqual([mv.command_key]);
@@ -156,7 +157,7 @@ describe('migrate_restart', () => {
 
   it('a GPU lost during the restart fails the job and the migration', () => {
     const mv = cmd('migrate_restart', 'job-a', { job_id: 'job-a', arguments: { destination_gpu_ids: gpusOn(7, 8) } });
-    const { results } = run(100_000, [[20_000, mv]], { faults: [fault('gpu_xid_79', 'gpu-r7-n1-3', 60_000)] });
+    const { results } = run(100_000, [[20_000, mv]], { faults: [fault('gpu_xid_79', 'gpu-r7-n1-3', T0 + 60_000)] });
     const r60 = at(results, 60_000);
     expect(r60.failed_command_keys).toEqual([mv.command_key]);
     expect(job(r60.world_after.observable, 'job-a')).toMatchObject({ status: 'failed', allocated_gpu_ids: [] });
@@ -164,7 +165,7 @@ describe('migrate_restart', () => {
 
   it('restarts a job that failed from an XID onto free GPUs, from its durable checkpoint', () => {
     const mv = cmd('migrate_restart', 'job-a', { job_id: 'job-a', arguments: { destination_gpu_ids: gpusOn(5, 7) } });
-    const { results } = run(30_000 + 121_000, [[30_000, mv]], { faults: [fault('gpu_xid_79', 'gpu-r3-n1-0', 15_000)] });
+    const { results } = run(30_000 + 121_000, [[30_000, mv]], { faults: [fault('gpu_xid_79', 'gpu-r3-n1-0', T0 + 15_000)] });
     expect(job(at(results, 15_000).world_after.observable, 'job-a').status).toBe('failed');
     expect(at(results, 150_000).completed_command_keys).toEqual([mv.command_key]);
     expect(job(at(results, 150_000).world_after.observable, 'job-a')).toMatchObject({ status: 'running', progress_work_units: 86_400 });
@@ -227,9 +228,9 @@ describe('cordon_gpu', () => {
     const un79 = cmd('uncordon_gpu', 'gpu-r3-n1-0');
     const un48 = cmd('uncordon_gpu', 'gpu-r5-n1-1');
     const { results } = run(40_000, [[10_000, c79], [10_000, c48], [20_000, un79], [20_000, un48]], {
-      faults: [fault('gpu_xid_79', 'gpu-r3-n1-0', 5_000), fault('gpu_xid_48', 'gpu-r5-n1-1', 5_000)],
+      faults: [fault('gpu_xid_79', 'gpu-r3-n1-0', T0 + 5_000), fault('gpu_xid_48', 'gpu-r5-n1-1', T0 + 5_000)],
     });
-    for (const r of results.filter((x) => x.world_after.observable.clock.sim_time_ms >= 5_000)) {
+    for (const r of results.filter((x) => x.world_after.observable.clock.sim_time_ms >= T0 + 5_000)) {
       const s = r.world_after.observable;
       expect(gpu(s, 'gpu-r3-n1-0').availability).toBe('unreachable');
       expect(gpu(s, 'gpu-r5-n1-1').availability).not.toBe('ready');

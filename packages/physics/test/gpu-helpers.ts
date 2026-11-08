@@ -3,10 +3,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FaultInjection, PhysicsTickResult, PhysicsWorld, SimulationTickInput } from '@dcos/contracts';
-import { buildPreset, step } from '../src/index.js';
+import { RUN_START_SIM_MS, buildPreset, step } from '../src/index.js';
 
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'gpu');
 export const readFixture = <T>(name: string): T => JSON.parse(readFileSync(join(FIXTURES, name), 'utf8')) as T;
+
+/** The run start (CONTRACTS §0.12 #2): every gate time is T0 + an offset. */
+export const T0 = RUN_START_SIM_MS;
 
 export const SLOTS = [0, 1, 2, 3, 4, 5, 6, 7];
 export const gpusOn = (...racks: number[]) => racks.flatMap((r) => SLOTS.map((k) => `gpu-r${r}-n1-${k}`));
@@ -23,10 +26,10 @@ export function fault(
   };
 }
 
-/** Same fault as the P1-1 fixtures (fixtures/gpu/tick_result_example.json). */
+/** Same fault as the P1-1 fixtures (fixtures/gpu/tick_result_example.json): pump-a at start + 10 s. */
 export const PUMP_A_FAULT: FaultInjection = {
   schema_version: '1.1.0', fault_id: 'fault-pump-a-degradation-1', run_id: 'run-demo-1', target_resource_id: 'pump-a',
-  kind: 'cooling_pump_degradation', start_sim_time_ms: 10_000, duration_sim_ms: null, severity: 0.6,
+  kind: 'cooling_pump_degradation', start_sim_time_ms: T0 + 10_000, duration_sim_ms: null, severity: 0.6,
   parameters: { capacity_factor: 0.4 }, seed_offset: 0,
 };
 
@@ -34,8 +37,11 @@ export function tickInput(world: PhysicsWorld, faults: FaultInjection[] = [], re
   const t1 = world.observable.clock.sim_time_ms + 1000;
   return {
     schema_version: '1.1.0', run_id: world.run_id, step_ms: 1000, seed, world,
-    // the DB passes the faults due by the end of this tick that are not active yet
-    due_faults_private: faults.filter((f) => f.start_sim_time_ms <= t1 && !world.active_faults_private.some((a) => a.fault_id === f.fault_id)),
+    // the DB passes the faults due by the end of this tick that are not active yet (scenarios.ts dueFaults rule): a
+    // timed fault that has ended by t1 is never passed again, or step() would re-apply it after it expired
+    due_faults_private: faults.filter((f) => f.start_sim_time_ms <= t1
+      && (f.duration_sim_ms === null || f.start_sim_time_ms + f.duration_sim_ms > t1)
+      && !world.active_faults_private.some((a) => a.fault_id === f.fault_id)),
     requested_action_ids: requested,
   };
 }

@@ -71,8 +71,6 @@ export interface HiddenState {
   gpu_failure: Record<string, GpuFailure>;
   /** GPUs cordoned by `cordon_gpu` (cordon never repairs: a failed GPU stays unreachable). */
   gpu_cordoned: string[];
-  /** True sim time of each job's last completed checkpoint; pre-run checkpoints are negative (schema forbids that in Checkpoint rows). */
-  last_checkpoint_sim_ms: Record<string, number>;
   /** Next checkpoint sequence number per job (ckpt-<job>-<n>). */
   checkpoint_counter: Record<string, number>;
   /** Commands handed to physics (see actions.ts) waiting for their action_id to appear in requested_action_ids. */

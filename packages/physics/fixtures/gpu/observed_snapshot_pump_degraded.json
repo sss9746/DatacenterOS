@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "run_id": "run-demo-1",
   "clock": {
-    "sim_time_ms": 120000,
+    "sim_time_ms": 720000,
     "tick_index": 120,
     "step_ms": 1000,
     "wall_tick_ms": 1000,
@@ -2637,7 +2637,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2652,7 +2652,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2667,7 +2667,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2682,7 +2682,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2697,7 +2697,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2712,7 +2712,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2727,7 +2727,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2742,7 +2742,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2757,7 +2757,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2772,7 +2772,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2787,7 +2787,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2802,7 +2802,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2817,7 +2817,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2832,7 +2832,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2847,7 +2847,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2862,7 +2862,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2877,7 +2877,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2892,7 +2892,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2907,7 +2907,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2922,7 +2922,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2937,7 +2937,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2952,7 +2952,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2967,7 +2967,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2982,7 +2982,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -2997,7 +2997,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3012,7 +3012,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3027,7 +3027,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3042,7 +3042,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3057,7 +3057,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3072,7 +3072,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3087,7 +3087,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3102,7 +3102,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3117,7 +3117,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3132,7 +3132,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3147,7 +3147,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3162,7 +3162,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3177,7 +3177,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3192,7 +3192,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3207,7 +3207,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3222,7 +3222,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3237,7 +3237,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3252,7 +3252,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3267,7 +3267,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3282,7 +3282,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3297,7 +3297,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3312,7 +3312,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3327,7 +3327,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3342,7 +3342,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3357,7 +3357,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3372,7 +3372,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3387,7 +3387,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3402,7 +3402,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3417,7 +3417,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3432,7 +3432,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3447,7 +3447,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3462,7 +3462,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3477,7 +3477,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3492,7 +3492,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3507,7 +3507,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3522,7 +3522,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3537,7 +3537,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3552,7 +3552,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3567,7 +3567,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     },
     {
@@ -3582,7 +3582,7 @@
       "power_limit_w": 700,
       "clocks_event_reasons": 0,
       "last_xid_code": null,
-      "last_seen_sim_ms": 120000,
+      "last_seen_sim_ms": 720000,
       "version": 0
     }
   ],
@@ -3794,7 +3794,7 @@
       "durable_work_units": 86400,
       "latest_checkpoint_id": "ckpt-job-a-1",
       "version": 0,
-      "last_update_sim_time_ms": 120000
+      "last_update_sim_time_ms": 720000
     },
     {
       "schema_version": "1.1.0",
@@ -3815,7 +3815,7 @@
       "durable_work_units": 40000,
       "latest_checkpoint_id": "ckpt-job-b-1",
       "version": 0,
-      "last_update_sim_time_ms": 120000
+      "last_update_sim_time_ms": 720000
     },
     {
       "schema_version": "1.1.0",
@@ -3836,7 +3836,7 @@
       "durable_work_units": 0,
       "latest_checkpoint_id": null,
       "version": 0,
-      "last_update_sim_time_ms": 120000
+      "last_update_sim_time_ms": 720000
     }
   ],
   "allocations": [
@@ -4074,8 +4074,8 @@
       "storage_resource_id": "ckpt-store-1",
       "status": "complete",
       "progress_work_units": 86400,
-      "requested_sim_time_ms": 0,
-      "complete_sim_time_ms": 0,
+      "requested_sim_time_ms": 30000,
+      "complete_sim_time_ms": 60000,
       "accessible": true,
       "command_key": "preset.gpu_demo_8.ckpt-job-a-1"
     },
@@ -4087,13 +4087,13 @@
       "storage_resource_id": "ckpt-store-1",
       "status": "complete",
       "progress_work_units": 40000,
-      "requested_sim_time_ms": 0,
-      "complete_sim_time_ms": 0,
+      "requested_sim_time_ms": 510000,
+      "complete_sim_time_ms": 540000,
       "accessible": true,
       "command_key": "preset.gpu_demo_8.ckpt-job-b-1"
     }
   ],
   "observation_event_ids": [
-    "sig.10000.pump-a.equipment_alarm"
+    "sig.610000.pump-a.equipment_alarm"
   ]
 }

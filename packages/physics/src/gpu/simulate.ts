@@ -187,7 +187,6 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
 
   // checkpoint bookkeeping
   const checkpoint_counter: Record<string, number> = {};
-  const last_checkpoint_sim_ms: Record<string, number> = {};
   for (const j of observable.job_states) {
     let n = 0;
     for (const c of observable.checkpoints) {
@@ -196,8 +195,6 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
       n = Math.max(n, m ? Number(m[1]) : 0);
     }
     checkpoint_counter[j.job_id] = n + 1;
-    const latest = observable.checkpoints.find((c) => c.checkpoint_id === j.latest_checkpoint_id);
-    if (latest) last_checkpoint_sim_ms[j.job_id] = latest.complete_sim_time_ms ?? 0;
   }
   const ids = new Set(observable.checkpoints.map((c) => c.checkpoint_id));
   for (const j of observable.job_states) while (ids.has(`ckpt-${j.job_id}-${checkpoint_counter[j.job_id]}`)) checkpoint_counter[j.job_id]! += 1;
@@ -240,7 +237,7 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
 
   const hidden: HiddenState = {
     model: GPU_MODEL_VERSION, preset_id: `${ESTIMATED_PREFIX}from_observed`, seed,
-    loop_temp_c, gpu_offset_c, gpu_failure, gpu_cordoned, last_checkpoint_sim_ms, checkpoint_counter,
+    loop_temp_c, gpu_offset_c, gpu_failure, gpu_cordoned, checkpoint_counter,
     command_inbox: [], in_flight, finished_command_keys: [], command_outcomes: {}, stale_values: {},
   };
   return {

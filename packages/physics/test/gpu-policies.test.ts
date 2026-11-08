@@ -18,7 +18,7 @@ import {
   type Policy,
   type Scenario,
 } from '../src/index.js';
-import { deepFreeze, gpusOn, readFixture } from './gpu-helpers.js';
+import { T0, deepFreeze, gpusOn, readFixture } from './gpu-helpers.js';
 
 const PUMP = readFixture<ObservedSnapshot>('observed_snapshot_pump_degraded.json');
 const DEMO = readFixture<ObservedSnapshot>('observed_snapshot_demo.json');
@@ -41,10 +41,10 @@ function expectValid(cmds: ActionCommand[]): void {
   expect(new Set(keys(cmds)).size).toBe(cmds.length); // unique within one call
 }
 
-/** Step a scenario with no actions until the clock reaches untilMs (or stop() says so). Returns the world. */
+/** Step a scenario with no actions until the clock reaches run start + untilMs (or stop() says so). Returns the world. */
 function advance(s: Scenario, untilMs: number, stop?: (o: ObservedSnapshot) => boolean): PhysicsWorld {
   let w = scenarioWorld(s);
-  while (w.observable.clock.sim_time_ms < untilMs) {
+  while (w.observable.clock.sim_time_ms < T0 + untilMs) {
     w = step(scenarioTickInput(s, w)).world_after;
     if (stop?.(w.observable)) break;
   }
@@ -68,7 +68,7 @@ interface Drive {
 }
 
 /**
- * A minimal trusted harness: each tick, call the policy on toObserved(world), enqueue keys it has not seen (first
+ * A minimal trusted harness (untilMs is an offset from the run start): each tick, call the policy on toObserved(world), enqueue keys it has not seen (first
  * payload wins), request a command once all its depends_on keys have completed, then step.
  */
 function drive(s: Scenario, policy: (o: ObservedSnapshot) => ActionCommand[], untilMs = s.horizon_s * 1000): Drive {
@@ -77,7 +77,7 @@ function drive(s: Scenario, policy: (o: ObservedSnapshot) => ActionCommand[], un
   const requested = new Set<string>();
   const done = new Set<string>();
   const out: Drive = { perTick: [], emitted: [], completed: [], failed: [], final: toObserved(w) };
-  while (w.observable.clock.sim_time_ms < untilMs) {
+  while (w.observable.clock.sim_time_ms < T0 + untilMs) {
     const obs = toObserved(w);
     const cmds = policy(obs);
     out.perTick.push({ t: obs.clock.sim_time_ms, obs, keys: keys(cmds) });
@@ -387,7 +387,7 @@ describe('idempotent and stateless', () => {
     let w = advance(SC03, 0, undefined);
     const seen = new Set<string>();
     let ticksWithKeys = 0;
-    while (w.observable.clock.sim_time_ms < 300_000) {
+    while (w.observable.clock.sim_time_ms < T0 + 300_000) {
       w = step(scenarioTickInput(SC03, w)).world_after;
       const k = keys(thresholdPolicy(toObserved(w))).filter((x) => x.includes('job-a'));
       if (k.length > 0) ticksWithKeys += 1;

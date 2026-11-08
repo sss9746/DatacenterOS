@@ -129,6 +129,12 @@ describe('GPU fixtures: §0.3 IDs and topology', () => {
     expect(a.progress_work_units - a.durable_work_units).toBe(16 * 540);
     expect(b.progress_work_units - b.durable_work_units).toBe(8 * 60);
     for (const c of demo.checkpoints) expect(c).toMatchObject({ status: 'complete', accessible: true, storage_resource_id: 'ckpt-store-1' });
+    // §0.12 #2: real pre-run times, age = sim_time_ms − complete_sim_time_ms
+    const ck = (id: string) => demo.checkpoints.find((c) => c.job_id === id)!;
+    expect(ck('job-a')).toMatchObject({ requested_sim_time_ms: 30_000, complete_sim_time_ms: 60_000 });
+    expect(ck('job-b')).toMatchObject({ requested_sim_time_ms: 510_000, complete_sim_time_ms: 540_000 });
+    expect(demo.clock.sim_time_ms - ck('job-a').complete_sim_time_ms!).toBe(540_000);
+    expect(demo.clock.sim_time_ms - ck('job-b').complete_sim_time_ms!).toBe(60_000);
   });
 });
 
@@ -152,8 +158,8 @@ describe('GPU fixtures: scenario content', () => {
   const temps = (s: ObservedSnapshot, ...racks: number[]) =>
     s.gpus.filter((g) => gpusOn(...racks).includes(g.resource_id)).map((g) => g.temp_c);
 
-  it('t=0 is healthy: loaded GPUs ≈70 °C, nothing throttled, epoch 0', () => {
-    expect(demo.clock).toMatchObject({ sim_time_ms: 0, tick_index: 0, decision_epoch: 0 });
+  it('the run start (sim 600 000, §0.12 #2) is healthy: loaded GPUs ≈70 °C, nothing throttled, epoch 0', () => {
+    expect(demo.clock).toMatchObject({ sim_time_ms: 600_000, tick_index: 0, decision_epoch: 0 });
     for (const t of temps(demo, 2, 3, 4)) expect(t).toBeGreaterThan(69);
     for (const t of temps(demo, 2, 3, 4)) expect(t).toBeLessThan(71);
     expect(demo.gpus.every((g) => g.clocks_event_reasons === 0 && g.availability === 'ready')).toBe(true);
@@ -166,24 +172,24 @@ describe('GPU fixtures: scenario content', () => {
     expect(r6.thermal_headroom_c).toBeLessThan(5);
   });
 
-  it('t=120 s: pump-a degraded, r2–r4 hotter than t=0, loop-b racks unchanged', () => {
-    expect(degraded.clock).toMatchObject({ sim_time_ms: 120_000, tick_index: 120, decision_epoch: 1 });
+  it('start + 120 s: pump-a degraded, r2–r4 hotter than at the start, loop-b racks unchanged', () => {
+    expect(degraded.clock).toMatchObject({ sim_time_ms: 720_000, tick_index: 120, decision_epoch: 1 });
     expect(degraded.cooling.find((c) => c.resource_id === 'pump-a')?.operating_state).toBe('degraded');
     expect(degraded.cooling.find((c) => c.resource_id === 'pump-b')?.operating_state).toBe('normal');
     const before = temps(demo, 2, 3, 4);
     temps(degraded, 2, 3, 4).forEach((t, i) => expect(t).toBeGreaterThan(before[i]! + 3));
     expect(temps(degraded, 1, 5, 6, 7, 8)).toEqual(temps(demo, 1, 5, 6, 7, 8));
-    expect(degraded.observation_event_ids).toEqual(['sig.10000.pump-a.equipment_alarm']);
+    expect(degraded.observation_event_ids).toEqual(['sig.610000.pump-a.equipment_alarm']);
   });
 
-  it('tick result: fault tick at t=10 s, material change, §0.5 metrics, unique ids, increasing source_seq', () => {
+  it('tick result: fault tick at start + 10 s (610 000), material change, §0.5 metrics, unique ids, increasing source_seq', () => {
     expect(tick.material_change).toBe(true);
-    expect(tick.world_after.observable.clock).toMatchObject({ sim_time_ms: 10_000, decision_epoch: 1 });
+    expect(tick.world_after.observable.clock).toMatchObject({ sim_time_ms: 610_000, tick_index: 10, decision_epoch: 1 });
     expect(tick.signals.map((s) => [s.resource_id, s.event_type])).toEqual([['pump-a', 'equipment_alarm']]);
     expect(tick.telemetry).toHaveLength(64 * 4 + 8 + 2);
     for (const e of tick.telemetry) {
       expect(METRICS_05.has(e.metric), e.metric).toBe(true);
-      expect(e).toMatchObject({ source_kind: 'simulator', quality: 'estimated', sim_time_ms: 10_000 });
+      expect(e).toMatchObject({ source_kind: 'simulator', quality: 'estimated', sim_time_ms: 610_000 });
     }
     // ≤ 1 Hz per GPU: one sample per (resource, metric) in a 1 s tick
     const keys = tick.telemetry.map((e) => `${e.resource_id}|${e.metric}`);
@@ -194,7 +200,7 @@ describe('GPU fixtures: scenario content', () => {
     seqs.slice(1).forEach((s, i) => expect(s).toBeGreaterThan(seqs[i]!));
   });
 
-  it('signal_xid79 is an XID 79 SignalEvent on gpu-r3-n1-0', () => {
-    expect(xid).toMatchObject({ resource_id: 'gpu-r3-n1-0', event_type: 'xid_error', xid_code: 79, severity: 'critical', source_kind: 'simulator' });
+  it('signal_xid79 is an XID 79 SignalEvent on gpu-r3-n1-0 at start + 150 s (750 000)', () => {
+    expect(xid).toMatchObject({ sim_time_ms: 750_000, resource_id: 'gpu-r3-n1-0', event_type: 'xid_error', xid_code: 79, severity: 'critical', source_kind: 'simulator' });
   });
 });

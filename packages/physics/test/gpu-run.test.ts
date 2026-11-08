@@ -7,7 +7,7 @@ import { validatePayload, type ActionCommand, type EvaluationResult, type Observ
 import { PRIVATE_KEYS, loadScenarios, runAllScenarios, runScenario, summarizeResults, type Scenario } from '../src/index.js';
 import { DO_NOTHING_POLICY, runScenarioDetailed, type Policy, type ScenarioRunDetails } from '../src/gpu/run.js';
 import { DO_NOTHING_FILE, EVALUATION_DIR, buildBaselineFiles, type ReferenceRow } from '../scripts/make-baseline-results.js';
-import { gpusOn } from './gpu-helpers.js';
+import { T0, gpusOn } from './gpu-helpers.js';
 
 const scenarios = loadScenarios();
 const byId = new Map(scenarios.map((s) => [s.scenario_id, s]));
@@ -43,9 +43,9 @@ const ckptMove: Policy = (obs) => {
   ];
 };
 
-/** From t ≥ 125 s: move job-a onto the hot rack r6 (its ready GPUs first, then r7 / r8), with no new checkpoint. */
+/** From start + 125 s: move job-a onto the hot rack r6 (its ready GPUs first, then r7 / r8), with no new checkpoint. */
 const unsafeR6: Policy = (obs) => {
-  if (obs.clock.sim_time_ms < 125_000) return [];
+  if (obs.clock.sim_time_ms < T0 + 125_000) return [];
   const ready = (r: number) => obs.gpus.filter((g) => g.resource_id.startsWith(`gpu-r${r}-`) && g.availability === 'ready').map((g) => g.resource_id);
   const dest = [...ready(6), ...ready(7), ...ready(8)].slice(0, 16);
   return [mk(obs, 'migrate_restart', 'job-a', 'unsafe-r6-move-job-a', { destination_gpu_ids: dest })];
@@ -196,7 +196,7 @@ describe('runScenario: the safety gate', () => {
   });
 
   it('gate none: a move onto the hot r1 + r5 (sc09) is denied at request time AND its destination overheats: counted once', async () => {
-    const hotDest: Policy = (obs) => (obs.clock.sim_time_ms >= 15_000
+    const hotDest: Policy = (obs) => (obs.clock.sim_time_ms >= T0 + 15_000
       ? [mk(obs, 'migrate_restart', 'job-a', 'hot-move-job-a', { destination_gpu_ids: gpusOn(1, 5) })]
       : []);
     const open = await runScenarioDetailed(sc('sc09-hot-destination'), hotDest, { policy_name: 'nemotron', gate: 'none' });
@@ -222,7 +222,7 @@ describe('runScenario: the safety gate', () => {
   it('retry_new_snapshot drops the command without remembering its key: the same key re-issued fresh runs', async () => {
     let calls = 0;
     const staleOnce: Policy = (obs) => {
-      if (obs.clock.sim_time_ms < 20_000) return [];
+      if (obs.clock.sim_time_ms < T0 + 20_000) return [];
       calls += 1;
       // first attempt carries a stale epoch; later attempts use the current one with the SAME key
       const epoch = calls === 1 ? obs.clock.decision_epoch + 5 : obs.clock.decision_epoch;
@@ -231,13 +231,13 @@ describe('runScenario: the safety gate', () => {
     const d = await runScenarioDetailed(sc('sc01-thermal-warning-only'), staleOnce, { policy_name: 'nemotron' });
     expect(d.retry_dropped).toBe(1);
     expect(d.commands).toHaveLength(1);
-    expect(d.commands[0]).toMatchObject({ command_key: 'retry-ckpt-job-b', disposition: 'executed', issued_sim_time_ms: 21_000 });
+    expect(d.commands[0]).toMatchObject({ command_key: 'retry-ckpt-job-b', disposition: 'executed', issued_sim_time_ms: T0 + 21_000 });
     expect(d.result.unsafe_actions_blocked).toBe(0);
   });
 
   it('a command on a job whose checkpoint is in flight is a CONFLICTING_ACTION (in-flight lease closure)', async () => {
     const twoCkpts: Policy = (obs) => {
-      const t = obs.clock.sim_time_ms;
+      const t = obs.clock.sim_time_ms - T0;
       if (t === 20_000) return [mk(obs, 'checkpoint', 'job-b', 'lease-ckpt-1')];
       if (t === 25_000) return [mk(obs, 'power_cap', 'job-b', 'lease-cap-1', { power_limit_w: 500 })];
       return [];
@@ -265,7 +265,7 @@ describe('runScenario: policy interface', () => {
     expect(r).toEqual(resultOf(moved, 'sc03-severe-pump'));
     expect(leaks).toEqual([]);
     expect(seenTimes).toHaveLength(sc('sc03-severe-pump').horizon_s);
-    expect(seenTimes[0]).toBe(0);
+    expect(seenTimes[0]).toBe(T0); // the run clock starts at 600 000 (CONTRACTS §0.12 #2)
   });
 
   it('a policy mutating its snapshot cannot change the world', async () => {

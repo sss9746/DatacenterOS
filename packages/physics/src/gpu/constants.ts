@@ -54,8 +54,12 @@ export const R6_INLET_OFFSET_C = 12;
 export const GPU_TEMP_SPREAD_C = 0.6;
 /** Simulated work rate per GPU at nominal clock, work units per sim-second. */
 export const WORK_RATE_PER_GPU_PER_SIM_S = 1;
-/** Sim time of the run start, ms (CONTRACTS §0.12 #2). */
-export const RUN_START_SIM_MS = 0;
+/**
+ * Sim time of the run start, ms (CONTRACTS §0.12 #2: the gpu_demo_8 run clock starts at 600 000 = 10 sim-min, so the
+ * pre-run checkpoints keep real, non-negative completion times). Every "t = X" in the gates is relative to this:
+ * "pump-a degrades at 10 s" means sim_time_ms 610 000. clock.tick_index counts ticks since the run start (0 here).
+ */
+export const RUN_START_SIM_MS = 600_000;
 /** Simulated unix-ms of sim t=0: observed_unix_ms = this + sim_time_ms (demo speed 1×). */
 export const RUN_EPOCH_UNIX_MS = 1_794_091_200_000;
 /** DCGM/NVML clocks_event_reasons HW thermal slowdown bit. */
@@ -66,7 +70,11 @@ export const CLOCKS_EVENT_SW_POWER_CAP = 0x4;
 export const THERMAL_LOAD_FAULT_MAX_C = 20;
 /** Telemetry source id of the simulator. */
 export const SIM_SOURCE_ID = 'sim-engine-1';
-/** Per-tick source_seq layout: tick × 1000 + i; telemetry uses i < 900, signals 900 + j. */
+/**
+ * Per-tick source_seq layout: tick × 1000 + i, with tick = the clock.tick_index the tick ends on (ticks since the run
+ * start, so the first tick is 1); telemetry uses i < 900, signals 900 + j. Unique and strictly increasing per run.
+ * Event ids embed sim_time_ms (tel.<t>.<resource>.<metric>, sig.<t>.<resource>.<event_type>), also unique.
+ */
 export const SEQ_PER_TICK = 1000;
 export const SIGNAL_SEQ_BASE = 900;
 /** Most recent signal event ids kept in ObservedSnapshot.observation_event_ids. */

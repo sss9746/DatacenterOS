@@ -239,7 +239,6 @@ function completeCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ct
       row.complete_sim_time_ms = ctx.t1;
       job.durable_work_units = row.progress_work_units;
       job.latest_checkpoint_id = row.checkpoint_id;
-      h.last_checkpoint_sim_ms[job.job_id] = ctx.t1;
       return null;
     }
     case 'migrate_restart': {
