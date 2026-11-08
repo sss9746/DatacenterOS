@@ -147,7 +147,7 @@ describe('runTriage', () => {
     expect('content' in sys && sys.content).toMatch(/evidence_ids/);
     expect('content' in sys && sys.content).toMatch(/needs_approval/);
     expect(Buffer.byteLength(JSON.stringify(payloadOf(req)), 'utf8')).toBeLessThanOrEqual(LLM_PAYLOAD_MAX_BYTES);
-    expect(r.toolCalls.map((t) => t.tool)).toEqual(['get_incident_evidence', 'group_symptoms', TRIAGE_TOOL_NAME, 'upsert_incident']);
+    expect(r.toolCalls.map((t) => t.tool)).toEqual(['get_incident_evidence', 'group_symptoms', TRIAGE_TOOL_NAME, 'upsert_symptoms', 'upsert_incident']);
     expect(r.evidenceIdsByIncident[PUMP_INC]).toEqual(['sym-cooling_degraded-loop-a-b1']);
   });
 
@@ -172,6 +172,19 @@ describe('runTriage', () => {
     const r8sym = r.symptoms.find((s) => s.kind === 'gpu_xid' && s.resource_id === 'gpu-r8-n1-0')!;
     expect(r8sym.evidence_event_ids).toContain('sig-xid79-gpu-r8-n1-0-555000');
     expectWireValid(r);
+  });
+
+  it('persists all extracted symptoms before incidents and stays idempotent on rerun', async () => {
+    const db = setup(['r7']);
+    const first = await runTriage({ db, llm: null, now });
+    expect(first.symptoms.length).toBeGreaterThan(0);
+    expect(db.symptoms.size).toBe(first.symptoms.length);
+    expect([...db.symptoms.keys()].sort()).toEqual(first.symptoms.map((s) => s.symptom_id).sort());
+    expect(first.toolCalls.map((t) => t.tool)).toContain('upsert_symptoms');
+    const calls = db.calls.map((c) => c.method);
+    expect(calls.indexOf('upsertSymptoms')).toBeLessThan(calls.indexOf('upsertIncident'));
+    await runTriage({ db, llm: null, now });
+    expect(db.symptoms.size).toBe(first.symptoms.length);
   });
 
   it('is idempotent: a rerun keeps the same incident ids, versions and links', async () => {

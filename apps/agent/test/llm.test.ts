@@ -101,6 +101,7 @@ function cfg(overrides: Record<string, string> = {}): AgentConfig {
       NIM_FALLBACK_MODEL: 'nvidia/fallback-model',
       LLM_MAX_TOKENS: '512',
       LLM_TIMEOUT_MS: '2000',
+      LLM_RETRIES: '2',
       ...overrides,
     },
     {},
@@ -157,6 +158,18 @@ describe('createNimLlm', () => {
       },
       { role: 'tool', tool_call_id: 'call-1', content: '{"job-a":"running"}' },
     ]);
+  });
+
+  it('takes thinking mode and retries from config when opts do not override', async () => {
+    queues.primary!.push(textReply('nvidia/primary-model', 'a'), textReply('nvidia/primary-model', 'b'));
+    await createNimLlm(cfg({ NIM_ENABLE_THINKING: 'true' }), { sleep: noSleep }).chat(REQ);
+    await createNimLlm(cfg({ NIM_ENABLE_THINKING: 'omit' }), { sleep: noSleep }).chat(REQ);
+    expect(recorded[0]!.body.chat_template_kwargs).toEqual({ enable_thinking: true });
+    expect(recorded[1]!.body.chat_template_kwargs).toBeUndefined();
+    recorded.length = 0;
+    const llm = createNimLlm(cfg({ LLM_RETRIES: '0', NIM_FALLBACK_MODEL: '' }), { sleep: noSleep });
+    await llm.chat(REQ).catch(() => undefined);
+    expect(recorded).toHaveLength(1);
   });
 
   it('maps a named tool choice and plain text replies', async () => {

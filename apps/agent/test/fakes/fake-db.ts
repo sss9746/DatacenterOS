@@ -44,6 +44,13 @@ export interface FakeDbOptions {
   physics?: PhysicsPort;
   /** Duration of non-checkpoint/non-migrate operations once running (default 0 = next tick). */
   defaultOpDurationMs?: number;
+  /** A claimed-but-never-started action may be re-claimed by another worker after this much wall time (default 15000). */
+  claimLeaseMs?: number;
+  /**
+   * Opt-in (default false, so existing verify tests that expect a cordon not to hold stay valid): when a
+   * cordon_gpu action completes set the GPU's availability to 'cordoned'; uncordon_gpu sets it back to 'ready'.
+   */
+  applyCordon?: boolean;
 }
 
 export interface FakeActionEvent {
@@ -60,6 +67,9 @@ interface ActionRecord {
   status: ActionStatus;
   fencingToken: bigint | null;
   dueSimMs: number | null;
+  /** Wall time of the (latest) claim; only meaningful while status is 'claimed'. */
+  claimedAtMs: number | null;
+  claimedBy: string | null;
 }
 
 const V = '1.1.0' as const;
@@ -104,6 +114,10 @@ export class FakeDb implements DbPort {
   private readonly listeners = new Set<(c: DbChange) => void>();
   private readonly physics: PhysicsPort | undefined;
   private readonly defaultOpDurationMs: number;
+  private readonly claimLeaseMs: number;
+  private readonly applyCordon: boolean;
+  /** Jobs whose migrate_restart completed: tick() accrues progress for them while running. */
+  private readonly progressingJobs = new Set<string>();
   private readonly nowFn: () => number;
   private wallMs = 1_794_091_200_000;
   private fencingCounter = 0n;
@@ -112,6 +126,8 @@ export class FakeDb implements DbPort {
     this.snap = clone(opts.snapshot);
     this.physics = opts.physics;
     this.defaultOpDurationMs = opts.defaultOpDurationMs ?? 0;
+    this.applyCordon = opts.applyCordon ?? false;
+    this.claimLeaseMs = opts.claimLeaseMs ?? 15_000;
     this.nowFn = opts.now ?? (() => this.wallMs);
   }
 
@@ -240,12 +256,33 @@ export class FakeDb implements DbPort {
       this.snap.clock.sim_time_ms += dt;
       this.snap.clock.tick_index += 1;
       this.refreshReachableGpus();
+      this.accrueProgress(dt);
       for (const rec of this.actions.values()) {
         if (rec.status.status === 'running' && rec.dueSimMs !== null && rec.dueSimMs <= this.simMs) {
           this.complete(rec);
         }
       }
     }
+  }
+
+  /** Post-migration progress: gpus x rate x dt for jobs that are running again. */
+  private accrueProgress(dtMs: number): void {
+    for (const jobId of this.progressingJobs) {
+      const job = this.snap.job_states.find((j) => j.job_id === jobId);
+      const spec = this.snap.job_specs.find((j) => j.job_id === jobId);
+      if (!job || !spec || job.status !== 'running') continue;
+      const gain = job.allocated_gpu_ids.length * spec.work_rate_per_gpu_per_sim_s * (dtMs / 1000);
+      job.progress_work_units = Math.min(spec.total_work_units, job.progress_work_units + gain);
+    }
+  }
+
+  private setGpuAvailability(gpuId: string, availability: 'ready' | 'cordoned'): void {
+    const gpu = this.snap.gpus.find((g) => g.resource_id === gpuId);
+    if (!gpu || gpu.availability === availability) return;
+    if (gpu.availability === 'unreachable') return; // a dead GPU stays unreachable
+    gpu.availability = availability;
+    gpu.version += 1;
+    this.emit({ kind: 'resource_version', resource_id: gpu.resource_id, version: gpu.version, sim_time_ms: this.simMs });
   }
 
   private complete(rec: ActionRecord): void {
@@ -285,7 +322,10 @@ export class FakeDb implements DbPort {
       job.status = 'running';
       job.version += 1;
       result.destination_gpu_ids = dest;
+      this.progressingJobs.add(job.job_id);
     }
+    if (this.applyCordon && cmd.operation === 'cordon_gpu') this.setGpuAvailability(cmd.target_resource_id, 'cordoned');
+    if (this.applyCordon && cmd.operation === 'uncordon_gpu') this.setGpuAvailability(cmd.target_resource_id, 'ready');
     if (job) this.emit({ kind: 'resource_version', resource_id: job.job_id, version: job.version, sim_time_ms: this.simMs });
     this.transition(rec, 'succeeded', { result });
   }
@@ -379,7 +419,7 @@ export class FakeDb implements DbPort {
       reason_code: rejected ? 'SAFETY_REJECTED' : null,
       version: 1,
     };
-    this.actions.set(cmd.command_key, { cmd: clone(cmd), payloadHash: hash, status, fencingToken: null, dueSimMs: null });
+    this.actions.set(cmd.command_key, { cmd: clone(cmd), payloadHash: hash, status, fencingToken: null, dueSimMs: null, claimedAtMs: null, claimedBy: null });
     this.logActionEvent(status);
     this.emit({ kind: 'action_status', status: clone(status) });
     return clone(status);
@@ -395,9 +435,15 @@ export class FakeDb implements DbPort {
     if (rec.status.version !== expectedVersion) {
       throw new DbError('VERSION_CONFLICT', `action ${commandKey} is v${rec.status.version}, expected v${expectedVersion}`);
     }
-    if (rec.status.status !== 'requested') {
+    if (rec.status.status === 'claimed' && rec.claimedBy !== workerId) {
+      // Never-started claim by another worker: held until the claim lease expires (a RUNNING action is never released).
+      const heldUntil = (rec.claimedAtMs ?? 0) + this.claimLeaseMs;
+      if (this.nowFn() < heldUntil) throw new DbError('LEASE_HELD', `action ${commandKey} claimed by ${rec.claimedBy}`);
+    } else if (rec.status.status !== 'requested') {
       throw new DbError('INVALID_TRANSITION', `cannot claim ${commandKey} from ${rec.status.status}`);
     }
+    rec.claimedAtMs = this.nowFn();
+    rec.claimedBy = workerId;
     rec.fencingToken = this.nextFencingToken();
     const status = this.transition(rec, 'claimed', { result: { ...rec.status.result, claimed_by: workerId } });
     return { status, fencing_token: rec.fencingToken };
