@@ -35,11 +35,20 @@ import {
 /** Latched hardware failure of a GPU (truth; survives the fault's duration: hardware does not self-heal). */
 export type GpuFailure = 'xid_79' | 'xid_48' | 'xid_74' | 'thermal_shutdown' | 'node_crash';
 
+/** How a command ended. reason_code uses CONTRACTS §0.7 codes where one fits, else a physics-specific code. */
+export interface CommandOutcome {
+  ok: boolean;
+  reason_code: string | null;
+  sim_time_ms: number;
+}
+
 /** A command that has started and completes on a later tick (P1-5). */
 export interface InFlightCommand {
   command: ActionCommand;
   started_sim_ms: number;
   due_sim_ms: number;
+  /** checkpoint: the job status to return to when the write ends. */
+  resume_status?: 'running' | 'paused';
   /** checkpoint: the checkpoint row being written. */
   checkpoint_id?: string;
   /** migrate_restart: the destination GPUs allocated at start. */
@@ -72,6 +81,8 @@ export interface HiddenState {
   in_flight: InFlightCommand[];
   /** command_keys already completed or failed (idempotency: a key never runs twice). */
   finished_command_keys: string[];
+  /** Outcome per finished command_key (PhysicsTickResult has no per-command reason field; see commandOutcome()). */
+  command_outcomes: Record<string, CommandOutcome>;
   /** Last good observed values for resources under a sensor_stale fault: `${resource_id}|${field}` → value. */
   stale_values: Record<string, number>;
 }

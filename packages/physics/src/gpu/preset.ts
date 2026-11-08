@@ -237,6 +237,7 @@ export function buildPreset(presetId: PresetId, runId: string, seed: number): Ph
     command_inbox: [],
     in_flight: [],
     finished_command_keys: [],
+    command_outcomes: {},
     stale_values: {},
   };
 

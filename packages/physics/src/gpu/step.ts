@@ -144,7 +144,7 @@ export function step(input: SimulationTickInput): PhysicsTickResult {
   obs.gpus = derived.gpus;
   obs.nodes = deriveNodes(obs.nodes, obs.gpus, h, topo);
   obs.cooling = deriveCooling(obs.cooling, topo, cond1);
-  for (const c of obs.checkpoints) c.accessible = !cond1.storageDown.has(c.storage_resource_id);
+  for (const c of obs.checkpoints) c.accessible = c.status !== 'failed' && !cond1.storageDown.has(c.storage_resource_id);
   for (const job of obs.job_states) job.last_update_sim_time_ms = ctx.t1;
 
   // 5. versions + material change (observable, safety-relevant fields only)

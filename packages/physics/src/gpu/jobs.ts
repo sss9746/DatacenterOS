@@ -25,9 +25,10 @@ export const JOB_FATAL_FAILURES: ReadonlySet<GpuFailure> = new Set(['xid_79', 'x
 /** Jobs that hold GPUs. */
 export const ACTIVE_STATUSES: ReadonlySet<JobState['status']> = new Set(['running', 'checkpointing', 'paused', 'restarting']);
 
-export function finishCommand(h: HiddenState, ctx: TickCtx, commandKey: string, ok: boolean): void {
+export function finishCommand(h: HiddenState, ctx: TickCtx, commandKey: string, ok: boolean, reason: string | null = null): void {
   (ok ? ctx.completed : ctx.failed).push(commandKey);
   if (!h.finished_command_keys.includes(commandKey)) h.finished_command_keys.push(commandKey);
+  h.command_outcomes[commandKey] = { ok, reason_code: ok ? null : reason ?? 'FAILED', sim_time_ms: ctx.t1 };
   h.in_flight = h.in_flight.filter((f) => f.command.command_key !== commandKey);
 }
 
@@ -51,7 +52,7 @@ export function failJob(world: PhysicsWorld, h: HiddenState, ctx: TickCtx, job: 
       const row = world.observable.checkpoints.find((c) => c.checkpoint_id === f.checkpoint_id);
       if (row) row.status = 'failed';
     }
-    finishCommand(h, ctx, f.command.command_key, false);
+    finishCommand(h, ctx, f.command.command_key, false, 'JOB_FAILED_DURING_OPERATION');
   }
 }
 
