@@ -8,7 +8,7 @@ import { number } from '../../lib/utils';
 import {
   baselines, buildScoreboard, exportPayload, headlineMetrics, metricInfo, metricLabel, metricValue, provenanceLabel, shortRevision,
   tally, unfinishedTotal, verdict, verdictText, viewMetrics,
-  type Case, type ColumnProvenance, type Outcome, type Policy, type ScoreboardView, type Verdict, type ViewMetric,
+  type Case, type ColumnProvenance, type HeadlineTally, type Outcome, type Policy, type ScoreboardView, type Verdict, type ViewMetric,
 } from './scoreboard-view';
 import './scoreboard.css';
 
@@ -62,18 +62,37 @@ function Refusal({ view, source }: { view: ScoreboardView; source: string }) {
 }
 
 function Comparison({ view, source }: { view: ScoreboardView; source: string }) {
-  const { cases, names, columns } = view;
+  const { cases, names, shortNames, columns } = view;
+  const countLine = `${cases.length} matched scenario/seed cases · ${cases.length * policies.length} policy runs · ${source}`;
   return <>
-    <p className="panel-footnote sb-count">{cases.length} matched scenario/seed cases · {cases.length * policies.length} policy runs · {source}</p>
-    {view.legacyOnly ? <p className="data-warning sb-inset">Provenance unavailable on every row (legacy results). Batch, revision, horizon and model use cannot be checked, so these results cannot be certified. Unfinished jobs are unknown.</p> : <BatchSummary view={view}/>}
+    <Headline view={view}/>
     {view.claim.banner && <div className="sb-banner" role="note"><AlertTriangle size={16} aria-hidden="true"/><div><strong>Cannot substantiate a Nemotron performance claim</strong><p>{view.claim.banner}</p></div></div>}
-    <ProvenanceColumns columns={columns} names={names}/>
-    <Tallies cases={cases} name={names.nemotron} label={columns[2].headline}/>
-    <CaseTable cases={cases} names={names} columns={columns}/>
-    <Aggregates view={view}/>
+    {/* the honesty point judges should see without clicking: every case where our column is worse on any metric */}
     <Outcomes title={`Cases where ${names.nemotron} loses or trades off`} open items={view.report.losses.flatMap((loss) => loss.worse.map((metric): Outcome => ({ scenario_id: loss.scenario_id, seed: loss.seed, baseline: loss.baseline, metric, ours: loss.nemotron[metric], theirs: loss.other[metric] })))} names={names} empty="No worse values on lost work, finite-horizon work deficit, GPU busy waste, unnecessary interventions, unsafe execution or failed recoveries."/>
+    <details className="report-details sb-provenance"><summary>Batch provenance<small>{countLine}</small></summary>
+      {view.legacyOnly ? <p className="data-warning">Provenance unavailable on every row (legacy results). Batch, revision, horizon and model use cannot be checked, so these results cannot be certified. Unfinished jobs are unknown.</p> : <BatchSummary view={view}/>}
+      <ProvenanceColumns columns={columns} names={names}/>
+    </details>
+    <Tallies cases={cases} name={names.nemotron} label={columns[2].headline}/>
+    <CaseTable cases={cases} names={shortNames} columns={columns}/>
+    <Aggregates view={view}/>
     <Outcomes title={`Ties on lost work or finite-horizon work deficit`} items={view.outcomes.ties} names={names} empty="No ties on the headline metrics."/>
   </>;
+}
+
+const tallyText = (t: HeadlineTally) => `${plural(t.win, 'win')} · ${plural(t.tie, 'tie')} · ${plural(t.loss, 'loss', 'losses')}${t.unknown ? ` · ${t.unknown} unknown` : ''}`;
+/** First row: lost work per policy over the matched cases, with case-count tallies. Numbers come from `view.headline` only. */
+function Headline({ view }: { view: ScoreboardView }) {
+  const { cases, shortNames, columns } = view;
+  return <section className="sb-headline" aria-labelledby="sb-headline-heading">
+    <h3 id="sb-headline-heading">Lost work over {plural(cases.length, 'matched case')}<span>work units, summed · lower is better · wins, ties and losses are case counts on lost work</span></h3>
+    <ul className="sb-headline-grid">{view.headline.map((column, index) => <li key={column.policy} className={column.lowest ? 'sb-headline-col sb-headline-lowest' : 'sb-headline-col'}>
+      <span className="sb-headline-name">{shortNames[column.policy]}</span>
+      <Badge tone={columns[index].uniform?.tone ?? 'warning'}>{columns[index].headline}</Badge>
+      <strong className="sb-headline-value numeric">{fmt(column.lostWork)}</strong>
+      {column.tallies.map((t) => <span key={t.versus} className="sb-headline-tally"><span>vs {shortNames[t.versus]}</span>{tallyText(t)}</span>)}
+    </li>)}</ul>
+  </section>;
 }
 
 function BatchSummary({ view }: { view: ScoreboardView }) {
@@ -108,8 +127,8 @@ function ProvenanceColumns({ columns, names }: { columns: ColumnProvenance[]; na
 function Tallies({ cases, name, label }: { cases: Case[]; name: string; label: string }) {
   return <div className="sb-section"><h3>{name} vs baselines, per case</h3><p className="sb-note">Provenance: {label}. Counts of cases only; no percentage claims.</p>
     <div className="table-scroll" tabIndex={0} role="region" aria-label="Win, tie and loss counts"><table className="sb-narrow">
-      <thead><tr><th scope="col">Metric (lower is better)</th>{baselines.map((b) => <th scope="col" key={b}>vs {b}</th>)}</tr></thead>
-      <tbody>{headlineMetrics.map((metric) => <tr key={metric}><th scope="row">{metricLabel(metric)}</th>{baselines.map((b) => { const t = tally(cases, metric, b); return <td key={b} className="numeric">{plural(t.win, 'win')} · {plural(t.tie, 'tie')} · {plural(t.loss, 'loss', 'losses')}{t.unknown ? ` · ${t.unknown} unknown` : ''}</td>; })}</tr>)}</tbody>
+      <thead><tr><th scope="col">Metric (lower is better)</th>{baselines.map((b) => <th scope="col" key={b} className="numeric">vs {b}</th>)}</tr></thead>
+      <tbody>{headlineMetrics.map((metric) => <tr key={metric}><th scope="row">{metricLabel(metric)}</th>{baselines.map((b) => <td key={b} className="numeric">{tallyText({ versus: b, ...tally(cases, metric, b) })}</td>)}</tr>)}</tbody>
     </table></div>
   </div>;
 }
@@ -119,16 +138,18 @@ function CaseTable({ cases, names, columns }: { cases: Case[]; names: Record<Pol
   const selectId = useId();
   const info = metricInfo[metric];
   const ranked = info.direction !== 'unranked';
+  // the per-row provenance pill repeats the column header when every nemotron row carries the same label
+  const perRowProvenance = columns[2].uniform === null;
   return <div className="sb-section"><h3>Per-scenario results</h3>
     <div className="sb-toolbar"><label htmlFor={selectId}>Metric</label><select id={selectId} value={metric} onChange={(event) => setMetric(event.target.value as ViewMetric)}>{viewMetrics.map((m) => <option key={m} value={m}>{metricLabel(m)}</option>)}</select></div>
     <p className="sb-note">{info.label} ({info.unit}){ranked ? ', lower is better' : ''}. {info.note ?? ''}</p>
-    <div className="table-scroll" tabIndex={0} role="region" aria-label={`Per-scenario ${info.label}`}><table>
-      <thead><tr><th scope="col">Scenario · seed</th>{policies.map((p) => <th scope="col" key={p}>{names[p]}</th>)}{baselines.map((b) => <th scope="col" key={b}>vs {b}</th>)}<th scope="col">Nemotron-policy row provenance</th></tr></thead>
+    <div className="table-scroll" tabIndex={0} role="region" aria-label={`Per-scenario ${info.label}`}><table className="sb-dense">
+      <thead><tr><th scope="col">Scenario · seed</th>{policies.map((p) => <th scope="col" key={p} className="numeric">{names[p]}</th>)}{baselines.map((b) => <th scope="col" key={b}>vs {b}</th>)}{perRowProvenance && <th scope="col">Nemotron-policy row provenance</th>}</tr></thead>
       <tbody>{cases.map((item) => { const nem = provenanceLabel(item.rows.nemotron); return <tr key={item.key}>
         <th scope="row"><code>{item.scenario_id}</code><small>seed {item.seed} · horizon {item.horizon_sim_s === null ? 'unknown' : `${item.horizon_sim_s} s`}</small></th>
         {policies.map((policy, index) => <MetricCell key={policy} row={item.rows[policy]} metric={metric} uniform={columns[index].uniform !== null}/>)}
         {baselines.map((b) => { const v = verdict(item, metric, b); return <td key={b}><Badge tone={verdictTone[v]}>{verdictText[v]}</Badge></td>; })}
-        <td><Badge tone={nem.tone}>{nem.text}</Badge></td>
+        {perRowProvenance && <td><Badge tone={nem.tone}>{nem.text}</Badge></td>}
       </tr>; })}</tbody>
     </table></div>
   </div>;
@@ -137,7 +158,7 @@ function CaseTable({ cases, names, columns }: { cases: Case[]; names: Record<Pol
 function MetricCell({ row, metric, uniform }: { row: EvaluationResult; metric: ViewMetric; uniform: boolean }) {
   const value = metricValue(row, metric);
   const p = row.provenance;
-  return <td>
+  return <td className="numeric">
     <span className="numeric">{fmt(value)}</span>
     {metric === 'unfinished_jobs' && p && p.unfinished_job_ids.length > 0 && <small>{p.unfinished_job_ids.join(', ')}{p.failed_job_ids.length ? ` (failed: ${p.failed_job_ids.join(', ')})` : ''}</small>}
     {!uniform && <small>{provenanceLabel(row).text}</small>}
@@ -150,10 +171,10 @@ function Aggregates({ view }: { view: ScoreboardView }) {
   const cell = (d: Distribution | null, key: 'total' | 'mean') => <td className="numeric">{fmt(d?.[key])}</td>;
   return <>
     <div className="sb-section"><h3>Aggregate over matched cases</h3>
-      <div className="table-scroll" tabIndex={0} role="region" aria-label="Aggregate policy comparison"><table>
-        <thead><tr><th scope="col">Policy</th><th scope="col">Lost work (total)</th><th scope="col">Finite-horizon work deficit (mean s)</th><th scope="col">GPU busy waste (total s)</th><th scope="col">Unnecessary interventions</th><th scope="col">Unsafe blocked / executed</th><th scope="col">Recoveries succeeded / failed</th><th scope="col">Unfinished jobs (total)</th></tr></thead>
+      <div className="table-scroll" tabIndex={0} role="region" aria-label="Aggregate policy comparison"><table className="sb-dense">
+        <thead><tr><th scope="col">Policy</th>{['Lost work (total)', 'Finite-horizon work deficit (mean s)', 'GPU busy waste (total s)', 'Unnecessary interventions', 'Unsafe blocked / executed', 'Recoveries succeeded / failed', 'Unfinished jobs (total)'].map((label) => <th scope="col" key={label} className="numeric">{label}</th>)}</tr></thead>
         <tbody>{summaries.map((row, index) => { const m = row.metrics; return <tr key={row.policy}>
-          <th scope="row">{view.names[row.policy]}<small>{view.columns[index].headline}</small></th>
+          <th scope="row">{view.shortNames[row.policy]}<small>{view.columns[index].headline}</small></th>
           {cell(m.lost_work_units, 'total')}{cell(m.job_completion_delay_s, 'mean')}{cell(m.gpu_busy_waste_s, 'total')}{cell(m.unnecessary_preemptions, 'total')}
           <td className="numeric">{fmt(m.unsafe_actions_blocked?.total, 0)} / {fmt(m.unsafe_actions_executed?.total, 0)}</td>
           <td className="numeric">{fmt(m.successful_recoveries?.total, 0)} / {fmt(m.failed_recoveries?.total, 0)}</td>
@@ -161,9 +182,9 @@ function Aggregates({ view }: { view: ScoreboardView }) {
         </tr>; })}</tbody>
       </table></div>
     </div>
-    <details className="report-details"><summary>Distributions across cases</summary><div className="table-scroll" tabIndex={0} role="region" aria-label="Evaluation distributions"><table>
-      <thead><tr><th scope="col">Policy</th><th scope="col">Deficit median (s)</th><th scope="col">Deficit p95 (s)</th><th scope="col">Deficit range (s)</th><th scope="col">Lost work median</th><th scope="col">Lost work range</th></tr></thead>
-      <tbody>{summaries.map((row) => { const d = row.metrics.job_completion_delay_s; const l = row.metrics.lost_work_units; return <tr key={row.policy}><th scope="row">{view.names[row.policy]}</th><td className="numeric">{fmt(d?.median)}</td><td className="numeric">{fmt(d?.p95)}</td><td className="numeric">{range(d)}</td><td className="numeric">{fmt(l?.median)}</td><td className="numeric">{range(l)}</td></tr>; })}</tbody>
+    <details className="report-details"><summary>Distributions across cases</summary><div className="table-scroll" tabIndex={0} role="region" aria-label="Evaluation distributions"><table className="sb-dense">
+      <thead><tr><th scope="col">Policy</th>{['Deficit median (s)', 'Deficit p95 (s)', 'Deficit range (s)', 'Lost work median', 'Lost work range'].map((label) => <th scope="col" key={label} className="numeric">{label}</th>)}</tr></thead>
+      <tbody>{summaries.map((row) => { const d = row.metrics.job_completion_delay_s; const l = row.metrics.lost_work_units; return <tr key={row.policy}><th scope="row">{view.shortNames[row.policy]}</th><td className="numeric">{fmt(d?.median)}</td><td className="numeric">{fmt(d?.p95)}</td><td className="numeric">{range(d)}</td><td className="numeric">{fmt(l?.median)}</td><td className="numeric">{range(l)}</td></tr>; })}</tbody>
     </table></div><p>Finite-horizon work deficit is a lower bound truncated at each case horizon, not measured completion time.</p></details>
   </>;
 }

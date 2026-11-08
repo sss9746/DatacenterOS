@@ -98,6 +98,27 @@ describe('ledger view model', () => {
     expect(formatEvidence({ required_headroom_c: 5 })[0]).toMatchObject({ value: expect.stringContaining(`actual ${UNAVAILABLE}`), tone: null });
   });
 
+  it('reads the BLOCKED reason from the recorded violations, request-time check first, and never invents one', () => {
+    const blocked = status({ status: 'failed', reason_code: 'SAFETY_REJECTED', result: { violations: ['DEST_GPU_BUSY', 'DEST_GPU_COUNT_INSUFFICIENT'] } });
+    const safety = { decision: 'deny' as const, violations: ['STALE_DECISION_EPOCH', 'DEST_GPU_BUSY'], checked_decision_epoch: 3, evidence: {} };
+    // request-time check wins over the status row, keeps the count of further codes
+    const withSafety = describeAction(blocked, detail(cmd(), blocked, { safety }), new Map(), 600_000);
+    expect(withSafety.blockedReason).toEqual({ code: 'STALE_DECISION_EPOCH', text: reasonText('STALE_DECISION_EPOCH'), source: 'request-time check', more: 1 });
+    // start-time recheck when the request-time check allowed it
+    const allowed = { decision: 'allow' as const, violations: [], checked_decision_epoch: 3, evidence: {} };
+    const atStart = describeAction(blocked, detail(cmd(), blocked, { safety: allowed, start_safety: { ...safety, violations: ['DEST_GPU_UNHEALTHY'] } }), new Map(), 600_000);
+    expect(atStart.blockedReason).toMatchObject({ code: 'DEST_GPU_UNHEALTHY', source: 'start-time recheck', more: 0 });
+    // status-only row: the ledger row's own violations
+    expect(describeAction(blocked, null, new Map(), 600_000).blockedReason).toMatchObject({ code: 'DEST_GPU_BUSY', source: 'ledger row', more: 1 });
+    // nothing recorded anywhere → null, never a guessed reason
+    expect(describeAction(status({ status: 'failed', reason_code: 'SAFETY_REJECTED' }), null, new Map(), 600_000).blockedReason).toBeNull();
+    // not blocked → null even with violations around
+    expect(describeAction(status({ status: 'failed', reason_code: 'JOB_FAILED_DURING_OPERATION', result: { violations: ['X'] } }), null, new Map(), 600_000).blockedReason).toBeNull();
+    // a command without a job renders no "Job no job"
+    const noJob = cmd({ operation: 'cordon_gpu', job_id: null, target_resource_id: 'gpu-r7-n1-0' });
+    expect(describeAction(status(), detail(noJob, status()), new Map(), 600_000).detail!.job).toBeNull();
+  });
+
   it('describes history detail payloads', () => {
     expect(historyNotes({ outcome: { status: 'failed', reason_code: 'JOB_FAILED_DURING_OPERATION', sim_time_ms: 630_000 } })[0]).toBe('Outcome failed (JOB_FAILED_DURING_OPERATION) at 00:10:30 sim');
     expect(historyNotes({ verification: { verified: true, note: 'progress advanced' } })).toEqual(['Verified — progress advanced']);
@@ -147,7 +168,7 @@ describe('ledger view model on real mock-client details with physics evaluateSaf
     const done = rows.find((r) => r.commandKey === 'wf-1:ckpt:job-a')!;
     expect(done.label).toBe('succeeded');
     expect(done.detail!.progress).toBeNull();
-    expect(done.verification).toMatchObject({ state: 'unverified', label: 'Ledger succeeded · not verified' });
+    expect(done.verification).toMatchObject({ state: 'unverified', label: 'Not verified' });
     expect(done.detail!.history.at(-1)!.notes[0]).toMatch(/^Outcome succeeded at /);
     expect(rows.find((r) => r.commandKey === 'wf-1:mig:job-b')!.detail!.dependencies[0]).toMatchObject({ status: 'succeeded', succeeded: true });
 
@@ -166,7 +187,13 @@ describe('ledger view model on real mock-client details with physics evaluateSaf
     expect(html).toContain('A destination GPU is already allocated.');
     expect(html).toContain('Details not received yet');
     expect(html).toContain('Verified');
-    expect((html.match(/<details>/g) ?? []).length).toBe(3);
+    // three rows; only the blocked one is open by default, and its reason is in the summary, not just the body
+    expect((html.match(/<details( open="")?>/g) ?? []).length).toBe(3);
+    expect((html.match(/<details open="">/g) ?? []).length).toBe(1);
+    const blockedRow = rows.find((r) => r.commandKey === 'wf-1:mig:job-b')!;
+    expect(blockedRow.blockedReason).toMatchObject({ code: blockedRow.detail!.safety!.violations[0]!.code, source: 'request-time check', more: 2 });
+    expect(html).toContain(`<span class="ledger-blocked-reason">${blockedRow.blockedReason!.text} <code class="ledger-inline-code">${blockedRow.blockedReason!.code}</code>`);
+    expect(html).not.toContain('Job no job');
     db.close();
   });
 

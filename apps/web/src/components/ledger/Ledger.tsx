@@ -11,6 +11,7 @@ import './ledger.css';
 
 export { actionLabel, reasonText } from './action-view';
 
+const LIFECYCLE = 'requested → claimed → running → terminal status → verified';
 const FILTERS: { value: LedgerFilter; label: string }[] = [
   { value: 'all', label: 'All actions' }, { value: 'active', label: 'In progress' }, { value: 'blocked', label: 'Blocked' },
 ];
@@ -38,9 +39,8 @@ export function Ledger({ actions, details, simTimeMs }: { actions: ActionStatus[
           {workflows.map((id) => <option key={id} value={id}>{id}</option>)}
         </select>
       </label>
-      <p className="ledger-count" aria-live="polite">{filtered ? `${shown.length} of ${rows.length} shown` : `${rows.length} actions`}</p>
+      <p className="ledger-count" aria-live="polite" title={`Lifecycle: ${LIFECYCLE}`}>{filtered ? `${shown.length} of ${rows.length} shown` : `${rows.length} actions`}</p>
     </div>
-    <div className="ledger-lifecycle"><span>requested</span><span aria-hidden="true">→</span><span>claimed</span><span aria-hidden="true">→</span><span>running</span><span aria-hidden="true">→</span><span>terminal status</span><span aria-hidden="true">→</span><span>verified</span></div>
     {!shown.length
       ? <Empty title={rows.length ? 'No actions match these filters' : 'No commands submitted'}>{rows.length ? 'Choose All actions and All workflows to see the full ledger. Actions whose details have not arrived cannot be matched to a workflow yet.' : 'Accepted commands and safety rejections appear here, identified by a stable command key.'}</Empty>
       : <ol className="ledger-list" aria-label="Actions, newest first">{shown.map((row) => <LedgerRow key={row.commandKey} row={row}/>)}</ol>}
@@ -49,12 +49,19 @@ export function Ledger({ actions, details, simTimeMs }: { actions: ActionStatus[
 
 function LedgerRow({ row }: { row: ActionView }) {
   const d = row.detail;
-  return <li className="ledger-row">
-    <details>
+  const reason = row.blockedReason;
+  return <li className={row.blocked ? 'ledger-row ledger-row-blocked' : 'ledger-row'}>
+    {/* a blocked row opens by default: the safety decision is the point of the ledger */}
+    <details open={row.blocked || undefined}>
       <summary className="ledger-summary">
         <span className="ledger-summary-main">
           <strong>{d ? d.operationLabel : 'Operation not received yet'}</strong>
-          {d ? <span className="ledger-summary-sub">Job {d.job} · target {d.target}</span> : <span className="ledger-summary-sub">Details not received yet</span>}
+          {row.blocked ? <span className="ledger-blocked-reason">
+            {reason
+              ? <>{reason.text} <code className="ledger-inline-code">{reason.code}</code>{reason.more > 0 ? <span className="ledger-blocked-more">+{reason.more} more</span> : null}</>
+              : 'Blocked by the safety check; no violation code was recorded on this row.'}
+          </span> : null}
+          {d ? <span className="ledger-summary-sub">{d.job ? `Job ${d.job} · target ${d.target}` : `Target ${d.target}`}</span> : <span className="ledger-summary-sub">Details not received yet</span>}
           <code>{row.commandKey}</code>
         </span>
         <span className="ledger-summary-status">
@@ -85,10 +92,18 @@ function PendingBody({ row }: { row: ActionView }) {
 function DetailBody({ row }: { row: ActionView }) {
   const d = row.detail!;
   const started = d.history.some((h) => h.label === 'running');
+  const safety = <>
+    <SafetySection title="Request-time safety check" view={d.safety} missing="Safety decision not recorded for this request."/>
+    {d.startSafety
+      ? <SafetySection title="Start-time recheck" view={d.startSafety} missing=""/>
+      : started ? <p className="ledger-note ledger-section">No start-time rejection recorded.</p> : null}
+  </>;
   return <>
+    {/* blocked: the safety decision comes first, before the command facts */}
+    {row.blocked ? <div className="ledger-safety-first">{safety}</div> : null}
     <dl className="ledger-facts">
       <Fact term="Operation">{d.operationLabel} <code className="ledger-inline-code">{d.operation}</code></Fact>
-      <Fact term="Job">{d.job}</Fact>
+      <Fact term="Job">{d.job ?? 'no job'}</Fact>
       <Fact term="Target">{d.target}</Fact>
       <Fact term="Workflow"><code>{d.workflowId}</code></Fact>
       <Fact term="Plan"><code>{d.planId}</code></Fact>
@@ -120,10 +135,7 @@ function DetailBody({ row }: { row: ActionView }) {
         : <p className="ledger-note">No dependencies.</p>}
     </section>
 
-    <SafetySection title="Request-time safety check" view={d.safety} missing="Safety decision not recorded for this request."/>
-    {d.startSafety
-      ? <SafetySection title="Start-time recheck" view={d.startSafety} missing=""/>
-      : started ? <p className="ledger-note ledger-section">No start-time rejection recorded.</p> : null}
+    {row.blocked ? null : safety}
 
     {row.verification ? <section className="ledger-section"><h3>Verification</h3>
       <p className="ledger-note"><Badge tone={row.verification.tone}>{row.verification.label}</Badge>{row.verification.note ? ` ${row.verification.note}` : ''}</p>
@@ -132,6 +144,7 @@ function DetailBody({ row }: { row: ActionView }) {
     </section> : null}
 
     <section className="ledger-section"><h3>Lifecycle history</h3>
+      <p className="ledger-lifecycle-order">{LIFECYCLE}</p>
       {d.history.length
         ? <ol className="ledger-history">{d.history.map((h) => <li key={h.key}>
           <div className="ledger-history-head"><Badge tone={h.tone}>{h.label}</Badge><span>{h.version}</span><time>{h.simTime}</time></div>

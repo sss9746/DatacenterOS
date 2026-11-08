@@ -94,6 +94,15 @@ export function nemotronName(rows: readonly EvaluationResult[]): string {
 export function policyName(policy: Policy, rows: readonly EvaluationResult[]): string {
   return policy === 'nemotron' ? nemotronName(rows) : policyLabels[policy];
 }
+/**
+ * Short column heading for dense tables and the headline. Only the fully deterministic nemotron column gets the short
+ * form ("no model calls" stays in the name); every other provenance mix keeps the full honest name.
+ */
+export function columnName(policy: Policy, rows: readonly EvaluationResult[]): string {
+  if (policy !== 'nemotron') return policyLabels[policy];
+  const own = rows.filter((row) => row.policy === 'nemotron').map(provenanceKind);
+  return own.length && own.every((kind) => kind === 'deterministic') ? 'Nemotron policy · no model calls' : nemotronName(rows);
+}
 
 /**
  * Whether the nemotron-policy rows can support a Nemotron performance claim: every row must be model-backed or a
@@ -184,6 +193,27 @@ export function tally(cases: readonly Case[], metric: ViewMetric, baseline: Excl
   for (const item of cases) { const v = verdict(item, metric, baseline); if (v !== 'unranked') out[v]++; }
   return out;
 }
+
+/** One headline column: total lost work over the matched cases plus case-count tallies against the other side. */
+export type HeadlineTally = { versus: Policy; win: number; tie: number; loss: number; unknown: number };
+export type HeadlineColumn = { policy: Policy; lostWork: number; /** strictly the lowest of the three (ties flag nobody) */ lowest: boolean; tallies: HeadlineTally[] };
+/**
+ * Headline numbers from the matched cases only. Lost work is summed per policy; tallies are case counts on lost work.
+ * The nemotron column is tallied against each baseline; a baseline column shows the same comparison from its side
+ * (its wins are the nemotron column's losses), so the three columns never disagree.
+ */
+export function headlineColumns(cases: readonly Case[]): HeadlineColumn[] {
+  const totals = Object.fromEntries(policies.map((policy) => [policy, cases.reduce((sum, item) => sum + (metricValue(item.rows[policy], 'lost_work_units') ?? 0), 0)])) as Record<Policy, number>;
+  const byBaseline = Object.fromEntries(baselines.map((b) => [b, tally(cases, 'lost_work_units', b)])) as Record<Exclude<Policy, 'nemotron'>, Tally>;
+  return policies.map((policy) => {
+    const others = policies.filter((p) => p !== policy).map((p) => totals[p]);
+    const tallies: HeadlineTally[] = policy === 'nemotron'
+      ? baselines.map((b) => ({ versus: b, ...byBaseline[b] }))
+      : [{ versus: 'nemotron', win: byBaseline[policy].loss, tie: byBaseline[policy].tie, loss: byBaseline[policy].win, unknown: byBaseline[policy].unknown }];
+    return { policy, lostWork: totals[policy], lowest: cases.length > 0 && others.every((other) => totals[policy] < other), tallies };
+  });
+}
+
 export type Outcome = { scenario_id: string; seed: number; baseline: Exclude<Policy, 'nemotron'>; metric: ViewMetric; ours: number; theirs: number };
 /** Ties and losses on the headline metrics (lost work, finite-horizon work deficit), for the visible ties/losses lists. */
 export function tiesAndLosses(cases: readonly Case[]): { ties: Outcome[]; losses: Outcome[] } {
@@ -293,6 +323,8 @@ export function buildScoreboard(results: readonly EvaluationResult[]) {
     header: batchHeader(valid),
     columns: policies.map((policy) => columnProvenance(compared, policy)),
     names: Object.fromEntries(policies.map((policy) => [policy, policyName(policy, compared)])) as Record<Policy, string>,
+    shortNames: Object.fromEntries(policies.map((policy) => [policy, columnName(policy, compared)])) as Record<Policy, string>,
+    headline: headlineColumns(cases),
     claim: nemotronClaim(compared),
     outcomes: tiesAndLosses(cases),
     report: summarizeResults(results),
