@@ -1,4 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { WorkflowBoard } from '../src/components/workflows/WorkflowBoard';
 import type { ActionDetail, AgentEventInput, WorkflowRecord } from '@dcos/db-client';
 import type { ActionCommand, ActionStatus } from '@dcos/contracts';
 import { openDashboard } from '../src/data/dashboard';
@@ -227,34 +230,41 @@ describe('R3 handoff and persisted resume marker', () => {
     expect(v).toMatchObject({ outcome: null, remainingRisk: null, actions: null, nextStep: null, unresolved: [] });
   });
   it('prefers the persisted state.resumed marker over event heuristics', () => {
-    const r = resumeEvidence([], { resumed: { by_worker: 'agent-2', at_sim_time_ms: 42_000, action: 'resumed_execute' } });
-    expect(r).toMatchObject({ source: 'workflow_state', sim_time_ms: 42_000 });
+    const r = resumeEvidence([], { resumed: { by_worker: 'agent-2', at_sim_time_ms: 42_000, action: 'resumed_execute', previous_owner: null } });
+    expect(r).toMatchObject({ source: 'workflow_state', sim_time_ms: 42_000, by_worker: 'agent-2', action: 'resumed_execute', previous_owner: null });
     expect(r?.detail).toContain('agent-2');
     expect(resumeEvidence([], { resumed: { by_worker: 'agent-2' } })).toBeNull();
+    expect(resumeEvidence([], { resumed: { by_worker: 'a', at_sim_time_ms: 1, action: 'bogus', previous_owner: null } })).toBeNull();
   });
   it('reads previous_owner and resume_count from the persisted marker', () => {
     const r = resumeEvidence([], { resumed: { by_worker: 'agent-2', at_sim_time_ms: 1, action: 'resumed_execute', previous_owner: 'agent-1' }, resume_count: 2 });
     expect(r).toMatchObject({ count: 2, previous_owner: 'agent-1' });
-    expect(r?.detail).toContain('took over from agent-1');
-    expect(resumeEvidence([], { resumed: { at_sim_time_ms: 1 } })).toMatchObject({ count: null, previous_owner: null });
+    expect(r?.detail).toBe('resumed by agent-2 (was agent-1) · resumed execute');
+    // resume_count lives at the top level of state, not inside the marker
+    const inner = resumeEvidence([], { resumed: { by_worker: 'a', at_sim_time_ms: 1, action: 'took_over', previous_owner: null, resume_count: 9 } });
+    expect(inner).toMatchObject({ count: null, previous_owner: null });
+  });
+  it('falls back to event evidence when state.resumed is malformed', () => {
+    const events = [ev({ stage: 'execute', summary: 'continuing wf-1 from stage plan after agent restart' })];
+    expect(resumeEvidence(events, { resumed: { at_sim_time_ms: 1 } })?.source).toBe('event_summary');
   });
 });
 
 describe('persisted candidates (workflow.state.candidates)', () => {
   const cand = (patch: Record<string, unknown>) => ({
-    job_id: 'job-a', option: 'ckpt', commands_summary: 'checkpoint job-a', predicted_lost_work_units: 0, predicted_work_deficit_units: 2,
-    predicted_gpu_busy_waste_s: 30, safety: 'allowed', violations: [], chosen: false, reason: 'r', decided_by: 'nemotron', snapshot_epoch: 7, as_of_sim_time_ms: 5000, ...patch,
+    job_id: 'job-a', option: 'ckpt', commands_summary: 'checkpoint job-a', predicted_lost_work_units: 0, predicted_work_deficit_units: null,
+    predicted_gpu_busy_waste_s: 30, safety: 'allow', violations: [], chosen: false, reason: 'r', decided_by: 'nemotron', snapshot_epoch: 7, as_of_sim_time_ms: 5000, ...patch,
   });
   it('reads chosen and rejected options with their persisted fields, chosen first per job', () => {
     const opts = persistedCandidateOptions({ candidates: [
-      cand({ option: 'move:r6', safety: 'denied: DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT', violations: ['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'], decided_by: 'code', predicted_lost_work_units: null }),
+      cand({ option: 'move:r6', safety: 'deny', violations: ['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'], decided_by: 'code', predicted_lost_work_units: null }),
       cand({ chosen: true }),
       cand({ job_id: 'job-b', option: 'job-b:cap', chosen: true }),
     ] })!;
     expect(opts.map((o) => [o.option_id, o.chosen, o.blocked, o.actor])).toEqual([
       ['job-a:ckpt', true, false, 'nemotron'], ['job-a:move:r6', false, true, 'code'], ['job-b:cap', true, false, 'nemotron'],
     ]);
-    expect(opts[0]).toMatchObject({ lost_wu: 0, persisted: { deficit_wu: 2, gpu_waste_s: 30, snapshot_epoch: 7, as_of_sim_time_ms: 5000, reason: 'r' } });
+    expect(opts[0]).toMatchObject({ lost_wu: 0, persisted: { deficit_wu: null, safety: 'allow', gpu_waste_s: 30, snapshot_epoch: 7, as_of_sim_time_ms: 5000, reason: 'r' } });
     expect(opts[1]!.lost_wu).toBeNull();
   });
   it('caps at 6 per job and ignores malformed rows', () => {
@@ -263,9 +273,35 @@ describe('persisted candidates (workflow.state.candidates)', () => {
     expect(persistedCandidateOptions({ candidates: [] })).toBeNull();
     expect(persistedCandidateOptions({})).toBeNull();
   });
-  it('accepts boolean safety', () => {
-    const [o] = persistedCandidateOptions({ candidates: [cand({ safety: false, violations: ['DEST_GPU_BUSY'] })] })!;
-    expect(o).toMatchObject({ blocked: true, safety: 'denied: DEST_GPU_BUSY' });
+  it('maps the 4-value safety enum and keeps the violations list', () => {
+    const opts = persistedCandidateOptions({ candidates: [
+      cand({ option: 'a', safety: 'deny', violations: ['DEST_GPU_BUSY', 'X'] }), cand({ option: 'b', safety: 'needs_approval' }), cand({ option: 'c', safety: 'not_checked' }),
+    ] })!;
+    expect(opts.map((o) => [o.safety, o.blocked])).toEqual([['denied', true], ['needs approval', false], ['not checked', false]]);
+    expect(opts[0]!.persisted!.violations).toEqual(['DEST_GPU_BUSY', 'X']);
+  });
+  it('skips entries whose safety is not in the enum (no guessing from booleans or {allowed})', () => {
+    const opts = persistedCandidateOptions({ candidates: [
+      cand({ option: 'bool', safety: false }), cand({ option: 'obj', safety: { allowed: true } }), cand({ option: 'old', safety: 'allowed' }),
+      cand({ option: 'badactor', decided_by: 'llm' }), cand({ option: 'ok', chosen: true }),
+    ] })!;
+    expect(opts.map((o) => o.persisted!.option)).toEqual(['ok']);
+    expect(persistedCandidateOptions({ candidates: [cand({ safety: true })] })).toBeNull();
+  });
+  it('keeps null metrics null and hides the work-deficit column while it is null everywhere', () => {
+    const state = { candidates: [cand({ chosen: true, predicted_lost_work_units: null, predicted_gpu_busy_waste_s: null })] };
+    const [o] = persistedCandidateOptions(state)!;
+    expect(o).toMatchObject({ lost_wu: null, persisted: { gpu_waste_s: null, deficit_wu: null } });
+    expect(candidateRound([], state)!.showDeficit).toBe(false);
+    expect(candidateRound([], { candidates: [cand({ predicted_work_deficit_units: 3 })] })!.showDeficit).toBe(true);
+  });
+  it('renders not simulated for null metrics and no deficit column', () => {
+    const round = candidateRound([], { candidates: [cand({ chosen: true, predicted_lost_work_units: null, predicted_gpu_busy_waste_s: null, violations: ['V1'] })] })!;
+    const html = renderToStaticMarkup(createElement(WorkflowBoard, { workflows: [wf({ state: { candidates: [cand({ chosen: true, predicted_lost_work_units: null, predicted_gpu_busy_waste_s: null, violations: ['V1'] })] } })], events: [], actionDetails: [], incidents: [], snapshot: null, example: false, mode: 'mock' } as never));
+    expect(round.options).toHaveLength(1);
+    expect(html).toContain('not simulated');
+    expect(html).not.toContain('work deficit');
+    expect(html).toContain('V1');
   });
   it('prefers persisted candidates and falls back to the plan-event round for older rows', () => {
     const events = [ev({ stage: 'plan', summary: 'plan summary', tool_calls: [

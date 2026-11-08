@@ -86,7 +86,9 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
     </ol>
     <p className={`wf-status wf-status-${view.status.kind}`}><strong>{view.status.label}.</strong> {view.status.detail}</p>
     {view.replan && wf.stage !== 'replan' && <p className="wf-note">Replanned{view.replan.previous_plan_id ? <> from <code>{view.replan.previous_plan_id}</code></> : ''}: {view.replan.reason ?? 'reason not recorded'}.</p>}
-    {view.resumed && <p className="wf-note">Resumed at {simAt(view.resumed.sim_time_ms)}, {view.resumed.source === 'workflow_state' ? 'recorded in the persisted workflow state' : view.resumed.source === 'reconcile_tool_calls' ? 'from ledger reconciliation tool calls' : 'from the resume event summary'}: <span className="wf-wrap">{view.resumed.detail}</span></p>}
+    {view.resumed && <p className="wf-note">{view.resumed.source === 'workflow_state'
+      ? <span className="wf-wrap">Resumed by {view.resumed.by_worker}{view.resumed.previous_owner ? ` (was ${view.resumed.previous_owner})` : ''} at sim {duration(view.resumed.sim_time_ms)}{view.resumed.count !== null ? `, #${view.resumed.count}` : ''} · {view.resumed.action?.replaceAll('_', ' ')} · recorded in the persisted workflow state</span>
+      : <>Resumed at {simAt(view.resumed.sim_time_ms)}, {view.resumed.source === 'reconcile_tool_calls' ? 'from ledger reconciliation tool calls' : 'from the resume event summary'}: <span className="wf-wrap">{view.resumed.detail}</span></>}</p>}
     <dl className="wf-labels">
       <div><dt>Plan</dt><dd>{view.planId ? <code>{view.planId}</code> : 'not recorded'}</dd></div>
       <div><dt>Plan attempt</dt><dd>{view.attempt ?? 'not recorded'}</dd></div>
@@ -133,7 +135,7 @@ function Candidates({ round, example, plan, planId }: { round: CandidateRound | 
           : <p className="wf-muted">No option-level choice was published; the chosen option cannot be identified by id. The plan summary above names it.</p>)}
         {round.options.length > 0 && <ul className="wf-options">{round.options.map((o) => <li key={o.option_id} className={o.chosen ? 'wf-option-chosen' : ''}>
           <div className="wf-option-head"><code>{o.option_id}</code>{o.chosen === true && <Badge tone="agent">Chosen</Badge>}{o.chosen === false && <Badge>{o.persisted ? 'Rejected' : 'Alternative'}</Badge>}{o.blocked && <Badge tone="danger">Blocked by safety</Badge>}</div>
-          {o.persisted ? <PersistedOption o={o} example={example}/> : <>
+          {o.persisted ? <PersistedOption o={o} example={example} showDeficit={round.showDeficit}/> : <>
             <dl>
               <div><dt>Predicted lost work</dt><dd>{o.lost_wu === null ? 'not reported' : `${o.lost_wu} wu`}</dd></div>
               <div><dt>Predicted delay</dt><dd>{o.delay_s === null ? 'not reported' : `${o.delay_s} s`}</dd></div>
@@ -150,15 +152,16 @@ function Candidates({ round, example, plan, planId }: { round: CandidateRound | 
   </details>;
 }
 
-const reported = (v: number | null, unit: string): string => (v === null ? 'not reported' : `${v} ${unit}`);
-function PersistedOption({ o, example }: { o: CandidateOption; example: boolean }) {
+const simulated = (v: number | null, unit: string): string => (v === null ? 'not simulated' : `${v} ${unit}`);
+function PersistedOption({ o, example, showDeficit }: { o: CandidateOption; example: boolean; showDeficit: boolean }) {
   const p = o.persisted!;
   return <>
     <dl>
-      <div><dt>Predicted lost work</dt><dd>{reported(o.lost_wu, 'wu')}</dd></div>
-      <div><dt>Predicted work deficit</dt><dd>{reported(p.deficit_wu, 'wu')}</dd></div>
-      <div><dt>Predicted GPU busy waste</dt><dd>{reported(p.gpu_waste_s, 's')}</dd></div>
-      <div><dt>Safety</dt><dd>{o.safety ?? 'not recorded'}{p.violations.length && !o.safety?.includes(p.violations[0]!) ? ` · ${p.violations.join(', ')}` : ''}</dd></div>
+      <div><dt>Predicted lost work</dt><dd>{simulated(o.lost_wu, 'wu')}</dd></div>
+      {showDeficit && <div><dt>Predicted work deficit</dt><dd>{simulated(p.deficit_wu, 'wu')}</dd></div>}
+      <div><dt>Predicted GPU busy waste</dt><dd>{simulated(p.gpu_waste_s, 's')}</dd></div>
+      <div><dt>Safety</dt><dd>{o.safety}</dd></div>
+      {p.violations.length > 0 && <div><dt>Violations</dt><dd className="wf-wrap">{p.violations.join(', ')}</dd></div>}
     </dl>
     {o.simulated && <p className="wf-muted wf-wrap">Commands: {o.simulated}</p>}
     <p className="wf-narrative"><ActorBadge actor={o.actor} example={example}/><span className="wf-wrap">{p.reason ?? 'no reason recorded'}</span></p>

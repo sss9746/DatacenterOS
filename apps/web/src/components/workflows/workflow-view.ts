@@ -317,7 +317,14 @@ export interface ResumeEvidence {
   count: number | null;
   /** Persisted `state.resumed.previous_owner`; null when not recorded. */
   previous_owner: string | null;
+  /** Persisted `state.resumed.by_worker`; null for event-derived evidence. */
+  by_worker: string | null;
+  /** Persisted `state.resumed.action`; null for event-derived evidence. */
+  action: ResumeAction | null;
 }
+export const RESUME_ACTIONS = ['resumed_execute', 'resumed_verify', 'took_over', 'escalated', 'nothing_to_do'] as const;
+export type ResumeAction = (typeof RESUME_ACTIONS)[number];
+const resumeActionOf = (v: unknown): ResumeAction | null => (RESUME_ACTIONS as readonly unknown[]).includes(v) ? (v as ResumeAction) : null;
 
 /**
  * "Resumed" only with evidence. The agent persists no resume field, so the strongest signal is the resume path's
@@ -328,21 +335,28 @@ export interface ResumeEvidence {
 export function resumeEvidence(events: readonly AgentEventInput[], state: Record<string, unknown> = {}): ResumeEvidence | null {
   // Primary: the persisted marker `state.resumed = { by_worker, at_sim_time_ms, action, previous_owner }` plus
   // `state.resume_count`, written by the resume path.
+  // Exact agent shape: ResumedMarker { by_worker, at_sim_time_ms, action, previous_owner: string | null };
+  // `resume_count` is a top-level state field. A marker of any other shape is ignored (event fallback below).
   const marker = state.resumed;
-  if (isRecord(marker) && num(marker.at_sim_time_ms) !== null) {
-    const previous_owner = str(marker.previous_owner);
-    const parts = [str(marker.by_worker) ? `by ${marker.by_worker as string}` : null, str(marker.action), previous_owner ? `took over from ${previous_owner}` : null].filter((x): x is string => x !== null);
-    const count = num(state.resume_count) ?? num(marker.resume_count);
-    return { source: 'workflow_state', event_id: 'workflow.state.resumed', sim_time_ms: marker.at_sim_time_ms as number, detail: parts.join(' · ') || 'resume recorded', count, previous_owner };
+  if (isRecord(marker)) {
+    const by_worker = str(marker.by_worker);
+    const at = num(marker.at_sim_time_ms);
+    const action = resumeActionOf(marker.action);
+    const prev = marker.previous_owner;
+    if (by_worker !== null && at !== null && action !== null && (prev === null || prev === undefined || typeof prev === 'string')) {
+      const previous_owner = str(prev);
+      const detail = `resumed by ${by_worker}${previous_owner ? ` (was ${previous_owner})` : ''} · ${action.replaceAll('_', ' ')}`;
+      return { source: 'workflow_state', event_id: 'workflow.state.resumed', sim_time_ms: at, detail, count: num(state.resume_count), previous_owner, by_worker, action };
+    }
   }
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     const calls = e.tool_calls.filter((t) => t.tool === 'get_action_status' && RECONCILE_RE.test(t.result_summary));
-    if (calls.length) return { source: 'reconcile_tool_calls', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: calls.map((t) => `${t.args_summary}: ${t.result_summary}`).join('; '), count: null, previous_owner: null };
+    if (calls.length) return { source: 'reconcile_tool_calls', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: calls.map((t) => `${t.args_summary}: ${t.result_summary}`).join('; '), count: null, previous_owner: null, by_worker: null, action: null };
   }
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
-    if (RESUME_SUMMARY_RE.test(e.summary)) return { source: 'event_summary', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: e.summary, count: null, previous_owner: null };
+    if (RESUME_SUMMARY_RE.test(e.summary)) return { source: 'event_summary', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: e.summary, count: null, previous_owner: null, by_worker: null, action: null };
   }
   return null;
 }
@@ -360,11 +374,15 @@ export interface CandidateOption extends Projection {
   /** Present only for options read from the persisted `workflow.state.candidates[]`. */
   persisted?: PersistedCandidateFields;
 }
+export const CANDIDATE_SAFETY = ['allow', 'needs_approval', 'deny', 'not_checked'] as const;
+export type CandidateSafety = (typeof CANDIDATE_SAFETY)[number];
+const SAFETY_LABEL: Record<CandidateSafety, string> = { allow: 'allowed', needs_approval: 'needs approval', deny: 'denied', not_checked: 'not checked' };
 export interface PersistedCandidateFields {
   job_id: string;
   option: string;
   deficit_wu: number | null;
   gpu_waste_s: number | null;
+  safety: CandidateSafety;
   violations: string[];
   reason: string | null;
   snapshot_epoch: number | null;
@@ -382,6 +400,8 @@ export interface CandidateRound {
   narrative: { summary: string; actor: AgentActor | null }[];
   /** Latest event is a replan with no plan event after it yet. */
   pending: boolean;
+  /** Persisted candidates only: false when no entry carries a work-deficit number (the agent always writes null today). */
+  showDeficit: boolean;
 }
 
 const LOST_RE = /lost\s+(-?[\d.]+)\s*wu/i;
@@ -454,25 +474,22 @@ export function latestCandidateRound(events: readonly AgentEventInput[]): Candid
     choice,
     narrative: round.filter((e) => e.stage === 'plan' || e.stage === 'replan').map((e) => ({ summary: e.summary, actor: e.actor ?? null })),
     pending: events[end]!.stage === 'replan',
+    showDeficit: false,
   };
 }
 
 const MAX_PERSISTED_PER_JOB = 6;
 const actorOf = (v: unknown): AgentActor | null => (v === 'nemotron' || v === 'code' ? v : null);
-/** `safety` may be a verdict string ("allowed" / "denied: …"), a boolean, or `{ allowed }`; anything else is "not recorded". */
-function persistedSafety(v: unknown, violations: string[]): { safety: string | null; blocked: boolean } {
-  if (typeof v === 'string' && v.trim()) return { safety: v, blocked: /^(denied|blocked|rejected|unsafe)/i.test(v) };
-  const allowed = typeof v === 'boolean' ? v : isRecord(v) ? bool(v.allowed) : null;
-  if (allowed !== null) return { safety: allowed ? 'allowed' : `denied${violations.length ? `: ${violations.join(', ')}` : ''}`, blocked: !allowed };
-  return { safety: null, blocked: violations.length > 0 };
-}
-
 /**
  * Options persisted by the agent in `workflow.state.candidates[]` (chosen first, at most 6 per job), including the
  * rejected ones. Returns null when the row has none, so the caller falls back to the plan-event round.
  */
 export function persistedCandidateOptions(state: Record<string, unknown>): CandidateOption[] | null {
-  const rows = records(state.candidates).filter((r) => str(r.job_id) && str(r.option));
+  // Exact agent shape (PersistedCandidate). Entries with a safety outside the 4-string enum, a non-boolean `chosen`
+  // or an unknown `decided_by` are malformed and skipped, never guessed.
+  const rows = records(state.candidates).filter(
+    (r) => str(r.job_id) && str(r.option) && (CANDIDATE_SAFETY as readonly unknown[]).includes(r.safety) && bool(r.chosen) !== null && actorOf(r.decided_by) !== null,
+  );
   if (!rows.length) return null;
   const perJob = new Map<string, number>();
   const out: CandidateOption[] = [];
@@ -483,7 +500,7 @@ export function persistedCandidateOptions(state: Record<string, unknown>): Candi
     if (seen >= MAX_PERSISTED_PER_JOB) continue;
     perJob.set(job_id, seen + 1);
     const violations = strList(r.violations);
-    const { safety, blocked } = persistedSafety(r.safety, violations);
+    const code = r.safety as CandidateSafety;
     out.push({
       option_id: option.startsWith(`${job_id}:`) ? option : `${job_id}:${option}`,
       simulated: str(r.commands_summary) ?? '',
@@ -491,13 +508,14 @@ export function persistedCandidateOptions(state: Record<string, unknown>): Candi
       lost_wu: num(r.predicted_lost_work_units),
       delay_s: null,
       actor: actorOf(r.decided_by),
-      safety,
-      blocked,
+      safety: SAFETY_LABEL[code],
+      blocked: code === 'deny',
       chosen: bool(r.chosen),
       persisted: {
         job_id, option,
         deficit_wu: num(r.predicted_work_deficit_units),
         gpu_waste_s: num(r.predicted_gpu_busy_waste_s),
+        safety: code,
         violations,
         reason: str(r.reason),
         snapshot_epoch: num(r.snapshot_epoch),
@@ -528,6 +546,7 @@ export function candidateRound(events: readonly AgentEventInput[], state: Record
     choice: fromEvents?.choice ?? null,
     narrative: fromEvents?.narrative ?? [],
     pending: fromEvents?.pending ?? false,
+    showDeficit: persisted.some((o) => o.persisted!.deficit_wu !== null),
   };
 }
 

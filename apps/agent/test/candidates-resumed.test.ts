@@ -3,7 +3,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAgentLoop, type AgentLoop, type AgentLoopDeps } from '../src/agent-loop.js';
 import { DEFAULT_LEASE_MS } from '../src/coordinator.js';
 import { createEventPublisher } from '../src/events.js';
-import { CANDIDATE_LIMITS, capCandidates, mergeCandidates, type PersistedCandidate } from '../src/planner.js';
+import {
+  CANDIDATE_LIMITS,
+  buildCandidates,
+  capCandidates,
+  mergeCandidates,
+  resolveConflicts,
+  type JobPlan,
+  type PersistedCandidate,
+  type RankedOption,
+} from '../src/planner.js';
 import { CLAIM_LEASE_MS } from '../src/resume.js';
 import { killable } from '../scripts/crash-test.js';
 import { FakeDb, FakePhysics } from './fakes/index.js';
@@ -135,6 +144,37 @@ describe('candidate caps (pure)', () => {
     expect(merged.map((c) => c.option).sort()).toEqual(['keep_running', 'new']);
     expect(mergeCandidates(undefined, [cand()])).toHaveLength(1);
     expect(mergeCandidates('junk', [cand()])).toHaveLength(1);
+  });
+});
+
+describe('synthetic keep fallback', () => {
+  it('is persisted with null metrics, not_checked safety and a "not separately simulated" reason', () => {
+    const mig = (job: string): RankedOption => ({
+      option_id: `${job}:migrate`,
+      label: `${job} migrate`,
+      job_id: job,
+      commands: [{ operation: 'migrate_restart', arguments: { destination_gpu_ids: ['gpu-9'] } } as never],
+      metrics: { expected_lost_work_units: 7, expected_gpu_busy_waste_s: 11 } as never,
+      safety: [{ decision: 'allow', violations: [] } as never],
+      rank: 1,
+      job_risk: 0,
+    });
+    const plan = (job: string): JobPlan => ({ job_id: job, chosen: mig(job), alternatives: [], decided_by: 'deterministic', needs_approval: false, explanation: 'best' });
+    const ranked = new Map([
+      ['job-a', [mig('job-a')]],
+      ['job-b', [mig('job-b')]],
+    ]);
+    const plans = resolveConflicts([plan('job-a'), plan('job-b')], ranked);
+    expect(plans[1]!.chosen.option_id).toBe('job-b:keep');
+    const cands = buildCandidates(plans, 3, 1000);
+    const synth = cands.find((c) => c.job_id === 'job-b' && c.chosen)!;
+    expect(synth.predicted_lost_work_units).toBeNull();
+    expect(synth.predicted_gpu_busy_waste_s).toBeNull();
+    expect(synth.safety).toBe('not_checked');
+    expect(synth.reason).toContain('not separately simulated');
+    const real = cands.find((c) => c.job_id === 'job-a')!;
+    expect(real.predicted_lost_work_units).toBe(7);
+    expect(real.safety).toBe('allow');
   });
 });
 

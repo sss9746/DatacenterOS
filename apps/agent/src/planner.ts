@@ -41,6 +41,8 @@ export interface RankedOption {
   excluded_reason?: string;
   /** keep_running only: set when a hold rule put it first. */
   hold?: KeepHold;
+  /** Set on the synthetic `<job>:keep` fallback of resolveConflicts: metrics/safety are copied, never simulated. */
+  not_simulated?: boolean;
 }
 
 export interface JobPlan {
@@ -791,7 +793,7 @@ export function resolveConflicts(plans: JobPlan[], ranked: Map<string, RankedOpt
           opts.find((o) => o.commands.length === 0) ??
           opts.find((o) => isOp(o, 'pause_job') && !clash(o)) ??
           opts.find((o) => isOp(o, 'escalate') && !clash(o));
-        const chosen: RankedOption = floor ?? { ...p.chosen, option_id: `${p.job_id}:keep`, label: `${p.job_id} keep running`, commands: [] };
+        const chosen: RankedOption = floor ?? { ...p.chosen, option_id: `${p.job_id}:keep`, label: `${p.job_id} keep running`, commands: [], not_simulated: true };
         jp = {
           ...p,
           chosen,
@@ -1008,6 +1010,7 @@ function optionKind(o: RankedOption): CandidateOption {
 }
 
 function candidateSafety(o: RankedOption): PersistedCandidate['safety'] {
+  if (o.not_simulated) return 'not_checked';
   if (o.safety.length === 0) return 'not_checked';
   if (o.safety.some((s) => s.decision === 'deny')) return 'deny';
   if (o.safety.some((s) => s.decision === 'needs_approval')) return 'needs_approval';
@@ -1020,6 +1023,7 @@ const candidateViolations = (o: RankedOption): string[] =>
     .map((v) => clip(v, CANDIDATE_VIOLATION_CHARS));
 
 function candidateReason(o: RankedOption, chosen: RankedOption, isChosen: boolean, explanation: string): string {
+  if (o.not_simulated) return clip(`not separately simulated: ${isChosen ? explanation : 'fallback'}`, CANDIDATE_REASON_MAX);
   if (isChosen) return clip(explanation, CANDIDATE_REASON_MAX);
   if (o.excluded_reason) return clip(`rejected by deterministic safety: ${o.excluded_reason}`, CANDIDATE_REASON_MAX);
   const lost = finiteOrNull(o.metrics.expected_lost_work_units);
@@ -1062,11 +1066,11 @@ export function buildCandidates(jobPlans: readonly JobPlan[], snapshotEpoch: num
         job_id: jp.job_id,
         option: optionKind(o),
         commands_summary: clip(o.label, CANDIDATE_SUMMARY_MAX),
-        predicted_lost_work_units: finiteOrNull(o.metrics?.expected_lost_work_units),
+        predicted_lost_work_units: o.not_simulated ? null : finiteOrNull(o.metrics?.expected_lost_work_units),
         predicted_work_deficit_units: null,
-        predicted_gpu_busy_waste_s: finiteOrNull(o.metrics?.expected_gpu_busy_waste_s),
+        predicted_gpu_busy_waste_s: o.not_simulated ? null : finiteOrNull(o.metrics?.expected_gpu_busy_waste_s),
         safety: candidateSafety(o),
-        violations: candidateViolations(o),
+        violations: o.not_simulated ? [] : candidateViolations(o),
         chosen: isChosen,
         reason: candidateReason(o, jp.chosen, isChosen, jp.explanation),
         decided_by: decidedBy,
