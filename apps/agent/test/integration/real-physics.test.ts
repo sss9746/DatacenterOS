@@ -65,11 +65,11 @@ describe('P1 <-> P3 contract surface', () => {
     expect(typeof physics.simulatePlan).toBe('function');
   });
 
-  it('P1 safety codes = P3 §0.7 list + the §0.12 #4 physics-only codes (P3 list is missing those 5)', () => {
+  it('P1 safety codes = P3 SAFETY_REASON_CODES (§0.7 + the §0.12 #4 physics-only codes), exactly', () => {
     const p1 = new Set<string>(physicsPkg.SAFETY_REASON_CODES);
     for (const c of SAFETY_REASON_CODES) expect(p1.has(c), c).toBe(true);
     const extra = [...p1].filter((c) => !(SAFETY_REASON_CODES as readonly string[]).includes(c)).sort();
-    expect(extra).toEqual(['INVALID_ARGUMENT', 'JOB_FAILED_DURING_OPERATION', 'JOB_NOT_FOUND', 'JOB_STATE_INVALID', 'TARGET_NOT_FOUND']);
+    expect(extra).toEqual([]);
   });
 
   it('buildPreset honours CONTRACTS §0.12 #2 (clock 600000, job-a ckpt 60000, job-b ckpt 540000)', () => {
