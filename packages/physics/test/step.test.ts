@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, computeBalance, setFanReading, step } from '../src/index.js';
-import type { FacilityState } from '../src/index.js';
+import { applyAction, computeBalance, setFanReading, step } from '../src/v0/index.js';
+import type { FacilityState } from '../src/v0/index.js';
 import { RACKS, deepFreeze, defaultState, fail, failPump, fanEvery, rng, run, ticksUntil } from './helpers.js';
 
 const rackTemps = (s: FacilityState) => RACKS.map((id) => s.components[id]!.true_temp_c);

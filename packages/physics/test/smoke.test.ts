@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as physics from '../src/index.js';
+import * as physics from '../src/v0/index.js';
 
 const FUNCTION_EXPORTS = [
   'defaultDemoConfig',

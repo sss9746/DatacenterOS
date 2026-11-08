@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, TECH_REPAIR_TICKS } from '../src/index.js';
-import type { Action } from '../src/index.js';
+import { applyAction, TECH_REPAIR_TICKS } from '../src/v0/index.js';
+import type { Action } from '../src/v0/index.js';
 import { defaultState, failPump, run } from './helpers.js';
 
 const act = (kind: Action['kind'], target_id: string, params: Action['params'] = {}): Action => ({ kind, target_id, params });

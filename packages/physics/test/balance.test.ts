@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, computeBalance, facilityStatus } from '../src/index.js';
+import { applyAction, computeBalance, facilityStatus } from '../src/v0/index.js';
 import { defaultState, fail, failPump, run } from './helpers.js';
 
 describe('computeBalance', () => {
