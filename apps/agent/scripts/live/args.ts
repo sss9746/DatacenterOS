@@ -7,6 +7,9 @@
 //   --seed 42  --speed 2  --timeout-s 240  --out <dir>  --run-id run-demo-1
 //   --no-llm               spawn the agent without NIM credentials: a DETERMINISTIC rehearsal, labeled as such
 //   --skip-reset           run against whatever run is live (only way to run on prod; cases may fail)
+//   --hold-s <n>           after each case (pass or fail), hold the final DB state for n seconds (0..600,
+//                          default 0) before the next case's reset / before exit, so a presenter or screen
+//                          recorder can see the Verified + handoff state on the dashboard. Pacing only.
 
 export const CASE_IDS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const;
 export type CaseId = (typeof CASE_IDS)[number];
@@ -17,6 +20,8 @@ export const DEFAULT_PRESET_ID = 'gpu_demo_8';
 export const DEFAULT_SEED = 42;
 export const DEFAULT_SPEED = 2;
 export const DEFAULT_TIMEOUT_S = 240;
+export const DEFAULT_HOLD_S = 0;
+export const MAX_HOLD_S = 600;
 
 export interface HarnessArgs {
   readonly db: string;
@@ -24,6 +29,8 @@ export interface HarnessArgs {
   readonly seed: number;
   readonly speed: number;
   readonly timeoutS: number;
+  /** Seconds to hold the final state after each case (0 = no hold). */
+  readonly holdS: number;
   readonly outDir: string | null;
   readonly runId: string;
   readonly presetId: string;
@@ -42,9 +49,11 @@ export class ArgsError extends Error {
 
 export const USAGE = `usage: live-recovery-test --db <name> [--case L1|L2|L3|L4|L5|L6|all] [--seed 42] [--speed 2]
                           [--timeout-s 240] [--out <dir>] [--run-id run-demo-1] [--no-llm] [--skip-reset]
-                          [--i-know-this-is-prod]
+                          [--hold-s 0] [--i-know-this-is-prod]
   --db is required and must name a disposable dev/local database. '${PROD_DB}' (prod) is refused unless
-  --i-know-this-is-prod is also given, and even then the reset is refused (pass --skip-reset).`;
+  --i-know-this-is-prod is also given, and even then the reset is refused (pass --skip-reset).
+  --hold-s <n> holds the final state for n seconds (0..${MAX_HOLD_S}) after each case, before the next reset /
+  before exit, so a recorder can capture the Verified + handoff state.`;
 
 const num = (flag: string, raw: string | undefined, pred: (n: number) => boolean, what: string): number => {
   if (raw === undefined) throw new ArgsError(`${flag} needs a value`);
@@ -70,6 +79,7 @@ export function parseArgs(argv: readonly string[]): HarnessArgs {
   let seed = DEFAULT_SEED;
   let speed = DEFAULT_SPEED;
   let timeoutS = DEFAULT_TIMEOUT_S;
+  let holdS = DEFAULT_HOLD_S;
   let outDir: string | null = null;
   let runId = DEFAULT_RUN_ID;
   let presetId = DEFAULT_PRESET_ID;
@@ -101,6 +111,9 @@ export function parseArgs(argv: readonly string[]): HarnessArgs {
         break;
       case '--timeout-s':
         timeoutS = num('--timeout-s', take(), (n) => n >= 10 && n <= 3600, 'in [10, 3600] seconds');
+        break;
+      case '--hold-s':
+        holdS = num('--hold-s', take(), (n) => n >= 0 && n <= MAX_HOLD_S, `in [0, ${MAX_HOLD_S}] seconds`);
         break;
       case '--out':
         outDir = take() ?? null;
@@ -136,9 +149,9 @@ export function parseArgs(argv: readonly string[]): HarnessArgs {
         throw new ArgsError(`unknown argument "${a}"${next() === undefined ? '' : ''}\n${USAGE}`);
     }
   }
-  if (help) return { db: db ?? '', cases, seed, speed, timeoutS, outDir, runId, presetId, noLlm, skipReset, acknowledgedProd, help };
+  if (help) return { db: db ?? '', cases, seed, speed, timeoutS, holdS, outDir, runId, presetId, noLlm, skipReset, acknowledgedProd, help };
   if (!db) throw new ArgsError(`--db is required\n${USAGE}`);
-  return { db, cases, seed, speed, timeoutS, outDir, runId, presetId, noLlm, skipReset, acknowledgedProd, help };
+  return { db, cases, seed, speed, timeoutS, holdS, outDir, runId, presetId, noLlm, skipReset, acknowledgedProd, help };
 }
 
 export const isProdDb = (db: string): boolean => db.trim().toLowerCase() === PROD_DB;

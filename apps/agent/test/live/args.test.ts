@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ArgsError, CASE_IDS, DEFAULT_TIMEOUT_S, isProdDb, parseArgs, parseCases, resolveTarget } from '../../scripts/live/args.js';
+import { ArgsError, CASE_IDS, DEFAULT_HOLD_S, DEFAULT_TIMEOUT_S, isProdDb, MAX_HOLD_S, parseArgs, parseCases, resolveTarget, USAGE } from '../../scripts/live/args.js';
 
 describe('live harness args', () => {
   it('requires --db', () => {
@@ -38,6 +38,31 @@ describe('live harness args', () => {
     expect(() => parseArgs(['--db', 'd', '--bogus'])).toThrow(/unknown argument/);
     expect(() => parseCases('')).toThrow(/at least one/);
     expect(parseCases('all')).toEqual([...CASE_IDS]);
+  });
+
+  it('--hold-s defaults to 0 and accepts values in [0, 600] (both spellings)', () => {
+    expect(DEFAULT_HOLD_S).toBe(0);
+    expect(MAX_HOLD_S).toBe(600);
+    expect(parseArgs(['--db', 'd']).holdS).toBe(0);
+    expect(parseArgs(['--db', 'd', '--hold-s', '45']).holdS).toBe(45);
+    expect(parseArgs(['--db', 'd', '--hold-s=0']).holdS).toBe(0);
+    expect(parseArgs(['--db', 'd', '--hold-s', '600']).holdS).toBe(600);
+    expect(parseArgs(['--db', 'd', '--hold-s', '2.5']).holdS).toBe(2.5);
+    expect(parseArgs(['--hold-s', '30', '--help']).holdS).toBe(30);
+  });
+
+  it('--hold-s rejects > 600, negatives, non-numbers and a missing value', () => {
+    expect(() => parseArgs(['--db', 'd', '--hold-s', '601'])).toThrow(ArgsError);
+    expect(() => parseArgs(['--db', 'd', '--hold-s', '601'])).toThrow(/--hold-s must be in \[0, 600\] seconds, got "601"/);
+    expect(() => parseArgs(['--db', 'd', '--hold-s', '-1'])).toThrow(/--hold-s/);
+    expect(() => parseArgs(['--db', 'd', '--hold-s', 'abc'])).toThrow(/--hold-s must be .* got "abc"/);
+    expect(() => parseArgs(['--db', 'd', '--hold-s', 'Infinity'])).toThrow(/--hold-s/);
+    expect(() => parseArgs(['--db', 'd', '--hold-s'])).toThrow(/--hold-s needs a value/);
+  });
+
+  it('documents --hold-s in the usage text', () => {
+    expect(USAGE).toMatch(/--hold-s/);
+    expect(USAGE).toMatch(/600/);
   });
 
   it('identifies prod by exact name (case/space insensitive) only', () => {

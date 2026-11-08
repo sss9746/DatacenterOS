@@ -314,6 +314,60 @@ export function checkRecoveredOrEscalated(wf: WorkflowRecord | null): Check {
   return check('workflow recovered or explicitly escalated', false, `stage ${wf.stage}`, { stage: wf.stage });
 }
 
+// ------------------------------------------------------------------------------------ settlement / handoff
+
+export const SETTLED_STAGES: ReadonlySet<WorkflowRecord['stage']> = new Set(['done', 'escalated']);
+
+export interface SettledReport {
+  settled: boolean;
+  /** Workflows still in a non-terminal stage, as `workflow_id@stage`. */
+  pending: string[];
+  total: number;
+}
+
+/**
+ * Every workflow of the run is `done` or `escalated`. An empty list counts as settled (nothing is left
+ * running); callers that need a minimum number of workflows check `total` themselves.
+ */
+export function allWorkflowsSettled(workflows: readonly WorkflowRecord[]): SettledReport {
+  const pending = workflows.filter((w) => !SETTLED_STAGES.has(w.stage)).map((w) => `${w.workflow_id}@${w.stage}`);
+  return { settled: pending.length === 0, pending, total: workflows.length };
+}
+
+export type Handoff =
+  | { kind: 'verification'; verification: Record<string, unknown> }
+  | { kind: 'escalation'; reason: string }
+  | null;
+
+/**
+ * The handoff a workflow persisted for the operator: a non-empty `state.verification` object, or, for a
+ * workflow that escalated WITHOUT verifying, a non-empty `state.escalation_reason`. Anything else (settled
+ * with neither, or still running) is no handoff. Mirrors the L3 "fresh process recorded a handoff" rule.
+ */
+export function handoffOf(wf: WorkflowRecord): Handoff {
+  const v = (wf.state as { verification?: unknown }).verification;
+  if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length > 0) {
+    return { kind: 'verification', verification: v as Record<string, unknown> };
+  }
+  const reason = (wf.state as { escalation_reason?: unknown }).escalation_reason;
+  if (wf.stage === 'escalated' && typeof reason === 'string' && reason.length > 0) return { kind: 'escalation', reason };
+  return null;
+}
+
+/** Per-workflow: the settled workflow left a handoff (verification object, or an escalation with a reason). */
+export function checkHandoffRecorded(wf: WorkflowRecord): Check {
+  const name = `handoff/verification persisted for ${wf.workflow_id}`;
+  const h = handoffOf(wf);
+  const evidence = { workflow_id: wf.workflow_id, stage: wf.stage, handoff: h?.kind ?? null };
+  if (!h) {
+    const v = (wf.state as { verification?: unknown }).verification;
+    const vDesc = v === undefined ? 'absent' : v && typeof v === 'object' && !Array.isArray(v) ? 'empty object' : JSON.stringify(v).slice(0, 60);
+    return check(name, false, `stage ${wf.stage}: state.verification ${vDesc}, no escalation_reason`, evidence);
+  }
+  if (h.kind === 'verification') return check(name, true, `stage ${wf.stage}: verification ${JSON.stringify(h.verification).slice(0, 160)}`, evidence);
+  return check(name, true, `escalated: ${h.reason.slice(0, 160)}`, evidence);
+}
+
 // ------------------------------------------------------------------------------------ incidents
 
 export interface IncidentSeparation {

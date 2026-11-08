@@ -9,9 +9,11 @@ import { spawnAgent, buildAgentEnv, type AgentHandle } from './agent-process.js'
 import type { CaseId, HarnessArgs, TargetPolicy } from './args.js';
 import {
   allPassed,
+  allWorkflowsSettled,
   check,
   checkAllocationUniqueness,
   checkCheckpointOnce,
+  checkHandoffRecorded,
   checkDestinationReplanned,
   checkFallbackAttributed,
   checkHardSafetyHeld,
@@ -25,6 +27,7 @@ import {
   allocationUniqueness,
   type Check,
 } from './asserts.js';
+import { deriveCheckpointDue, describeDue } from './due.js';
 import { COOLING_RESOURCE_IDS, dueTickTooLate, nodeOfGpu, pumpDegradation, xid79 } from './faults.js';
 import { byKey, completeCheckpoints, createObserver, jobState, ledgerRow, openAction, snapshotSummary, type LiveState, type Observer } from './observe.js';
 import type { Redactor } from './redact.js';
@@ -267,6 +270,43 @@ async function waitWorkflowSettled(run: CaseRun, wfId: string, extraMs = 0): Pro
   return { wf: r.value, state: r.state };
 }
 
+/** Default bound for `waitAllWorkflowsSettled`: one more restart-length workflow plus slack. */
+const allSettledWant = (run: CaseRun): number => RESTART_SIM_MS / run.env.args.speed + 120_000;
+
+/**
+ * Wait until EVERY workflow of the run is done/escalated, not just the one the case followed. A fault
+ * injected mid-case (e.g. L2's destination Xid) opens a second workflow whose verification/handoff must
+ * be persisted before the harness resets for the next case; otherwise the dashboard shows "Verifying…".
+ * Every workflow seen while waiting is tracked so it stays readable after it closes.
+ */
+async function waitAllWorkflowsSettled(run: CaseRun, timeoutMs: number): Promise<{ workflows: WorkflowRecord[]; state: LiveState }> {
+  try {
+    const r = await run.until('every workflow of the run to finish (done/escalated)', timeoutMs, (s) => {
+      for (const w of s.workflows) run.obs.trackWorkflow(w.workflow_id);
+      return allWorkflowsSettled(s.workflows).settled ? s.workflows : null;
+    });
+    run.log('all workflows settled', { workflows: r.value.map((w) => `${w.workflow_id}@${w.stage}`), waited_ms: r.waitedMs });
+    return { workflows: r.value, state: r.state };
+  } catch (e) {
+    if (!(e instanceof WaitTimeoutError)) throw e;
+    const rep = allWorkflowsSettled(run.obs.current()?.workflows ?? []);
+    throw new WaitTimeoutError(
+      `every workflow of the run to finish (done/escalated); still pending: ${rep.pending.length ? rep.pending.join(', ') : '(none readable)'} of ${rep.total} workflow(s)`,
+      e.waitedMs,
+      e.lastSummary,
+    );
+  }
+}
+
+/** One check per settled workflow: it persisted a handoff (verification object, or escalation with a reason). */
+function assertHandoffs(run: CaseRun, workflows: readonly WorkflowRecord[]): void {
+  if (workflows.length === 0) {
+    run.add(check('handoff/verification persisted', false, 'no workflows readable after settlement'));
+    return;
+  }
+  for (const w of workflows) run.add(checkHandoffRecorded(w));
+}
+
 function finalChecks(run: CaseRun, s: LiveState, wf: WorkflowRecord, requireDone: boolean) {
   run.add(checkAllocationUniqueness(s.snapshot.allocations, s.jobs));
   const fin = finalMigrate(s.details, JOB_A);
@@ -307,7 +347,8 @@ async function caseL1(run: CaseRun): Promise<LiveState> {
   run.checkpointCount.complete_after = completeCheckpoints(state, JOB_A);
   run.add(checkKeysReconciled(before.details, state.details));
   finalChecks(run, state, wf, true);
-  return state;
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  return all.state;
 }
 
 async function caseL2(run: CaseRun): Promise<LiveState> {
@@ -335,7 +376,10 @@ async function caseL2(run: CaseRun): Promise<LiveState> {
   const ja = jobState(state, JOB_A);
   run.add(check('job-a not allocated to the failed GPU', !(ja?.allocated_gpu_ids ?? []).includes(failedGpu), `${JOB_A} on [${ja?.allocated_gpu_ids.join(',')}]`));
   finalChecks(run, state, wf, false);
-  return state;
+  // The destination Xid opened a second workflow: it too must verify/hand off before the next reset.
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  assertHandoffs(run, all.workflows);
+  return all.state;
 }
 
 async function caseL3(run: CaseRun): Promise<LiveState> {
@@ -372,7 +416,9 @@ async function caseL3(run: CaseRun): Promise<LiveState> {
   finalChecks(run, state, wf, false);
   // Evidence, not just an exit code: the fresh process left a handoff.
   run.add(check('fresh process recorded a handoff/verification', run.verification !== null && Object.keys(run.verification).length > 0, JSON.stringify(run.verification ?? {}).slice(0, 200)));
-  return state;
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  assertHandoffs(run, all.workflows);
+  return all.state;
 }
 
 async function probeRejected(run: CaseRun, name: string, fn: () => Promise<unknown>): Promise<void> {
@@ -432,10 +478,21 @@ async function caseL5(run: CaseRun): Promise<LiveState> {
   run.checkpointCount = { job_id: JOB_A, complete_before: ckptBaseline, complete_after: ckptBaseline };
   const ja0 = jobState(s1, JOB_A);
   const durableBefore = ja0?.durable_work_units ?? 0;
-  const due = ck.due_sim_time_ms;
-  if (due === null) throw new Error(`checkpoint ${ck.command.command_key} is running but has no due_sim_time_ms`);
-  const late = dueTickTooLate(s1.snapshot.clock, due);
-  if (late) throw new Error(`cannot time the source fault to the due tick: ${late}`);
+  // The live ledger may carry due_sim_time_ms = null for a running checkpoint: derive it (start + 30 s) from
+  // the checkpoint row / lifecycle history, or, as a labeled estimate, from when the harness first saw it running.
+  const dueD = deriveCheckpointDue(ck, s1.snapshot.checkpoints, s1.snapshot.clock.sim_time_ms);
+  const due = dueD.due_sim_time_ms;
+  run.log(dueD.source === 'ledger_due' ? 'checkpoint due tick from ledger' : `checkpoint due tick DERIVED (${describeDue(dueD)})${dueD.estimate ? ' -- no start time observable; this is an estimate' : ''}`, {
+    command_key: ck.command.command_key,
+    due_sim_time_ms: due,
+    start_sim_time_ms: dueD.start_sim_time_ms,
+    source: dueD.source,
+    estimate: dueD.estimate,
+  });
+  // Lead guard against a FRESH clock: at least two steps until the due tick, or injecting would land late.
+  const clockNow = (await run.obs.read()).snapshot.clock;
+  const late = dueTickTooLate(clockNow, due);
+  if (late) throw new Error(`cannot time the source fault to the checkpoint due tick (${describeDue(dueD)}): ${late}. Re-run with a lower --speed so the harness observes the running checkpoint earlier.`);
   const sourceGpu = [...(ja0?.allocated_gpu_ids ?? [])].sort()[0];
   if (!sourceGpu) throw new Error(`${JOB_A} has no allocated GPUs to fault`);
   run.key('source_gpu', sourceGpu);
@@ -456,7 +513,8 @@ async function caseL5(run: CaseRun): Promise<LiveState> {
   const consumed = consumers.filter((d) => d.status.status === 'running' || d.status.status === 'succeeded');
   run.add(check('dependent move did not consume the failed write', consumed.length === 0, consumers.length ? consumers.map((d) => `${d.command.command_key}=${d.status.status}`).join(', ') : 'no dependent command', { consumers: consumers.map((d) => d.command.command_key) }));
   finalChecks(run, state, wf, false);
-  return state;
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  return all.state;
 }
 
 function unsafeProbeCommand(s: LiveState, wfId: string): ActionCommand | null {
@@ -514,7 +572,8 @@ async function caseL6(run: CaseRun): Promise<LiveState> {
   run.add(checkFallbackAttributed(state.events, { expectNoNemotron: true }));
   run.add(checkRecoveredOrEscalated(wf));
   run.add(checkAllocationUniqueness(state.snapshot.allocations, state.jobs));
-  return state;
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  return all.state;
 }
 
 const RUNNERS: Record<CaseId, (run: CaseRun) => Promise<LiveState>> = { L1: caseL1, L2: caseL2, L3: caseL3, L4: caseL4, L5: caseL5, L6: caseL6 };

@@ -1,8 +1,9 @@
 // R5 live recovery harness (TASKS R5, SCOPE §5-6, SUVAN.md S5).
 //
-//   pnpm --filter agent live-recovery -- --db dcos-dev --case L1            one case
-//   pnpm --filter agent live-recovery -- --db dcos-dev --case all --speed 2  all six
-//   pnpm --filter agent live-recovery -- --db dcos-dev --case L3 --no-llm    DETERMINISTIC rehearsal (labeled)
+//   pnpm --filter agent live-recovery --db dcos-dev --case L1            one case
+//   pnpm --filter agent live-recovery --db dcos-dev --case all --speed 2  all six
+//   pnpm --filter agent live-recovery --db dcos-dev --case L3 --no-llm    DETERMINISTIC rehearsal (labeled)
+//   pnpm --filter agent live-recovery --db dcos-dev --case L2 --hold-s 45 hold the Verified state 45 s for recording
 //
 // What it does, per case: controlled reset with the agent stopped (never on prod) -> spawn the REAL agent as
 // a child process (same entry as `pnpm --filter agent start`) -> inject faults through the admin reducer ->
@@ -24,6 +25,7 @@ import { ArgsError, parseArgs, resolveTarget, USAGE, type HarnessArgs } from './
 import { runCase, type CaseEnv } from './live/cases.js';
 import { createRedactor, describeEnv, secretsFromEnv, type Redactor } from './live/redact.js';
 import { writeArtifacts, type CaseArtifact, type RunArtifact, type RunMeta } from './live/report.js';
+import { pace } from './live/wait.js';
 
 const DEFAULT_URI = 'wss://maincloud.spacetimedb.com';
 
@@ -98,7 +100,7 @@ async function main(argv: string[]): Promise<number> {
     node: process.version,
     platform: `${process.platform} ${hostname()}`,
   };
-  log(`target db=${args.db}${target.isProd ? ' (PRODUCTION, acknowledged; no reset)' : ''} run=${args.runId} seed=${args.seed} speed=${args.speed} cases=${args.cases.join(',')} timeout=${args.timeoutS}s`);
+  log(`target db=${args.db}${target.isProd ? ' (PRODUCTION, acknowledged; no reset)' : ''} run=${args.runId} seed=${args.seed} speed=${args.speed} cases=${args.cases.join(',')} timeout=${args.timeoutS}s${args.holdS > 0 ? ` hold=${args.holdS}s` : ''}`);
   log(`commit ${meta.commit} model=${meta.model} mode=${meta.llm_mode} out=${outDir}`);
   log(`env ${JSON.stringify(describeEnv(env, ['STDB_URI', 'STDB_DB', 'STDB_ADMIN_TOKEN', 'STDB_AGENT_TOKEN', 'NIM_BASE_URL', 'NIM_API_KEY', 'NIM_MODEL']))}`);
   if (!args.noLlm && llmMode !== 'live_nim') log('NOTE: NIM_API_KEY/NIM_MODEL unset -> the agent runs deterministically; evidence is labeled as a rehearsal, not a Nemotron claim');
@@ -126,12 +128,21 @@ async function main(argv: string[]): Promise<number> {
   process.once('SIGINT', onSig);
   process.once('SIGTERM', onSig);
 
+  // --hold-s: pacing only (never correctness). The final DB state of a case stays on the dashboard until the
+  // next case's reset, so a presenter/recorder can capture the Verified + handoff state.
+  const holdFinalState = async (): Promise<void> => {
+    if (args.holdS <= 0) return;
+    log(`holding final state for ${args.holdS}s (for recording)`);
+    await pace(args.holdS * 1_000);
+  };
+
   for (const id of args.cases) {
     log(`===== ${id} =====`);
     const art = await runCase(id, caseEnv);
     cases.push(art);
     log(`===== ${id} ${art.passed ? 'PASS' : 'FAIL'} (${art.checks.filter((c) => c.ok).length}/${art.checks.length} checks, ${((art.ended_unix_ms - art.started_unix_ms) / 1000).toFixed(0)} s) =====`);
     flush();
+    await holdFinalState();
   }
   const run = flush();
   admin.close();

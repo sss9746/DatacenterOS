@@ -61,12 +61,12 @@
 2. Meanwhile, Brev on your **local DB only** (never dev during this window):
    - Rent the cheapest Brev GPU (L4/T4/A10) if none exists. Note the hourly rate in chat.
    - `brev login && brev refresh`; check `ssh <host> nvidia-smi`.
-   - `pnpm --filter nvidia-smi-collector start -- --host <host> --dry-run` shows valid events every second.
+   - `pnpm --filter nvidia-smi-collector start --host <host> --dry-run` shows valid events every second.
    - Mint a **gateway** identity for dev and `grant_role` it `"gateway"`. Keep the token private.
 
 **K3: Brev live on dev** (after `releasing dev` from Suvan, ~05:30 → 07:00)
 1. Post `taking dev`.
-2. `pnpm --filter nvidia-smi-collector start -- --host <host> --db dcos-dev` (gateway token in your `.env.local`).
+2. `pnpm --filter nvidia-smi-collector start --host <host> --db dcos-dev` (gateway token in your `.env.local`).
 3. Check that the dashboard's **REAL NVIDIA GPU** tile shows live numbers.
 4. `scp hardware/brev/load.py <host>:~/` then `ssh <host> "python3 ~/load.py --seconds 60"`. The tile's temperature and power rise.
 5. Stop the collector; after 15 seconds the tile shows "stale".
@@ -166,10 +166,10 @@
 1. Post `taking dev`. Tell Karthik to start recording.
 2. Run one case at a time:
    ```bash
-   pnpm --filter agent live-recovery -- --db dcos-dev --case L1 --speed 2 --timeout-s 480
-   pnpm --filter agent live-recovery -- --db dcos-dev --case L2 --speed 1 --timeout-s 600
-   pnpm --filter agent live-recovery -- --db dcos-dev --case L3 --speed 1 --timeout-s 600
-   pnpm --filter agent live-recovery -- --db dcos-dev --case L4,L5,L6 --speed 2 --timeout-s 480
+   pnpm --filter agent live-recovery --db dcos-dev --case L1 --speed 2 --timeout-s 480
+   pnpm --filter agent live-recovery --db dcos-dev --case L2 --speed 1 --timeout-s 600
+   pnpm --filter agent live-recovery --db dcos-dev --case L3 --speed 1 --timeout-s 600
+   pnpm --filter agent live-recovery --db dcos-dev --case L4,L5,L6 --speed 2 --timeout-s 480
    ```
 3. After each case: paste the last ~20 lines (or the `report.md` path in `apps/agent/live-results/`) to Claude.
    - **PASS:** post `R5 Lx PASS` and go on.
