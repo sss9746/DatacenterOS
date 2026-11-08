@@ -62,7 +62,7 @@ describe('XID 79 in the rendered cluster', () => {
       expect(html).toMatch(/data-gpu="gpu-r3-n1-0"[^>]*aria-label="GPU 0, [^"]*XID 79/);
       expect(html.match(/sim-tile-fault/g)?.length).toBe(1);
       expect(html).toContain('>✕<');
-      expect(html).toContain('1 unavailable');
+      expect(html).toContain('1 GPU failed on rack 3');
     } finally { client.close(); }
   });
 });
