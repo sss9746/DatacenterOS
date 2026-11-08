@@ -1,12 +1,29 @@
 // P1-9b: the offline harness runScenario / runAllScenarios / summarizeResults (src/gpu/run.ts).
-// Written against small inline test policies (P1-8's reactive / threshold policies are tested separately once merged).
+// Written against small inline test policies, plus the P1-9 done-when run of P1-8's reactivePolicy / thresholdPolicy.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { validatePayload, type ActionCommand, type EvaluationResult, type ObservedSnapshot } from '@dcos/contracts';
-import { PRIVATE_KEYS, loadScenarios, runAllScenarios, runScenario, summarizeResults, type Scenario } from '../src/index.js';
+import {
+  PRIVATE_KEYS,
+  loadScenarios,
+  reactivePolicy,
+  runAllScenarios,
+  runScenario,
+  summarizeResults,
+  thresholdPolicy,
+  type Scenario,
+} from '../src/index.js';
 import { DO_NOTHING_POLICY, runScenarioDetailed, type Policy, type ScenarioRunDetails } from '../src/gpu/run.js';
-import { DO_NOTHING_FILE, EVALUATION_DIR, buildBaselineFiles, type ReferenceRow } from '../scripts/make-baseline-results.js';
+import {
+  DO_NOTHING_FILE,
+  EVALUATION_DIR,
+  REACTIVE_FILE,
+  THRESHOLD_FILE,
+  buildBaselineFiles,
+  type HarnessApi,
+  type ReferenceRow,
+} from '../scripts/make-baseline-results.js';
 import { T0, gpusOn } from './gpu-helpers.js';
 
 const scenarios = loadScenarios();
@@ -59,6 +76,8 @@ const PUMP_MOVE_HELPS = ['sc03-severe-pump', 'sc09-hot-destination', 'sc11-stale
 
 let doNothing: EvaluationResult[] = [];
 let moved: EvaluationResult[] = [];
+let reactiveRows: EvaluationResult[] = [];
+let thresholdRows: EvaluationResult[] = [];
 let wallMs = 0;
 const resultOf = (rows: EvaluationResult[], id: string) => rows.find((r) => r.scenario_id === id)!;
 
@@ -67,6 +86,12 @@ beforeAll(async () => {
   doNothing = await runAllScenarios(DO_NOTHING_POLICY, { policy_name: 'reactive' });
   wallMs = performance.now() - t0;
   moved = await runAllScenarios(ckptMove, { policy_name: 'threshold' });
+  reactiveRows = [];
+  thresholdRows = [];
+  for (const s of scenarios) {
+    reactiveRows.push(await runScenario(s, reactivePolicy, { policy_name: 'reactive' }));
+    thresholdRows.push(await runScenario(s, thresholdPolicy, { policy_name: 'threshold' }));
+  }
   const table = scenarios.map((s) => {
     const a = resultOf(doNothing, s.scenario_id);
     const b = resultOf(moved, s.scenario_id);
@@ -279,6 +304,31 @@ describe('runScenario: policy interface', () => {
   });
 });
 
+describe('P1-9 done-when: the contract baselines through runScenario', () => {
+  it('runScenario with reactivePolicy and with thresholdPolicy returns a valid EvaluationResult for all 20 scenarios', () => {
+    expect(scenarios).toHaveLength(20);
+    for (const [name, rows] of [['reactive', reactiveRows], ['threshold', thresholdRows]] as const) {
+      expect(rows.map((r) => r.scenario_id)).toEqual(scenarios.map((s) => s.scenario_id));
+      for (const r of rows) {
+        expect(validatePayload('EvaluationResult', r), `${name} ${r.scenario_id}`).toEqual({ ok: true });
+        expect(r).toMatchObject({ policy: name, run_id: `eval-${name}-${r.scenario_id}`, agent_crash_resumes: 0 });
+      }
+    }
+  });
+
+  it('the baselines behave as designed: reactive recovers XIDs, threshold also prevents the thermal losses', () => {
+    const lost = (rows: EvaluationResult[]) => rows.reduce((s, r) => s + r.lost_work_units, 0);
+    expect(lost(thresholdRows)).toBeLessThan(lost(reactiveRows));
+    expect(lost(reactiveRows)).toBeLessThanOrEqual(lost(doNothing));
+    // sc04 (XID 79 on a job-a GPU): both restart job-a from its checkpoint
+    for (const rows of [reactiveRows, thresholdRows]) expect(resultOf(rows, 'sc04-failed-gpu-xid79').successful_recoveries).toBe(1);
+    // reactive never reacts to temperature: no preemption at all
+    for (const r of reactiveRows) expect(r.unnecessary_preemptions).toBe(0);
+    // with the safety gate on, neither executes an unsafe command
+    for (const r of [...reactiveRows, ...thresholdRows]) expect(r.unsafe_actions_executed, r.scenario_id).toBe(0);
+  });
+});
+
 describe('summarizeResults', () => {
   it('totals per policy, sorted by policy name', () => {
     const sum = summarizeResults([...doNothing, ...moved]);
@@ -294,9 +344,25 @@ describe('summarizeResults', () => {
 
 describe('fixtures/evaluation (hand-off to P4)', () => {
   let files: Record<string, string> = {};
+  const api: HarnessApi = { runAllScenarios, summarizeResults, DO_NOTHING_POLICY, reactivePolicy, thresholdPolicy };
   beforeAll(async () => {
-    files = await buildBaselineFiles({ runAllScenarios, DO_NOTHING_POLICY });
+    files = await buildBaselineFiles(api); // the generator's own path, recomputing every row
   }, 120_000);
+
+  it('writes reactive.json and threshold.json: 20 contract EvaluationResults each, equal to runScenario', () => {
+    for (const [file, rows] of [[REACTIVE_FILE, reactiveRows], [THRESHOLD_FILE, thresholdRows]] as const) {
+      const onFile = JSON.parse(files[file]!) as EvaluationResult[];
+      expect(onFile).toHaveLength(20);
+      for (const r of onFile) expect(validatePayload('EvaluationResult', r), `${file} ${r.scenario_id}`).toEqual({ ok: true });
+      expect(onFile).toEqual(rows);
+    }
+    // the README compares the three policies and carries the summarizeResults totals
+    const readme = files['README.md']!;
+    for (const s of summarizeResults([...JSON.parse(files[DO_NOTHING_FILE]!), ...reactiveRows, ...thresholdRows])) {
+      expect(readme).toContain(`| ${s.policy} | ${s.scenarios} | ${s.lost_work_units} | ${s.job_completion_delay_s} | ${s.gpu_busy_waste_s} |`);
+    }
+    for (const s of scenarios) expect(readme).toContain(`| ${s.scenario_id} |`);
+  });
 
   it('the files on disk are exactly what the generator produces', () => {
     const onDisk = readdirSync(EVALUATION_DIR).sort();
