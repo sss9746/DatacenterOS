@@ -155,7 +155,7 @@ test('real GPU page renders its honesty labels without a live feed', async ({ pa
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/#/real-gpu');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Real GPU');
-  await expect(page.locator('#real-gpu')).toBeVisible();
+  await expect(page.locator('.real-gpu')).toBeVisible();
   await expectAccessibleAndContained(page);
   expect(errors).toEqual([]);
 });
