@@ -10,10 +10,10 @@
 // allocation. Run: `pnpm --filter agent exec tsx scripts/crash-test.ts` (exits 1 on any FAIL).
 
 import { pathToFileURL } from 'node:url';
-import type { ActionCommand, ActionStatus, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
+import type { ActionCommand, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
 import { createCoordinator, type ExecutablePlan } from '../src/coordinator.js';
 import { createEventPublisher } from '../src/events.js';
-import { isDbError, type DbPort } from '../src/ports.js';
+import type { DbPort } from '../src/ports.js';
 import { CLAIM_LEASE_MS, resumeOpenWorkflows, type ReconcileDecision, type ResumeReport } from '../src/resume.js';
 import { buildCommand } from '../src/tools/command.js';
 import { FakeDb, FakePhysics } from '../test/fakes/index.js';
@@ -39,38 +39,6 @@ export const EXPECTED_DECISIONS: Record<KillPoint, [ReconcileDecision, Reconcile
   d: ['wait', 'resubmit_same_key'],
   e: ['skip', 'resubmit_same_key'],
 };
-
-// ---------------------------------------------------------------------------
-// Test-only FakeDb shim: a claimed-but-never-started action whose claim lease (15 s wall) expired becomes
-// re-claimable with a new fencing token (ARCHITECTURE §6 lease crash rule). No-op once FakeDb models it.
-// ---------------------------------------------------------------------------
-
-export class LeaseAwareFakeDb extends FakeDb {
-  private wall = 0;
-  private readonly claimedAt = new Map<string, number>();
-
-  override advanceWallMs(ms: number): void {
-    super.advanceWallMs(ms);
-    this.wall += ms;
-  }
-
-  override async claimAction(key: string, expectedVersion: number, workerId: string): Promise<{ status: ActionStatus; fencing_token: bigint }> {
-    try {
-      const r = await super.claimAction(key, expectedVersion, workerId);
-      this.claimedAt.set(key, this.wall);
-      return r;
-    } catch (e) {
-      const at = this.claimedAt.get(key);
-      const rec = (this as unknown as { actions: Map<string, { status: ActionStatus }> }).actions.get(key);
-      const expired = at !== undefined && this.wall - at > CLAIM_LEASE_MS;
-      if (!isDbError(e, 'INVALID_TRANSITION') || !rec || rec.status.status !== 'claimed' || !expired || rec.status.version !== expectedVersion) throw e;
-      rec.status = { ...rec.status, status: 'requested' }; // the claim lease lapsed: reservations released
-      const r = await super.claimAction(key, expectedVersion, workerId);
-      this.claimedAt.set(key, this.wall);
-      return r;
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -109,10 +77,16 @@ export function makePlan(snap: ObservedSnapshot): ExecutablePlan {
   return { plan, commands };
 }
 
-export function makeWorld(opts: { leaseAwareClaims?: boolean } = {}) {
+export interface WorldOptions {
+  /** FakeDb claim lease on a claimed-but-never-started action (default 15 000 wall ms). */
+  claimLeaseMs?: number;
+}
+
+export function makeWorld(opts: WorldOptions = {}) {
   const physics = new FakePhysics();
   const snap = loadPumpDegradedSnapshot();
-  const db = opts.leaseAwareClaims === false ? new FakeDb({ snapshot: snap, physics }) : new LeaseAwareFakeDb({ snapshot: snap, physics });
+  const claimLeaseMs = opts.claimLeaseMs ?? CLAIM_LEASE_MS;
+  const db = new FakeDb({ snapshot: snap, physics, claimLeaseMs });
   let sim = snap.clock.sim_time_ms;
   const clock = { unixMs: () => 0, simTimeMs: () => sim };
   /** Advance sim time; running jobs make progress (FakeDb doesn't model progress itself). */
@@ -124,7 +98,7 @@ export function makeWorld(opts: { leaseAwareClaims?: boolean } = {}) {
     });
   };
   const sleep = async () => tick(1000);
-  return { physics, snap, db, clock, tick, sleep };
+  return { physics, snap, db, clock, tick, sleep, claimLeaseMs };
 }
 
 type Phase = 'before' | 'after';
@@ -192,7 +166,7 @@ export interface KillResult {
 }
 
 /** Run worker-1 to the kill point, let the lease lapse, resume with worker-2 and check invariants. */
-export async function runKillPoint(point: KillPoint, opts: { leaseAwareClaims?: boolean } = {}): Promise<KillResult> {
+export async function runKillPoint(point: KillPoint, opts: WorldOptions = {}): Promise<KillResult> {
   const world = makeWorld(opts);
   const { db, physics, clock, sleep } = world;
   const plan = makePlan(world.snap);
@@ -210,9 +184,10 @@ export async function runKillPoint(point: KillPoint, opts: { leaseAwareClaims?: 
   const check = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail });
   check('worker-1 reached kill point', how === 'killed', how);
 
-  // ---- the agent is dead: the DB keeps ticking; wall time passes the workflow + claim leases
+  // ---- the agent is dead: the DB keeps ticking; wall time passes the workflow lease and the
+  // (default 15 s) claim lease, so a claimed-never-started action is re-claimable.
   world.tick(5_000);
-  db.advanceWallMs(16_000);
+  db.advanceWallMs(Math.min(world.claimLeaseMs, CLAIM_LEASE_MS) + 1_000);
 
   // ---- worker-2 boots and resumes
   const ev2 = createEventPublisher({ db, runId: RUN_ID, clock, redact: (s) => s, startSeq: 1000 });

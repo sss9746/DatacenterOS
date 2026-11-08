@@ -65,7 +65,7 @@ describe('resume', () => {
   });
 
   it('claimed action on a DB that never releases claims -> needs_operator, escalated, no duplicate', async () => {
-    const r = await runKillPoint('c', { leaseAwareClaims: false });
+    const r = await runKillPoint('c', { claimLeaseMs: 10 * 60_000 });
     const item = r.report?.items[0];
     expect(item?.reconciled[0]).toMatchObject({ ledger_status: 'claimed', decision: 'needs_operator' });
     expect(item?.action).toBe('escalated');
