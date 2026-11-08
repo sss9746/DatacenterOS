@@ -23,12 +23,14 @@ import {
   type ParsedRow,
 } from './mapping.js';
 import { sshExec, sshStreamLines } from './ssh.js';
+import { createDeliveryWatchdog } from './watchdog.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const ALLOWED_DBS = ['dcos-dev', 'dcos', 'dcos-r-local'] as const;
 const LOCAL_DB = 'dcos-r-local'; // private test DB: token file in ~/.dcos-tokens, and the only DB --fake may write to
 const REPLAY_LABEL = 'REPLAY OF REAL RECORDING';
 const REPLAY_MAX_GAP_MS = 5_000;
+const DELIVERY_TIMEOUT_MS = 20_000;
 
 const log = (msg: string) => process.stderr.write(`[collector] ${msg}\n`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -102,9 +104,17 @@ async function makeSink(opts: Options): Promise<Send> {
   log(`connecting to ${opts.db} as gateway`);
   const db = await connect({ uri: uri!, db: opts.db!, token, runId: opts.runId });
   log('connected');
+  const watchdog = createDeliveryWatchdog(DELIVERY_TIMEOUT_MS);
+  setInterval(() => {
+    if (!watchdog.expired()) return;
+    log(`no batch delivered for ${DELIVERY_TIMEOUT_MS / 1000} s; exiting so a restart loop can reconnect`);
+    process.exit(1);
+  }, 1_000);
   return async (batch) => {
+    const sendId = watchdog.sent();
     try {
       await db.ingestObservations(batch);
+      watchdog.delivered(sendId);
     } catch (e) {
       const err = e as { code?: string; message?: string };
       log(`ingest rejected: ${err.code ?? ''} ${err.message ?? String(e)}`);
