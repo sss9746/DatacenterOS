@@ -1,7 +1,6 @@
 // GPU layer constants. EVERY number here is SIMULATED and configurable (CONTRACTS §0.4: shown in the UI as
-// "simulated, configurable"). §0.4 values come first; the rest are the P1-1 fixture assumptions
-// (packages/physics/fixtures/gpu/README.md, scripts/make-gpu-fixtures.ts FIXTURE_SIM) so the real model and the
-// fixtures P2/P3/P4 build against agree.
+// "simulated, configurable"). §0.4 values come first; the rest are the model assumptions listed in
+// packages/physics/fixtures/gpu/README.md. The fixtures are generated from this code (scripts/make-gpu-fixtures.ts).
 import { DEFAULT_THERMAL_MASS_KJ_PER_C } from '../constants.js';
 
 /** Wire schema version stamped on every payload (same value as @dcos/contracts SCHEMA_VERSION). */
@@ -55,6 +54,8 @@ export const R6_INLET_OFFSET_C = 12;
 export const GPU_TEMP_SPREAD_C = 0.6;
 /** Simulated work rate per GPU at nominal clock, work units per sim-second. */
 export const WORK_RATE_PER_GPU_PER_SIM_S = 1;
+/** Sim time of the run start, ms (CONTRACTS §0.12 #2). */
+export const RUN_START_SIM_MS = 0;
 /** Simulated unix-ms of sim t=0: observed_unix_ms = this + sim_time_ms (demo speed 1×). */
 export const RUN_EPOCH_UNIX_MS = 1_794_091_200_000;
 /** DCGM/NVML clocks_event_reasons HW thermal slowdown bit. */

@@ -8,7 +8,10 @@ import {
   type PhysicsTickResult,
   type SignalEvent,
 } from '../../contracts/src/index.js';
-import { FIXTURE_TYPES, GPU_FIXTURE_DIR, buildGpuFixtures, serializeFixture } from '../scripts/make-gpu-fixtures.js';
+import { FIXTURE_TYPES, GPU_FIXTURE_DIR, buildGpuFixtures, serializeFixture, type PhysicsApi } from '../scripts/make-gpu-fixtures.js';
+import * as physics from '../src/index.js';
+
+const API: PhysicsApi = physics;
 
 const read = <T>(name: string): T => JSON.parse(readFileSync(join(GPU_FIXTURE_DIR, name), 'utf8')) as T;
 const demo = read<ObservedSnapshot>('observed_snapshot_demo.json');
@@ -50,8 +53,8 @@ describe('GPU fixtures: files and validation', () => {
   });
 
   it('files on disk are exactly what the generator produces (no hand edits, deterministic)', () => {
-    const a = buildGpuFixtures();
-    const b = buildGpuFixtures();
+    const a = buildGpuFixtures(API);
+    const b = buildGpuFixtures(API);
     for (const [name, payload] of Object.entries(a)) {
       expect(serializeFixture(payload)).toBe(serializeFixture(b[name]));
       expect(readFileSync(join(GPU_FIXTURE_DIR, name), 'utf8')).toBe(serializeFixture(payload));
