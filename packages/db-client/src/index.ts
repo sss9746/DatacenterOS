@@ -1,4 +1,11 @@
-// @dcos/db-client: typed wrapper over the generated SpacetimeDB bindings (P2-2 fills this in).
-// Generated bindings use camelCase fields; the wrapper maps them to the snake_case
-// @dcos/contracts types so P3/P4 never touch generated names directly.
-export * as generated from './generated/index.js';
+// @dcos/db-client (lane P2): one DbClient API, two backends.
+//   createMockClient()  in-memory, fixture-backed (P3/P4 build against this first)
+//   connect()           live SpacetimeDB (lands with P2-3..P2-6)
+// Wire types come from @dcos/contracts; DB-side types (workflow, evidence, errors) come from here.
+// Generated bindings use camelCase fields; this wrapper exposes snake_case contract shapes only.
+
+export type * from './client.js';
+export * from './types.js';
+export { createMockClient, MOCK_FIXTURES } from './mock.js';
+export type { MockCall, MockClientOptions, MockDbClient, MockSnapshotName } from './mock.js';
+export { connect } from './live.js';
