@@ -607,8 +607,8 @@ export async function connect(opts: ConnectOptions): Promise<DbClient> {
       return () => changeSubs.delete(cb);
     },
 
-    async ingestObservations(_batch) {
-      throw new DbError('INVALID_TRANSITION', 'ingest_observations lands in P2-9');
+    async ingestObservations(batch) {
+      await call(r.ingestObservations({ batchJson: JSON.stringify(batch) }));
     },
 
     async createRun(runId, seed, presetId) {

@@ -27,6 +27,7 @@ import {
   TRIAGE_TOOL_NAME,
   buildTriageUserMessage,
 } from './prompts/triage.js';
+import { REAL_GPU_ID } from './tools/snapshot-index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -297,6 +298,7 @@ export function extractSymptoms(obs: ObservedSnapshot, signals: SignalEvent[], o
     add({ kind: 'node_unavailable', resource_id: n.resource_id, first_seen: now, last_seen: now, evidence: snapEvidence(n.resource_id, n.version) });
   }
   for (const g of obs.gpus) {
+    if (g.resource_id === REAL_GPU_ID) continue; // observation only: a real GPU under load is not an incident
     const ev = snapEvidence(g.resource_id, g.version);
     const base = { resource_id: g.resource_id, last_seen: now, evidence: ev };
     if ((g.clocks_event_reasons & THERMAL_THROTTLE_BIT) !== 0 || g.temp_c >= THROTTLE_TEMP_C) {

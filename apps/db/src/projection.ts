@@ -33,7 +33,8 @@ function sync<R extends { run_id: string }>(
   keyOf: (r: R) => string,
   runId: string,
   rows: R[],
-  prune: boolean
+  prune: boolean,
+  retain?: (row: R) => boolean
 ): number {
   let writes = 0;
   const keep = new Set<string>();
@@ -53,7 +54,7 @@ function sync<R extends { run_id: string }>(
     }
   }
   if (prune) {
-    const stale = [...table.iter()].filter((r) => r.run_id === runId && !keep.has(keyOf(r)));
+    const stale = [...table.iter()].filter((r) => r.run_id === runId && !keep.has(keyOf(r)) && !retain?.(r));
     for (const r of stale) {
       pk.delete(keyOf(r));
       writes++;
@@ -156,7 +157,8 @@ export function projectWorld(ctx: Ctx, world: PhysicsWorld): number {
       last_seen_sim_ms: g.last_seen_sim_ms,
       version: g.version,
     })),
-    true
+    true,
+    (r) => r.resource_id === 'gpu-real-0' // owned by ingest_observations; physics never models it
   );
 
   writes += sync(
