@@ -1,0 +1,55 @@
+/* R6 scoreboard. Uses the shared tokens and table/badge styles from styles.css. */
+#scoreboard { min-width: 0; }
+#scoreboard .table-scroll { max-width: 100%; }
+#scoreboard .table-scroll:focus-visible { outline-offset: -2px; }
+#scoreboard th small, #scoreboard td small { display: block; color: var(--muted); font-size: 9px; margin-top: 5px; overflow-wrap: anywhere; }
+#scoreboard th code { font-size: 10px; white-space: nowrap; }
+/* Tables keep readable column widths and scroll inside their focusable region instead of crushing columns. */
+#scoreboard .table-scroll > table { min-width: 640px; }
+#scoreboard .table-scroll > table.sb-narrow { min-width: 440px; }
+.sb-count { padding-top: 0; }
+.sb-inset, #scoreboard > .sb-inset { margin: 0 20px 16px; }
+.sb-note { font-size: 11px; color: var(--muted); line-height: 1.6; max-width: none; }
+
+.sb-section { padding: 16px 20px; border-top: 1px solid var(--line); min-width: 0; }
+.sb-section > h3, .sb-batch > h3 { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.sb-section > .table-scroll { margin-top: 12px; }
+.sb-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 11px; color: var(--muted); }
+.sb-toolbar select { min-height: 32px; max-width: 100%; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-raised); color: var(--foreground); font-size: 12px; }
+
+.sb-batch { padding: 16px 20px; border-top: 1px solid var(--line); }
+.sb-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 12px 18px; font-size: 11px; }
+.sb-facts > div { min-width: 0; }
+.sb-facts > .sb-wide { grid-column: 1 / -1; }
+.sb-facts dt { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+.sb-facts dd { color: #d0dbe5; overflow-wrap: anywhere; white-space: normal; }
+.sb-facts code { font-size: 10px; overflow-wrap: anywhere; margin-right: 6px; }
+.sb-facts ul { list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.sb-facts li > span { color: var(--muted); display: inline-block; min-width: 72px; }
+.sb-batch > .sb-note { margin-top: 12px; }
+
+.sb-banner { display: flex; gap: 10px; align-items: flex-start; margin: 4px 20px 16px; padding: 12px 14px; border-radius: 6px; border: 1px solid #6b5634; background: #2c291f; color: #f5d49e; font-size: 11px; line-height: 1.6; }
+.sb-banner strong { display: block; font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.sb-banner p { max-width: none; color: #e9d5ad; }
+.sb-banner svg { margin-top: 2px; }
+
+.sb-columns { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px 18px; padding: 16px 20px; border-top: 1px solid var(--line); font-size: 11px; }
+.sb-columns li { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.sb-columns .badge { white-space: normal; text-align: left; }
+.sb-columns small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+.sb-refusal { padding: 16px 20px; border-top: 1px solid var(--line); font-size: 12px; }
+.sb-refusal > h3 { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--danger); margin-bottom: 8px; }
+.sb-refusal > p { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.sb-reasons { margin: 12px 0 14px; padding: 10px 14px 10px 30px; border-radius: 6px; border: 1px solid #5a3a3c; background: #2a1f22; color: #ffcfc8; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.sb-refusal td code { min-width: 0; }
+
+.benchmark-empty > .sb-rehearsal { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: none; border-top: 0; padding-top: 0; margin-top: 18px; }
+.benchmark-empty > .sb-rehearsal small { max-width: 52ch; }
+.benchmark-empty > .sb-rehearsal .button { max-width: 100%; white-space: normal; height: auto; min-height: 32px; text-align: center; }
+
+@media (max-width: 680px) {
+  .sb-section, .sb-batch, .sb-refusal, .sb-columns { padding-left: 16px; padding-right: 16px; }
+  .sb-banner, .sb-inset, #scoreboard > .sb-inset { margin-left: 16px; margin-right: 16px; }
+  #scoreboard th, #scoreboard td { padding: 10px 12px; }
+}

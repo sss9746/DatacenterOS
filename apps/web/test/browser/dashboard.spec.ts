@@ -78,3 +78,21 @@ test('local physics: pump degradation heats loop A, XID 79 fails a job, and the 
   await page.screenshot({ path: `.impeccable/review/local-${testInfo.project.name}.png`, fullPage: true, animations: 'disabled' });
   expect(errors).toEqual([]);
 });
+
+test('scoreboard: deterministic rehearsal batch is labelled by provenance, never as Nemotron performance', async ({ page }, testInfo) => {
+  const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  const board = page.locator('#scoreboard');
+  await expect(board).toContainText('No matched evaluation runs yet');
+  await board.getByRole('button', { name: 'Load deterministic rehearsal batch (mock only)' }).click();
+  await expect(board).toContainText('rehearsal-fixed12-nollm');
+  await expect(board).toContainText('Deterministic planner');
+  await expect(board).toContainText('cannot substantiate a Nemotron performance claim');
+  await expect(board).toContainText('finite-horizon work deficit');
+  await expect(board).not.toContainText('$');
+  await expect(board).not.toContainText(/GPU-hours/i);
+  await board.scrollIntoViewIfNeeded();
+  await expectAccessibleAndContained(page);
+  await board.screenshot({ path: `.impeccable/review/scoreboard-${testInfo.project.name}.png`, animations: 'disabled' });
+  expect(errors).toEqual([]);
+});

@@ -14,6 +14,7 @@ import { WorkflowBoard } from '../components/workflows/WorkflowBoard';
 import { Ledger } from '../components/ledger/Ledger';
 import { PresenterControls } from '../components/controls/Controls';
 import { Scoreboard } from '../components/scoreboard/Scoreboard';
+import { loadRehearsalBatch } from '../data/rehearsal-batch';
 import { Badge } from '../components/ui/panel';
 import { Button } from '../components/ui/button';
 import { duration } from '../lib/utils';
@@ -71,7 +72,7 @@ export function App() {
       <div className="activity-grid"><Feed events={state.events} example={mode === 'mock' && preview === 'recovery'}/><Ledger actions={state.actions} details={state.actionDetails} simTimeMs={snapshot.clock.sim_time_ms}/></div>
       {state.signals.length > 0 && <details className="signal-panel"><summary>Observed signals <Badge tone="warning">{state.signals.length}</Badge></summary><div>{[...state.signals].reverse().map((signal) => <p key={signal.event_id}><time>{duration(signal.sim_time_ms)} sim</time><code>{signal.resource_id}</code><strong>{signal.xid_code ? `XID ${signal.xid_code}` : signal.event_type}</strong><span>{signal.message}</span></p>)}</div></details>}
       <ModelAssumptions snapshot={snapshot}/>
-      <Scoreboard results={state.results} mode={mode}/>
+      <Scoreboard results={state.results} mode={mode} onLoadRehearsal={mode === 'mock' && store ? () => { void loadRehearsalBatch(store.client).catch((reason) => setControlError(errorMessage(reason))); } : undefined}/>
     </>}
     <footer className="footer"><span>DataCenterOS <span className="separator">/</span> A GPU cluster digital twin</span><span>Simulated, configurable thresholds: throttle 85 °C · shutdown 92 °C</span><a href="https://github.com/sss9746/DatacenterOS/blob/main/plans/CONTRACTS.md" target="_blank" rel="noreferrer">Model contracts<ArrowUpRight size={13}/></a></footer>
   </main></>;
