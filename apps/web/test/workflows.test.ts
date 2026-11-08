@@ -250,7 +250,10 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(cool.waiting?.operation).toBe('checkpoint');
     expect(cool.groups.blocked.map((l) => l.reason)).toEqual(['STALE_DECISION_EPOCH']);
     expect(cool.attempt).toBe(2);
-    expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:cap')?.chosen).toBe(true);
+    // The fixture persists `state.candidates[]` in the planner's shape, so the persisted round wins over the plan-event round.
+    expect(cool.candidates?.source).toBe('workflow_state');
+    expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:power_cap')?.chosen).toBe(true);
+    expect(cool.candidates?.options.filter((o) => o.persisted?.job_id === 'job-b').map((o) => o.persisted?.safety)).toEqual(['allow', 'needs_approval', 'deny', 'not_checked']);
     expect(xid.status.kind).toBe('verified');
     expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-alpha-1', count: 1 });
     expect(xid.workflow.lease_owner).toBe('example-agent-beta-2');

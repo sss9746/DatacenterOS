@@ -65,7 +65,7 @@ export function WorkflowsPage({ state, snapshot, runWorkflows, runPlans, example
       </button>)}
     </div>
     <div id="wf-pane-workflows" role="tabpanel" aria-labelledby="wf-tab-workflows" hidden={tab !== 'workflows'} className="wf-pane">
-      <WorkflowBoard workflows={runWorkflows} plans={runPlans} events={state.events} actionDetails={state.actionDetails} incidents={state.incidents} snapshot={snapshot} example={example} mode={mode} nowUnixMs={now}/>
+      <WorkflowBoard workflows={runWorkflows} plans={runPlans} events={state.events} actionDetails={state.actionDetails} incidents={state.incidents} snapshot={snapshot} example={example} mode={mode} nowUnixMs={now} evidence={state.evidence}/>
     </div>
     <div id="wf-pane-ledger" role="tabpanel" aria-labelledby="wf-tab-ledger" hidden={tab !== 'ledger'} className="wf-pane">
       <Ledger actions={state.actions} details={state.actionDetails} simTimeMs={snapshot.clock.sim_time_ms}/>
