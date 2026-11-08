@@ -6,6 +6,26 @@ Read-only source/checkpoint audit against fetched **`origin/main` `95e1abd`**, p
 
 Evidence classes: **source** = implementation inspected; **reported test/live** = dated checkpoint report; **remaining** = proof or implementation not found. The recorded 697-test suite (15 contracts, 24 client, 353 physics, 9 evaluation, 290 agent, 6 web) is historical evidence in `plans/status/P2.md`, not a fresh run of this audit.
 
+## R-sprint integration on `int/r-sprint` (2026-11-08, base `origin/main` `777b2bf`)
+
+Merged no-ff, in order: `r/r0-provenance` (R0 step 3, S1), `r/r1-completion` (R1, S2), `r/r6-eval-adapter` (R6 adapter + counters, S4), `r/r3-verify-handoff` (R3, S3). No conflicts. Kaushik's R2 (`start_action` blocking any nonempty violations) was **not yet** on `origin/lane/p2-db` (its head `cf56397` is an ancestor of main); `start_action` still rechecks only `decision === 'deny'`.
+
+| Gate at the integrated commit | Measured result |
+|---|---|
+| `pnpm --filter @dcos/physics build` | clean |
+| `pnpm -r test` | 766 passed, 0 failed: contracts 23, db-client 24, physics 370, evaluation 19, agent 324, web 6 |
+| `tsc --noEmit` in contracts, physics, db-client, agent, db, evaluation, web | clean in all seven |
+| `python packages/contracts/schema/validate_contracts.py` | all 7 fixtures valid (incl. `evaluation_result_provenance`) |
+| `pnpm --filter @dcos/web build` | built (one >500 kB chunk warning, pre-existing) |
+| `apps/agent/scripts/crash-test.ts` | 5/5 kill points PASS (in-memory fakes; not live crash evidence) |
+| `apps/agent/scripts/demo-local.ts` | DEMO OK (6/6 checks; deterministic, no NIM key read) |
+| `evaluate --cases fixed12 --no-llm` | 36/36 validated rows, every row with provenance, 12 matched groups; artifact `apps/evaluation/results/deterministic-fixed12-2026-11-08/` (rows, traces, manifest, summary) at revision `c4b10b3` (the merge commit). **Deterministic-only:** Nemotron rows have `model_enabled: false`; this is a rehearsal, not a Nemotron performance claim. Gate 4 stays partial until a live or cached-replay NIM matrix exists |
+| `apps/agent/eval-results/deterministic-2026-11-08.json` | regenerated with the merged physics: identical except `generated_at`, so it was not replaced (zero baseline drift from R1) |
+
+Documented limits carried from the task reports: R1 leaves a thermal-shutdown latch derived on the exact checkpoint due tick able to complete that checkpoint (fatal XID/node-crash faults are covered), and completion freshness is scoped to destination GPUs. R3's `closeNoAction` still saves a no-action handoff as `recovered`/verified; `checkPowerCap` treats a missing `power_limit_w` as unverified instead of the 500 W default. The live NIM path of the evaluation adapter has no test. `apps/db` consumes `@dcos/physics` from its built `dist` (there is no `apps/db/src/physics` copy), so the physics build is the sync step; republishing `dcos-dev` from this branch remains Kaushik's step.
+
+Integration follow-ups done here: `@dcos/physics` now exports `runScenarioDetailed`/`ScenarioRunDetails`; `summarizeResults` (shared by the web scoreboard) refuses mixed batch/revision/horizon or legacy-plus-provenance sets, reports per-policy mode labels from provenance and unfinished-job totals (null when any row lacks provenance); the scoreboard shows them; `publish_evaluation_result` fills `policy_version`/`physics_profile_version` from supplied provenance (R0 step 4; legacy rows unchanged). Live publish → read-back of a provenance row (R0 step 5) is not proven here: no database was touched.
+
 ## Implemented foundation
 
 | Area | Inspected implementation | Evidence / remaining boundary |
