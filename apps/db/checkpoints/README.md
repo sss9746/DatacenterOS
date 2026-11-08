@@ -1,0 +1,32 @@
+# P2 checkpoints (Kaushik): SpacetimeDB + durability
+
+The P2 lane split into one file per task. Source of truth for scope: [`plans/LANE-P2-db.md`](../../../plans/LANE-P2-db.md). If a checkpoint file and the lane file disagree, the lane file wins (and CONTRACTS §0 beats both).
+
+## Board
+| # | Checkpoint | Due | Gate | Depends on | Status |
+|---|---|---|---|---|---|
+| 0 | [Setup + booth questions](P2-0-setup.md) | 8:15 PM | — | — | ☐ |
+| 1 | [Scaffold module + publish + bindings](P2-1-scaffold.md) | 9:00 PM | **Gate 0** | P2-0 | ☐ |
+| 2 | [db-client wrapper + mock](P2-2-db-client-mock.md) ‖ | 9:00 PM | Gate 0 | P1 fixtures (or local stand-ins) | ☐ |
+| 3 | [Tier 1 tables + `create_run`](P2-3-tables-create-run.md) | 10:45 PM | — | P2-1, P1 `buildPreset` | ☐ |
+| 4 | [`advance_tick` + `inject_fault`](P2-4-tick-faults.md) | 11:30 PM | **Gate 1** | P2-3, P1 `step` | ☐ |
+| 5 | [Action ledger](P2-5-action-ledger.md) | 1:00 AM | — | P2-4, P1 `evaluateSafety` | ☐ |
+| 6 | [Workflow + incidents](P2-6-workflow-incidents.md) ‖ | 1:15 AM | — | P2-3 | ☐ |
+| 7 | [Gate 2 script](P2-7-gate2-script.md) | 1:30 AM | **Gate 2** | P2-5, P2-6 | ☐ |
+| 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ☐ |
+| 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ☐ |
+
+Status key: ☐ not started · ◐ in progress · ☑ done (all "Done when" boxes ticked) · ⛔ blocked (say why in the file).
+
+## How a checkpoint moves
+1. **Codex (architect)** reads the checkpoint file and writes into its `## Architect notes` section: anything it wants changed or pinned down. It may leave the section empty.
+2. **Claude (coder)** implements it, runs the "Done when" checks and fills in `## Implementation report` (files, how verified, open questions).
+3. **Codex reviews** the diff (`codex review` run by Claude, or by you in Codex.app) and appends findings under `## Architect notes`.
+4. **Kaushik** runs the commit command that Claude prints, ticks the board above, and updates [`plans/status/P2.md`](../../../plans/status/P2.md) at each sync.
+
+## Rules that apply to every checkpoint
+- Edit only `apps/db/**`, `packages/db-client/**` and `plans/status/P2.md`.
+- Wire types come from `@dcos/contracts`; never hand-write a duplicate type. Need a contract change → write `CONTRACT request` in `plans/status/P2.md` and stop.
+- Validate every JSON reducer argument with `validatePayload()`; reject with the stable reason codes (CONTRACTS §0.7 + `BAD_PAYLOAD`, `UNAUTHORIZED`, `COMMAND_KEY_COLLISION`, `STALE_FENCING_TOKEN`, `LEASE_HELD`).
+- Schema changes after 9 PM are **additive only**.
+- Never commit tokens, `.env.local` or `node_modules`.
