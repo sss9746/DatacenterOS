@@ -1,0 +1,6 @@
+test-results/
+playwright-report/
+.vercel/
+.impeccable/review/
+.impeccable/critique/
+!.impeccable/critique/ignore.md
