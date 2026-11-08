@@ -1,0 +1,67 @@
+/* Training jobs: one card per job in the dark console. The job colour (--job-a/b/c) carries identity only; state
+   is in the chip, the risk line and the lost line. Motion: scaleX on the bar layers, a pulse on the shield while a
+   checkpoint is written, a one-shot bump when durable work grows. Type floor 11px. */
+#jobs { --jb-ease: cubic-bezier(.2, .7, .2, 1); --jb-fast: 160ms; --jb-slow: 600ms; }
+#jobs .jobs-badges { display: inline-flex; gap: 6px; }
+#jobs .jobs-legend { display: flex; gap: 16px; align-items: center; padding: 0 20px 14px; font-size: 11px; color: var(--muted, #a6b4c3); }
+#jobs .jobs-legend span { display: flex; align-items: center; gap: 6px; }
+#jobs .jobs-key { display: inline-block; width: 12px; height: 6px; border-radius: 2px; background: color-mix(in srgb, var(--job-a, #9abedc) 42%, #1b2631); }
+#jobs .jobs-key-durable { background: var(--job-a, #9abedc); }
+#jobs .jobs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); border-top: 1px solid var(--line, #303c49); }
+#jobs .jobcard { --job-color: var(--job-a, #9abedc); position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px 20px 20px; border-right: 1px solid var(--line, #303c49); border-bottom: 1px solid var(--line, #303c49); color: var(--foreground, #e8edf2); }
+#jobs .jobcard.job-b { --job-color: var(--job-b, #c4b5dc); }
+#jobs .jobcard.job-c { --job-color: var(--job-c, #dbc18f); }
+#jobs .jobcard.is-failed { background: linear-gradient(180deg, #2a1f22, transparent 42%); }
+#jobs .jobcard-head { display: flex; align-items: center; gap: 8px; }
+#jobs .jobcard-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+#jobs .jobcard-head h3 i { width: 9px; height: 9px; border-radius: 2px; background: var(--job-color); }
+#jobs .jobcard-lock { display: inline-grid; place-items: center; color: var(--muted, #a6b4c3); }
+#jobs .jobcard-head .badge { margin-left: auto; }
+
+/* Two-layer bar: work done (tint) under checkpointed work (full colour). Width is animated with scaleX. */
+#jobs .jobcard-progress { position: relative; height: 8px; border-radius: 2px; overflow: hidden; background: #2b3642; }
+#jobs .jobcard-progress i { position: absolute; inset: 0; display: block; transform-origin: left center; border-radius: 2px; transition: transform var(--jb-slow) var(--jb-ease); will-change: transform; }
+#jobs .jobcard-bar-work { background: color-mix(in srgb, var(--job-color) 42%, #1b2631); }
+#jobs .jobcard-bar-durable { background: var(--job-color); }
+#jobs .jobcard-progress-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: -2px; }
+#jobs .jobcard-progress-row strong { font-size: 20px; font-weight: 500; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+#jobs .jobcard-progress-row strong small { margin-left: 3px; font-size: 11px; font-weight: 500; color: var(--muted, #a6b4c3); }
+#jobs .jobcard-shield { position: relative; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted, #a6b4c3); white-space: nowrap; }
+#jobs .jobcard-shield svg { color: var(--job-color); }
+#jobs .jobcard-shield.is-writing { color: var(--warning, #efc589); }
+#jobs .jobcard-shield.is-writing svg { color: var(--warning, #efc589); }
+#jobs .jobcard-shield.is-writing::before { content: ''; position: absolute; left: -5px; top: 50%; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; border: 1.5px solid var(--warning, #efc589); border-right-color: transparent; animation: jobcard-spin 1.1s linear infinite; opacity: .8; }
+#jobs .jobcard-shield.is-bumping svg { animation: jobcard-bump 700ms var(--jb-ease) 1; }
+@keyframes jobcard-spin { to { transform: rotate(360deg); } }
+@keyframes jobcard-bump { 0% { transform: scale(1); } 40% { transform: scale(1.5); } 100% { transform: scale(1); } }
+
+#jobs .jobcard-risk, #jobs .jobcard-lost, #jobs .jobcard-place, #jobs .jobcard-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted, #a6b4c3); max-width: none; }
+#jobs .jobcard-risk strong, #jobs .jobcard-lost strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+#jobs .jobcard-risk.is-at-risk { color: var(--warning, #efc589); }
+#jobs .jobcard-risk.is-safe { color: var(--muted, #a6b4c3); }
+#jobs .jobcard-lost { color: var(--danger, #f0a29d); }
+#jobs .jobcard-note { color: var(--warning, #efc589); }
+#jobs .jobcard-note.is-danger { color: var(--danger, #f0a29d); }
+#jobs .jobcard-place { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--foreground, #e8edf2); }
+#jobs .jobcard-moving { font-style: normal; color: var(--agent, #8bd6b1); font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+#jobs .jobcard-move { display: inline-flex; align-items: center; gap: 6px; color: var(--agent, #8bd6b1); font-weight: 600; }
+#jobs .jobcard-move svg { animation: jobcard-arrow 900ms var(--jb-ease) infinite alternate; }
+#jobs .jobcard-move > span:first-child { color: var(--muted, #a6b4c3); font-weight: 400; text-decoration: line-through; }
+@keyframes jobcard-arrow { from { transform: translateX(-2px); } to { transform: translateX(3px); } }
+
+#jobs .jobcard-decision { display: flex; flex-direction: column; gap: 5px; margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--line, #303c49); font-size: 12px; }
+#jobs .jobcard-decision-head { display: flex; align-items: center; gap: 8px; }
+#jobs .jobcard-decision-head strong { font-weight: 600; }
+#jobs .jobcard-reason { color: var(--muted, #a6b4c3); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#jobs .jobcard-reason.is-none { font-style: italic; }
+#jobs .jobcard-history { font-size: 11px; color: var(--muted, #a6b4c3); }
+#jobs .jobcard-history > summary { cursor: pointer; }
+#jobs .jobcard-history ol { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0 0; padding: 0; }
+#jobs .jobcard-history li { display: inline-flex; gap: 5px; align-items: baseline; }
+#jobs .jobcard-history time { font-size: 11px; }
+
+@media (max-width: 680px) { #jobs .jobcard { padding: 16px; } }
+@media (prefers-reduced-motion: reduce) {
+  #jobs .jobcard-progress i { transition-duration: 160ms !important; }
+  #jobs .jobcard-shield::before, #jobs .jobcard-shield svg, #jobs .jobcard-move svg { animation: none !important; }
+}
