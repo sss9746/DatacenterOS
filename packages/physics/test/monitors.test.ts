@@ -16,7 +16,7 @@ import {
   type IncidentDraft,
   type Symptom,
   type TelemetryPoint,
-} from '../src/index.js';
+} from '../src/v0/index.js';
 
 function fail(kind: FailureKind, target_id: string, params: Failure['params'] = {}, id = 1): Failure {
   return { id, kind, target_id, params, start_tick: 0, active: true };

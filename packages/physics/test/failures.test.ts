@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyFailure, setFanReading } from '../src/index.js';
+import { applyFailure, setFanReading } from '../src/v0/index.js';
 import { defaultState, fail } from './helpers.js';
 
 describe('applyFailure', () => {

@@ -8,7 +8,7 @@ import {
   simulate,
   step,
   type FacilityState,
-} from '../src/index.js';
+} from '../src/v0/index.js';
 
 const LIMIT_MS = 100; // targets (LANE-S §3.3): step < 0.2, simulate(300) < 10, checkAction < 25 ms
 

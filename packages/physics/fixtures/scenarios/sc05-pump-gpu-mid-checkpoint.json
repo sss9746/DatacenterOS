@@ -1,0 +1,35 @@
+{
+  "scenario_id": "sc05-pump-gpu-mid-checkpoint",
+  "seed": 105,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §9 pump + GPU mid-checkpoint: pump-a degrades 60% at 10 s; XID 79 hits job-a GPU gpu-r2-n1-1 at 30 s, i.e. while a checkpoint started on the pump alarm (≈11 s, 30 s write) is still writing, so that checkpoint never becomes durable. No action: job-a fails at 30 s; job-b survives because the r2/r3 heat goes away.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc05-pump-gpu-mid-checkpoint.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc05-pump-gpu-mid-checkpoint.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r2-n1-1",
+      "kind": "gpu_xid_79",
+      "start_sim_time_ms": 30000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 1
+    }
+  ]
+}

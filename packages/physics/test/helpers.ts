@@ -1,7 +1,7 @@
 // Test helpers (S-2). defaultState() is a hand-built equivalent of compileTopology(defaultDemoConfig()).state
 // (S-3 is building the compiler in parallel; swap to it once it lands).
-import { applyFailure, setFanReading, step, makeRng } from '../src/index.js';
-import type { ComponentKind, ComponentState, Edge, FacilityState, Failure, FailureKind } from '../src/index.js';
+import { applyFailure, setFanReading, step, makeRng } from '../src/v0/index.js';
+import type { ComponentKind, ComponentState, Edge, FacilityState, Failure, FailureKind } from '../src/v0/index.js';
 
 function comp(
   id: string,

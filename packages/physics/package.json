@@ -9,12 +9,19 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./v0": {
+      "types": "./dist/v0/index.d.ts",
+      "import": "./dist/v0/index.js"
     }
   },
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc -p .",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@dcos/contracts": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

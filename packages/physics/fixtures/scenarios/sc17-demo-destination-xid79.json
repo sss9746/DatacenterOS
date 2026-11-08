@@ -1,0 +1,35 @@
+{
+  "scenario_id": "sc17-demo-destination-xid79",
+  "seed": 117,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §11 minimum demo: pump-a degrades 60% at 10 s; XID 79 hits gpu-r1-n1-0 at 90 s, on the first free rack (the likely relocation destination) while a checkpoint+move started on the alarm would be restarting. The destination is disqualified; a second incident. No action: r1 GPU unreachable, jobs unaffected by it.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc17-demo-destination-xid79.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc17-demo-destination-xid79.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-0",
+      "kind": "gpu_xid_79",
+      "start_sim_time_ms": 90000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 1
+    }
+  ]
+}

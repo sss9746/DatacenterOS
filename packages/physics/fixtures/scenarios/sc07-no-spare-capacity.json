@@ -1,0 +1,71 @@
+{
+  "scenario_id": "sc07-no-spare-capacity",
+  "seed": 107,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §9 no spare capacity: the four free nodes (r1, r5, r7, r8) crash at 5 s, then pump-a degrades 60% at 10 s. No safe destination exists, so moving is impossible; cap, pause or escalate. No action: r2-r4 throttle, then shut down near the end.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc07-no-spare-capacity.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "node-r1-n1",
+      "kind": "node_crash",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc07-no-spare-capacity.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "node-r5-n1",
+      "kind": "node_crash",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc07-no-spare-capacity.03",
+      "run_id": "run-demo-1",
+      "target_resource_id": "node-r7-n1",
+      "kind": "node_crash",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 2
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc07-no-spare-capacity.04",
+      "run_id": "run-demo-1",
+      "target_resource_id": "node-r8-n1",
+      "kind": "node_crash",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 3
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc07-no-spare-capacity.05",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 4
+    }
+  ]
+}
