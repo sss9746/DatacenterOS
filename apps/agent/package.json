@@ -8,6 +8,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke-nim.ts",
+    "demo": "tsx scripts/demo-local.ts",
     "fixtures": "tsx test/fixtures/make-fixtures.ts"
   },
   "dependencies": {
