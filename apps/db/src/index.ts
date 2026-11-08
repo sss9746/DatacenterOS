@@ -8,6 +8,7 @@ export default spacetimedb;
 export { init, grant_role } from './auth';
 export { create_run, pause_run, configure_run } from './run';
 export { advance_tick } from './tick';
+export { inject_fault } from './faults';
 
 // Smoke test: proves the module runs, @dcos/physics bundles, and @dcos/contracts' validator
 // (ajv) works inside the SpacetimeDB runtime.

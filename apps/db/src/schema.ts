@@ -504,6 +504,7 @@ export const fault_injection_truth = table(
     kind: t.string(),
     start_sim_time_ms: t.u32(),
     fault_json: t.string(),
+    /** true once advance_tick has handed it to physics (due_faults_private); see faults.ts. */
     active: t.bool(),
   }
 );

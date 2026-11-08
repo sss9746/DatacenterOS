@@ -3,7 +3,7 @@
 // create_run builds the world from physics, stores it in private `world_state`, and projects it
 // into the public tables. Calling it again for an existing run_id RESETS that run: every row
 // scoped to the run (incl. actions, incidents, telemetry, faults) is deleted first.
-import { t } from 'spacetimedb/server';
+import { ScheduleAt, t } from 'spacetimedb/server';
 import { validatePayload, type PhysicsWorld } from '@dcos/contracts';
 import spacetimedb, { type Ctx } from './schema';
 import { reject, requireRole } from './auth';
@@ -140,6 +140,8 @@ export const create_run = spacetimedb.reducer(
       profile_version: `${preset_id}@p2-standin`,
     });
     const writes = projectWorld(ctx, world);
+    // advance_tick once per wall second (clearRun removed any previous schedule for this run).
+    ctx.db.tick_schedule.insert({ scheduled_id: 0n, scheduled_at: ScheduleAt.interval(1_000_000n), run_id });
     console.info(
       `create_run ${run_id} seed=${seed} preset=${preset_id}: ${cleared ? `reset (${cleared} rows cleared), ` : ''}${writes} public rows`
     );
