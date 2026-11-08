@@ -2,6 +2,7 @@ import { Cpu } from 'lucide-react';
 import type { Evidence } from '@dcos/db-client';
 import { Badge } from '../ui/panel';
 import { number } from '../../lib/utils';
+import './real-gpu.css';
 
 const METRICS: ReadonlyArray<readonly [metric: string, label: string, unit: string]> = [
   ['nvidia_smi.temperature_gpu', 'Temperature', '°C'], ['nvidia_smi.power_draw', 'Power', 'W'],
