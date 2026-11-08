@@ -7,7 +7,9 @@
 > - **Stage 4:** RECORDED replay of the real L3 rounds.
 > - **Stage 5:** reduced `/design-review` (contrast passes AA, NEMOTRON/CODE tags enlarged) and docs.
 >
-> **Live check:** L3 team mode on `dcos-dev`, 17/18 (`apps/agent/live-results/agent-team-2026-11-08/L3-team-v2-dev/`). The stage updated live during both rounds. The peer-conversation check failed because Workload's finding was rejected for `no_question_reason`.
+> **Live check:** L3 team mode on `dcos-dev`. The first run scored 17/18 (`apps/agent/live-results/agent-team-2026-11-08/L3-team-v2-dev/`): the stage updated live during both rounds, but the peer-conversation check failed. Workload's finding was rejected in both rounds for two *different* reasons — round 0 invalid arguments (`no_question_reason`), round 1 an unknown evidence id and an unknown resource id — and because the peer-answer phase requires the responder to hold a valid finding, Cooling covered each time and no peer answer was possible. After the grounding fix the rerun passes **18/18** (`…/L3-team-v4-grounded/`, 205 s): four consumed answers across both rounds (`workload → [cooling,lead]` and `cooling → [lead]`, twice) and `no cover occurred`.
+>
+> **No live run is citable yet.** All seven reports under `apps/agent/live-results/agent-team-2026-11-08/` record a `-dirty` commit, v4 included (`1a4c94f-dirty`), so no run can be re-derived from the repository. A clean-HEAD rerun after the next commit is required before any of this is quoted as evidence. Do not drop the cover-rendering guidance below on the strength of v4: covers still happen (SB/SBK), and the surfaces must render them.
 >
 > **Still open:**
 > - A SIGKILL *during* a round (interrupted) is unit-tested only.
