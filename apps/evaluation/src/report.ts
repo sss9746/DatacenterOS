@@ -27,7 +27,11 @@ export function modeLabel(p: Provenance): string {
   if (!p.model_enabled) return p.fallback_decisions > 0 ? 'deterministic-only' : 'rules';
   if (p.fallback_decisions > 0) return 'mixed-fallback';
   if (p.model_requests === 0) return 'model-enabled, no model call needed';
-  return p.live_model_responses === 0 && p.cache_hits > 0 ? 'model-assisted (cached replay)' : p.cache_hits > 0 ? 'model-assisted (live+cached)' : 'model-assisted (live)';
+  // Requests went out but nothing came back (live or cached): no model output backs this row, so it is never
+  // "model-assisted", whatever the fallback counter says.
+  if (p.live_model_responses + p.cache_hits === 0) return 'model-enabled, no model response (deterministic)';
+  if (p.live_model_responses === 0) return 'model-assisted (cached replay)';
+  return p.cache_hits > 0 ? 'model-assisted (live+cached)' : 'model-assisted (live)';
 }
 export const rowMode = (row: EvaluationResult): string => (row.provenance ? modeLabel(row.provenance) : LEGACY_MODE);
 const comparisonKey = (row: EvaluationResult) => JSON.stringify([row.run_id, row.scenario_id, row.seed]);

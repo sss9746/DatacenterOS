@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createNemotronPolicy } from '../src/policy.js';
 import type { LlmChatRequest, LlmChatResponse, LlmPort } from '../src/ports.js';
 import { CHOOSE_OPTIONS_TOOL_NAME } from '../src/prompts/planner.js';
+import { TRIAGE_TOOL_NAME } from '../src/prompts/triage.js';
 import { FakeLlm, FakePhysics } from './fakes/index.js';
 import { loadPumpDegradedSnapshot } from './fixtures/index.js';
 
@@ -22,6 +23,14 @@ class PickFirstLlm implements LlmPort {
   }
 }
 
+/** The triage call fails (budget exhausted / NIM error); the planner call answers. */
+class TriageDownLlm extends PickFirstLlm {
+  override async chat(req: LlmChatRequest): Promise<LlmChatResponse> {
+    if (req.tools?.[0]?.name === TRIAGE_TOOL_NAME) throw new Error('live LLM call budget exhausted');
+    return super.chat(req);
+  }
+}
+
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'policy-usage-'));
@@ -36,6 +45,30 @@ describe('policy usage counters (CONTRACTS 0.14)', () => {
     const u = policy.usage();
     expect(u).toMatchObject({ model_requests: 0, live_model_responses: 0, cache_hits: 0, fallback_decisions: 1 });
     expect(u.decision_wall_time_ms).toBeGreaterThan(0);
+  });
+
+  it('a failed triage model call is a counted fallback even when the planner later uses the model', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const policy = createNemotronPolicy({ llm: new TriageDownLlm(), physics: new FakePhysics(), cacheDir: dir, model: 'm', cache: false });
+    const cmds = await policy(obs, { sim_time_ms: obs.clock.sim_time_ms });
+    expect(cmds.length).toBeGreaterThan(0);
+    const u = policy.usage();
+    expect(u.model_requests).toBeGreaterThan(1);
+    expect(u.live_model_responses).toBe(u.model_requests - 1); // the one triage request produced no response
+    expect(u.fallback_decisions).toBe(1);
+  });
+
+  it('a failed triage call on a case with no incident is still a fallback, not a silent model-assisted row', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    let planner = 0;
+    const llm: LlmPort = { async chat(req) { if (req.tools?.[0]?.name !== TRIAGE_TOOL_NAME) planner += 1; throw new Error('NIM 503'); } };
+    const policy = createNemotronPolicy({ llm, physics: new FakePhysics(), cacheDir: dir, model: 'm', cache: false });
+    await policy(obs, { sim_time_ms: obs.clock.sim_time_ms });
+    const u = policy.usage();
+    expect(u.live_model_responses + u.cache_hits).toBe(0);
+    expect(u.model_requests).toBeGreaterThan(0);
+    expect(u.fallback_decisions).toBe(1); // one decision, counted once, whether or not the planner ran
+    expect(planner).toBeLessThanOrEqual(1);
   });
 
   it('counts live responses, then cache hits, and counters survive reset()', async () => {

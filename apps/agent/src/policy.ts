@@ -228,6 +228,8 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
           },
         }
       : null;
+  /** Requests that reached the (cached or live) model port so far; counted before the call, so a thrown call counts. */
+  const requestsSoFar = (): number => (cached ? cached.counts.requests : stats.uncachedRequests);
 
   const decide: Policy = async (obs, ctx) => {
     stats.calls += 1;
@@ -248,9 +250,16 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
     }
     stats.replans += 1;
     const db = createSnapshotDb(obs, signals);
+    const requestsBeforeTriage = requestsSoFar();
     const triage = await runTriage({ db, llm, now: () => ctx.sim_time_ms }, { signals });
+    // A triage model call that went out but yielded no usable assessment is a fallback decision (CONTRACTS §0.14),
+    // also when deterministic triage then finds nothing and the planner never runs. A case that needed no call is not.
+    const triageFellBack = llm !== null && !triage.usedLlm && requestsSoFar() > requestsBeforeTriage;
     if (memo) memo = { ...memo, incidentIds: triage.incidents.map((i) => i.incident_id).sort() };
-    if (triage.incidents.length === 0) return [];
+    if (triage.incidents.length === 0) {
+      if (triageFellBack) stats.llmFailures += 1;
+      return [];
+    }
     const fresh = newSupersedeTriggers(obs, issued, handled);
     if (fresh.length > 0) {
       // like runReplan's new attempt: what we issued before is invalidated, so the new plan needs new keys
@@ -269,7 +278,8 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
       },
       { incidents: triage.incidents },
     );
-    if (!result.used_llm) stats.llmFailures += 1;
+    // one counted fallback per decision, whichever stage (triage or planner) lacked a usable model choice
+    if (!result.used_llm || triageFellBack) stats.llmFailures += 1;
     if (memo && result.recheck_after_s !== undefined) memo = { ...memo, recheckAtMs: ctx.sim_time_ms + result.recheck_after_s * 1000 };
     issued = [...issued, ...result.commands.filter((c) => !issued.some((x) => x.command_key === c.command_key))];
     return result.commands;

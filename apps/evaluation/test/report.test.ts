@@ -24,7 +24,18 @@ describe('provenance on the scoreboard (CONTRACTS §0.14)', () => {
     expect(modeLabel(provenance({ fallback_decisions: 2 }))).toBe('deterministic-only');
     expect(modeLabel(provenance({ model_enabled: true, model_requests: 3, live_model_responses: 2, cache_hits: 1 }))).toBe('model-assisted (live+cached)');
     expect(modeLabel(provenance({ model_enabled: true, model_requests: 2, live_model_responses: 1, fallback_decisions: 1 }))).toBe('mixed-fallback');
+    expect(modeLabel(provenance({ model_enabled: true, model_requests: 2, live_model_responses: 0, cache_hits: 2 }))).toBe('model-assisted (cached replay)');
+    expect(modeLabel(provenance({ model_enabled: true, model_requests: 1, live_model_responses: 1 }))).toBe('model-assisted (live)');
+    expect(modeLabel(provenance({ model_enabled: true, model_requests: 0 }))).toBe('model-enabled, no model call needed');
     expect(rowMode(row('nemotron'))).toBe(LEGACY_MODE);
+  });
+  it('a request with no live or cached response is never labelled model-assisted, even with zero counted fallbacks', () => {
+    // e.g. the live-call budget was exhausted or NIM errored during triage, deterministic triage found no incident, the planner never ran
+    const label = modeLabel(provenance({ model_enabled: true, model_requests: 1, live_model_responses: 0, cache_hits: 0, fallback_decisions: 0 }));
+    expect(label.startsWith('model-assisted')).toBe(false);
+    expect(label).toBe('model-enabled, no model response (deterministic)');
+    const report = summarizeResults([withProv('reactive'), withProv('threshold'), withProv('nemotron', { model_enabled: true, model_requests: 1 })]);
+    expect(Object.keys(report.modes.nemotron).some((k) => k.startsWith('model-assisted'))).toBe(false);
   });
   it('counts modes and unfinished jobs per policy; a deterministic Nemotron batch is visibly not model-assisted', () => {
     const report = summarizeResults([withProv('reactive'), withProv('threshold'), withProv('nemotron', { policy_version: 'nemotron-1', fallback_decisions: 1, unfinished_job_ids: ['job-a', 'job-b'] })]);
