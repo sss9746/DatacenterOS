@@ -9,7 +9,7 @@
 
 **Branch:** `r/o1-real-gpu`, cut from `main`, merged into `int/r-sprint`.
 
-## Status (2026-11-08 05:14 CST; Kaushik now owns this track)
+## Status (2026-11-08 06:12 CST; Kaushik now owns this track)
 
 | # | State | Evidence |
 |---|---|---|
@@ -19,8 +19,9 @@
 | G3 | Done on dev | `ingest_observations` is in module `c1ac94d` on `dcos-dev`; prod at K7 |
 | G4 | Done on dev | Dev gateway token in `.env.local`; prod gateway role and token at K7 |
 | G5 | Passed on dev | About 2 minutes live with zero rejected batches; the tile went live in a browser on dev. Recording is `hardware/recordings/brev-l40s.jsonl` |
+| Box | Passed on dev | Collector runs on `dcos-gpu` in `tmux` with a restart loop. It survived a forced kill with zero rejected batches, and exits and reconnects if DB delivery stops for 20 s. Currently stopped |
 
-**Differences from the plan below:** omit the `--` after `start` in `pnpm` commands. A stopped collector shows "collector offline", not "stale". The recording is named `brev-l40s.jsonl`, and the tile labels a replay `REPLAY OF REAL RECORDING`.
+**Differences from the plan below:** omit the `--` after `start` in `pnpm` commands. A stopped collector shows "collector offline", not "stale". The recording is named `brev-l40s.jsonl`, and the tile labels a replay `REPLAY OF REAL RECORDING`. The collector runs on the box for the demo, not on a laptop. Run only one collector at a time, because two share a `source_id` and reject each other's batches.
 
 ## Already in place (don't rebuild)
 
