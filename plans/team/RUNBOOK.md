@@ -105,8 +105,16 @@
 2. `pnpm install --frozen-lockfile`.
 3. Wait for `dev ready`, then start the dashboard live:
    ```bash
-   VITE_DATA_MODE=live VITE_STDB_DB=dcos-dev pnpm --filter @dcos/web dev
+   VITE_DATA_MODE=live VITE_STDB_DB=dcos-dev \
+   VITE_ADMIN_TOKEN="$(grep '^STDB_ADMIN_TOKEN=' ~/.dcos-tokens/dcos-dev.env | cut -d= -f2-)" \
+   pnpm --filter @dcos/web dev
    ```
+   `VITE_ADMIN_TOKEN` is required for presenter mode. Without it the dashboard
+   connects read-only and every Fault library row is disabled
+   (`use-dashboard.ts:25` → `mode.ts:5` → `FaultLibrary.tsx:77`), which blocks the
+   "move onto hot r6 → BLOCKED" beat. It is accepted only by the local dev server;
+   `vite.config.ts:9` rejects any build that has it set, so never put it in a
+   `.env` file you also build from, and **never** configure it on Vercel.
 4. While waiting: draft `docs/devpost.md`:
    - one-liner
    - problem + statistic (Meta Llama 3: 419 interruptions in 54 days, 58.7% GPU-related, arXiv 2407.21783)

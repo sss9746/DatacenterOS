@@ -80,7 +80,7 @@ Integration branch: `int/r-sprint`. Agent-team work: `Prod-Multi-Agent-System`, 
 | L4 | Stale fencing token rejected after takeover | ✅ 8/8 |
 | L5 | Source GPU fails on the checkpoint due tick → no false durability | 🧪 (harness fixed; re-run pending) |
 | L6 | Nemotron unreachable → safety holds, all events CODE | ✅ 5/5 |
-| L3 in team mode on `dcos-dev` (09:16) | 17/18: full recovery passed; conversation check failed because Workload's finding was rejected in both rounds (`no_question_reason`) and Cooling covered |
+| L3 in team mode on `dcos-dev` | First run 17/18 (09:16): recovery passed, the peer-conversation check failed — Workload's finding was rejected in round 0 for `no_question_reason` and in round 1 for unknown citation ids, and Cooling covered both times | ✅ 18/18 on both reruns. The current evidence is v4 (15:59, the citation-fixed code): four consumed answers across both rounds and no cover needed. All three runs are on dirty trees, so none is yet a reproducible citation |
 | L1, L3 in team mode | Same checks, plus Lead decided, peer answer consumed, 6 model calls per round at most | ✅ 12/12 and 18/18 on local DB |
 | SB, SBK | Scene B: all nodes crash, jobs wait, nodes return, checkpoint-backed jobs restart; SBK adds a SIGKILL during the wait | ✅ SBK 25/25; SB 20/21 (recovery passed, no peer answer after a Workload timeout) on local DB |
 | L7, L8 | Multi-process cases from `r/multi-agent` | Dropped, not merged |

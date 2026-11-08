@@ -32,7 +32,7 @@ The third row restarts the same agent; it is not a second agent taking over. A h
 
 One round runs inside planning and replaces the single Nemotron choice. It runs once per plan attempt.
 
-1. **Findings (parallel):** Cooling and Workload each make one forced `submit_finding` call on pre-packed evidence of about 6 KB. `question_for_peer` is required; `null` must carry a reason. Specialists have no tool loop and no access to the tool registry.
+1. **Findings (parallel):** Cooling and Workload each make one forced `submit_finding` call on pre-packed evidence of about 6 KB. `question_for_peer` is required; a `null` question should carry a reason, and when none is given a code-authored placeholder is recorded instead of discarding the finding. Specialists have no tool loop and no access to the tool registry.
 2. **Peer answers:** each question goes to the other specialist's own session, which makes one forced `answer_peer` call. Skip this phase when there are no questions.
 3. **Cover:** at most one cover call, if a specialist failed and time remains.
 4. **Decision:** the Lead receives findings, answers and the existing candidate board, then calls the existing `choose_options`. Choices go through the existing `decideJob`, conditional re-scoring and `resolveConflicts`.
@@ -41,7 +41,7 @@ One round runs inside planning and replaces the single Nemotron choice. It runs 
 
 **Team LLM client:** build it with `createNimLlm({ ...cfg, LLM_TIMEOUT_MS: 12000 }, { maxRetries: 0, useFallback: false })` and apply the existing circuit breaker, set to open only after 3 consecutive failures. This replaces the cancellation plumbing in §5.
 
-**Validation:** evidence IDs and resource IDs in a finding must exist in that round's bundle, or the finding is rejected. Findings are claims and never become GPU or job facts.
+**Validation:** evidence IDs and resource IDs in a finding must exist in that round's bundle. An ID that does not is dropped and the finding is kept, with a code-authored supervisor note recording how many were dropped. But when the bundle had evidence and **nothing** grounded survives, the whole reply is refused: the summary is kept verbatim, so a claim whose entire basis was invented would otherwise ship invented numbers without their IDs, against the honesty rules in `WORKFLOW-TAB-INTEGRATION.md`. The invented IDs are model text and are never repeated into the trace. Findings are claims and never become GPU or job facts, and the Lead still chooses only from code-validated options.
 
 **Persistence:** the round is awaited inside planning, so there is one writer and §4's serialized queue is not needed. Store a bounded trace (24 messages at most, 400 characters per summary) as `workflow.state.team` in the existing patches at `agent-loop.ts:342` and `:487`. Emit feed events after that write, as `Cooling → Workload: ...` with `actor=nemotron`, and tool calls named `team_message`. A crash mid-round reruns the round; it has no live write tools.
 
@@ -129,12 +129,13 @@ Build only if G3 passes early and Kaushik says yes. A second process with `AGENT
 - A running action cannot be interrupted, and two recovery actions never run at once.
 - The agent process restarts automatically; a separate machine failure is not covered.
 - Better recovery scores for the team are unmeasured unless a single-versus-multi comparison is run.
+- Triage grouping is deterministic in team mode, so a live run's handoff can read "LLM unavailable" while the team rounds were Nemotron. Both are true; say it before a judge asks.
 
 **Docs:** once G2 passes, update `plans/FEATURES.md`, which still lists zones, agent messages and automatic takeover from the dropped branch, along with its "cover for each other" one-liner. Align the Devpost text. The web Agent room is outside this sprint; if it ships, its live roles must be Cooling, Workload and Lead.
 
 ### 0.9 Progress
 
-**Updated 2026-11-08 07:40 CST.** Live means real Nemotron against the disposable local database `dcos-r-local`. Nothing has run on `dcos-dev` or prod.
+**Updated 2026-11-08 10:15 CST.** Live means real Nemotron against the disposable local database `dcos-r-local`, except where a row names `dcos-dev`. L3 in team mode has now run three times on `dcos-dev`: the first failed one check, and the two after it passed 18/18. The third (v4) is the current evidence and the only one taken on the citation-fixed code (see G4). Nothing has run on prod.
 
 | Gate | Status | Evidence |
 |---|---|---|
@@ -142,30 +143,54 @@ Build only if G3 passes early and Kaushik says yes. A second process with `AGENT
 | **G1** real NIM | Passed about 06:57 | L1 in team mode, 12/12 checks with a real SIGKILL. One round: 5 model calls, 11 s, Lead decided, both peer answers consumed |
 | **G2** Scene A | Passed 07:03; committed and pushed as `468cda2` | L3 in team mode at speed 1, 18/18 checks: destination Xid, SIGKILL, DB-finished checkpoint, reclaim, separate incidents, new destination, verified handoff. Two rounds, Lead decided both, 5 calls at most |
 | **G3** Scene B | **Recovery passed; conversation check passed in 1 of 2 runs** | SBK 25/25: all nodes crash, jobs wait, SIGKILL during the wait, fresh process keeps the original wait start, jobs restart from checkpoints, job-c goes to an operator, agents talked. SB 20/21: the same recovery, but Workload timed out at 12 s, so Cooling covered and no peer answer was possible |
-| **G4** regression and review | Not started | L2 and L4–L6 not yet run in team mode; Codex review not done; `dcos-dev` run not done |
+| **G4** regression and review | **Review done and fixed; `dcos-dev` L3 passes on the fixed code, but only on a dirty tree** | Codex review raised 9 issues: 6 confirmed and fixed in `c5ee1f3`, merged as `bb25f19`; 3 deferred (see Open). 573 agent tests pass and typecheck is clean. `dcos-dev`, L3 in team mode, three times, all on `nvidia/nemotron-3.5-lightning-30b-a3b` (`live_nim`): **FAIL 17/18** at `dd61041-dirty` (`L3-team-v2-dev/`), **PASS 18/18** at 15:46 at `2ca6153-dirty` (`L3-team-v3-peerfix/`, two consumed answers in one round, one cover), and **PASS 18/18** at 15:59 in 205 s at `1a4c94f-dirty` (`L3-team-v4-grounded/`, the current evidence). v4 is the only run on the citation-fixed code and is strictly the strongest: **four consumed answers across both rounds** (`a1:e1:m7`, `a1:e1:m8`, `a2:e3:m5`, `a2:e3:m6`), **no cover occurred**, Lead decided 2/2, max 5 calls of the 6 budget. Every run so far is on a dirty tree, so none is a reproducible citation. Not done: an L3 run on a committed HEAD; L2 and L4–L6 in team mode; no L1 or SBK rerun on the fixed code |
 
 | Work package | Status |
 |---|---|
 | A: team round | Done, in `468cda2` |
 | B1: wiring and new-incident watch | Done, in `468cda2`. The watch runs in `multi` only |
 | C: harness and supervisor | Done, in `468cda2`. The supervisor passed with a stand-in child; it has not yet run the real agent |
-| B2: waiting recovery | Done and proven live on the local database. 540 agent tests pass, typecheck clean |
+| B2: waiting recovery | Done and proven live on the local database. 573 agent tests pass, typecheck clean |
 | D: integration | In progress |
 | E: hot standby | Not started; off by default |
+
+**Codex review: 6 confirmed issues fixed in `c5ee1f3` (merged as `bb25f19`):**
+- **High.** After a crash, a job already restarting could still be listed as waiting, so the wait ran on until it escalated. Restarting jobs are now filtered off the waiting list.
+- **High.** If capacity returned during a team round, the wait compared against a snapshot that already showed it back, so it never saw a change. It now compares against `planning_snapshot`.
+- **Medium.** The wait did not wake when a finishing job freed healthy GPUs. A rise in `free_gpus` now wakes it.
+- **Medium.** A job held in the first planning pass was never reconsidered after the Lead's choice freed what it needed. It is now re-ranked.
+- **Medium.** A resolved incident on a resource hid a new fault on that same resource from the new-incident watch. Resolved incidents no longer count as handled.
+- **Low.** Findings were marked consumed by the Lead even when the circuit breaker blocked the Lead's call.
+
+A regression test disproved part of one review finding: the only live rack was too hot, so the job could not have been placed there anyway.
+
+**The `dcos-dev` L3 failure (17/18), in detail:**
+- The one failed check is `team: specialist answer consumed by a role`: 0 specialist answers, so none reached a role's model input.
+- **Recovery itself was verified**: the checkpoint completed while the agent was dead, a fresh process reclaimed the workflow, the checkpoint completed exactly once with no double allocation, the new destination excluded the dead GPU, and the handoff was persisted. The Lead decided both rounds inside budget (max 4 calls).
+- The cause was Workload's finding being rejected in **both** rounds, for **two different reasons**: round 0 `invalid arguments (no_question_reason)`, round 1 `1 unknown evidence id(s), 1 unknown resource id(s)`. Cooling covered each time. Because the peer-answer phase requires the responder to hold a valid finding, Cooling's question went unanswered in both rounds.
+- **Both causes are fixed and both are now live-proven.** The 15:46 rerun (v3) proved the `no_question_reason` fix: 18/18, Workload accepted in both rounds, two answers consumed, but one cover still occurred. The 15:59 rerun (v4), the first on the citation-fixed code, went further: four consumed answers across both rounds and **no cover at all**, so neither specialist failed in either round. The drop-and-keep path is what removed the cover, and the uncited refusal did not cost it. Neither fix is committed yet, so the evidence is behavioural, not citable.
 
 **Found by live runs and fixed:**
 - Specialists declined to ask questions when the prompt allowed it, so no talking happened in the first run. The question is now required.
 - Workload could not say which racks jobs run on, so it could not answer Cooling. `current_rack_ids` was added, with a regression test.
 - On macOS the harness's SIGKILL hit only the `tsx` wrapper, so the agent survived and the first L1 run failed. Multi-mode cases, Scene B and the supervisor now launch the agent directly. Single-mode L1–L6 still use the old launch.
 - One slow specialist tripped the shared circuit breaker for 60 s, which could stop the Lead from being called. The team's breaker now opens after 3 consecutive failures.
-- Nemotron put real rack names in `evidence_ids`, so valid findings were rejected. These IDs are now moved to `resource_ids`; invented IDs are still rejected.
+- Nemotron put real rack names in `evidence_ids`, so valid findings were rejected. These IDs are now moved to `resource_ids`.
+- A null `question_for_peer` with no stated reason discarded the whole finding, which cost the peer conversation in round 0 of the `dcos-dev` run. A missing reason now records a code-authored placeholder and the finding is kept. **Fixed in the working tree, not yet committed or re-verified live.**
+- An invented citation ID discarded the whole reply, which cost the peer conversation in round 1 of the same run. A partly ungrounded reply now has the bad IDs dropped and is kept, with a supervisor note recording the counts; a reply with nothing grounded left is still refused, by Kaushik's call, so an entirely invented basis cannot reach the Lead. **Fixed in the working tree and live-proven by the v4 `dcos-dev` run (18/18, no cover needed), but not yet committed.**
 
 **Open:**
 - **Workload latency varies widely.** The same 8,972-byte prompt took 5.8 s in SBK and over 12 s in SB. When it times out, covering works, but that round has no peer conversation. Do not promise a conversation in every round.
 - **Findings can be factually wrong.** In SBK, Workload said job-a occupied rack-r6, and in an earlier run a cover claimed checkpoint-backed jobs had no checkpoint support. The Lead still chose only from code-validated options, and safety does not depend on findings, but the text shown to judges may contain errors.
-- In L3, a Workload finding was rejected for an unknown resource ID. Rejections now name the invalid field for argument errors, but unknown-ID rejections still report only counts, so that case stays undiagnosed.
-- Each live result is a single run, on the local database.
-- L1 and L3 ran before the Scene B fixes and need rerunning.
+- **A live run's handoff reads as a contradiction.** Both `dcos-dev` reports label the run `live_nim` with Nemotron, yet both hypotheses say "deterministic grouping (LLM unavailable)". This is by design, not a fault: `agent-loop.ts:1077` passes `llm: chooser ? null : llm`, so team mode deliberately gives triage no model (§0.2, so triage adds no model calls), and `triage.ts:900` then labels the grouping "no LLM configured". Both statements are true — the grouping was code, the team rounds were Nemotron — but side by side on a surface judges can read they look contradictory. Pre-existing, in the v2 and v3 reports alike.
+- **Rejections are hard to diagnose.** They now name the invalid field for argument errors, but a citation rejection records only counts, never the offending IDs, since those are model text. The `dcos-dev` unknown-ID case therefore cannot be diagnosed from the saved evidence; dropping such IDs instead of the whole reply makes it non-fatal, not visible.
+- **Deferred (review).** A restart can bypass the 120 s wait deadline. Real but narrow, and postponed because the fix touches the takeover logic L1 and L3 depend on.
+- **Deferred (review).** A round could make a 7th model call, one over budget. Not observed live: v4 reported `max 5 calls across 2 round(s)`, and no run so far has exceeded the budget. That is evidence the path is rare, not that it is closed.
+- **Deferred (review).** A round could have 3 requests in flight, one over the limit. Like the 7th call, it needs a corrective retry plus a second failure in the same round, and the result is a slightly over-budget round, not an unsafe action.
+- Each live result is a single run. All but the L3 `dcos-dev` run are on the local database.
+- **Not one live run in this sprint is reproducible from a commit.** Every report in `live-results/agent-team-2026-11-08/` records a `-dirty` commit: L1 and L3-scene-a at `1dd61b4-dirty`, SB and SBK at `468cda2-dirty`, and the three `dcos-dev` runs at `dd61041-dirty`, `2ca6153-dirty` and `1a4c94f-dirty`. So every gate row above, G1 through G4, rests on a tree that no longer exists. The runs are real and their checks are real, but none can be re-derived from the repository. An L3 run on a committed HEAD is the one piece of outstanding evidence and the only version worth citing publicly; the cheapest way to fix the rest is to rerun whichever gates matter after the commit.
+- **`nemotron_ok` and `nemotron_failed` in every report are dead counters.** `asserts.ts:633` tallies them by scraping agent stdout for `nemotron ok` / `nemotron failed`, and nothing in `apps/agent/src` or `packages/` ever prints either string, so both read 0 in every report ever produced, passing runs included. Do not cite `nemotron_ok=0` as evidence of anything. The real model evidence is the event attribution (`nemotron=17` on v4) and `team lead=2 fallback=0`.
+- L1 and SBK have not been rerun on the fixed code.
 - Better recovery scores for the team are unmeasured.
 
 **Evidence:** `apps/agent/live-results/agent-team-2026-11-08/`.

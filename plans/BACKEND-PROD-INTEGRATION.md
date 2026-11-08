@@ -7,13 +7,14 @@
 ## What this branch now contains (pushed)
 
 - **`r/ui-v2` frontend merged** (`dd61041`).
-- **Agent team live progress** (Stage 2): the round writes `state.team` while agents think (trace v2: per-call status, phase, message timing). The last 4 rounds stay in `state.team_rounds`, and a round cut short by a crash is marked interrupted. Single mode is unchanged. 572 agent tests pass and typecheck is clean.
-- **Workflows team tab, Agent room seats and RECORDED replay** (Stages 1, 3 and 4): 243 web tests pass and the build is clean.
+- **Agent team live progress** (Stage 2): the round writes `state.team` while agents think (trace v2: per-call status, phase, message timing). The last 4 rounds stay in `state.team_rounds`, and a round cut short by a crash is marked interrupted. Single mode is unchanged. 573 agent tests pass and typecheck is clean.
+- **Workflows team tab, Agent room seats and RECORDED replay** (Stages 1, 3 and 4): 244 web tests pass and the build is clean.
 - **Live harness:** accepts v2 traces, counts only closed rounds, and its reset check now ignores the observation-only `gpu-real-0`. Every dev reset was failing on `gpus=65` before this.
 - **Live evidence:** `apps/agent/live-results/agent-team-2026-11-08/L3-team-v2-dev/`, L3 in team mode on `dcos-dev` at 09:16.
     - 17/18: full recovery, SIGKILL, reclaim, separate GPU incident, new destination, no duplicates, verified handoff.
     - The dashboard stage moved live during both rounds.
-    - **Failed:** the peer conversation. In both rounds code rejected Workload's finding for `no_question_reason` (it set `question_for_peer` to null without a reason), so Cooling covered.
+    - **Failed:** the peer conversation. Code rejected Workload's finding in both rounds, for two different reasons — round 0 `no_question_reason` (it set `question_for_peer` to null without a reason), round 1 unknown citation ids — so Cooling covered each time, and the peer-answer phase needs the responder to hold a valid finding.
+- **Reruns, both passing.** `L3-team-v3-peerfix/` at 15:46, **18/18** at `2ca6153-dirty`: conversation gate passed with two consumed answers in one round, one cover. Then `L3-team-v4-grounded/` at 15:59, **18/18** in 205 s at `1a4c94f-dirty` — the current evidence, and the only run on the citation-fixed code: **four consumed answers across both rounds and no cover occurred**, Lead decided 2/2, max 5 calls of the 6 budget. Caveat before citing either: all three `dcos-dev` runs are on dirty trees, so a run on a committed HEAD is still outstanding.
 
 ## Where things stand (checked 09:25)
 
@@ -23,7 +24,7 @@
 |---|---|---|---|---|
 | DB module (incl. `ingest_observations`) | ✅ unchanged since `c1ac94d` (only checkpoint docs differ) | ✅ module `c1ac94d` | ❌ older module: `ingest_observations` → "no such reducer" | — |
 | Unique option ids web fix (`18f5a2b`) | ✅ cherry-picked | — | — | — |
-| Agent team + live progress | ✅ | ✅ L3 17/18 at 09:16 | ❌ not run | — |
+| Agent team + live progress | ✅ | ✅ L3 17/18 at 09:16, then 18/18 at 15:46 and 15:59 (all dirty trees) | ❌ not run | — |
 | Brev GPU: collector, `load.py`, recording, tile | ✅ | ✅ G5 passed 06:12; collector currently stopped | ❌ no reducer, no gateway role | — |
 | New UI with the Workflows team tab | ✅ | — | — | ❌ old build |
 | `origin/main` | `0b82369`, 104+ commits behind | | | |
