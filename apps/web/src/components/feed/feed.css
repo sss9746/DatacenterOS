@@ -1,3 +1,45 @@
+/* Agent activity feed. Overrides styles.css feed rules at equal-or-higher specificity; styles.css is not edited here.
+   Attribution: NEMOTRON = solid mint pill + 2px mint left rule; CODE = grey outline pill; unknown actor = neutral dashed pill.
+   Projector type floor: nothing below 11px; body-ish text 12px+. */
 .feed-badges { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.feed-event > p.feed-workflow { margin: 8px 0 0; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
-.feed-workflow code { font-size: 10px; color: #c3d3df; }
+
+/* Filter chips */
+.feed-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 20px 14px; }
+.feed-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 11px; border-radius: 6px; border: 1px solid #475667; background: transparent; color: var(--muted); font-size: 12px; font-weight: 550; line-height: 1; transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out; }
+.feed-chip:hover { background: var(--surface-raised); color: var(--foreground); }
+.feed-chip[aria-pressed="true"] { background: var(--surface-raised); border-color: #6a7d91; color: var(--foreground); }
+.feed-chip-nemotron[aria-pressed="true"] { background: #243c33; border-color: #4f8a6d; color: #a3e1bf; }
+.feed-chip-count { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, .07); font-variant-numeric: tabular-nums; }
+.feed-chip[aria-pressed="true"] .feed-chip-count { background: rgba(255, 255, 255, .12); }
+.feed-filter-note { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+/* Events */
+.feed-event.actor-nemotron { border-left: 2px solid var(--agent); padding-left: 18px; }
+.feed-event .feed-event-meta { font-size: 12px; color: var(--muted); }
+.feed-event.actor-code .feed-event-meta { color: var(--muted); }
+.feed-event .feed-event-meta time { font-size: 11px; color: var(--muted); }
+.feed-event .feed-event-meta .badge { font-size: 11px; }
+.feed-actor { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; line-height: 1.35; white-space: nowrap; }
+.feed-actor.actor-nemotron { background: var(--agent); color: #14291f; }
+.feed-actor.actor-code { background: transparent; border: 1px solid #5b6d80; color: var(--muted); }
+.feed-actor.actor-unknown { background: transparent; border: 1px dashed #5b6d80; color: var(--muted); text-transform: none; letter-spacing: 0; font-weight: 550; }
+.feed-event > p { font-size: 13px; }
+.feed-event > p.feed-workflow { margin: 8px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.feed-workflow code { font-size: 12px; color: #c3d3df; }
+.feed-event .tool-call { font-size: 12px; border-left: 2px solid transparent; }
+.feed-event .tool-call.actor-nemotron { border-left-color: var(--agent); }
+.feed-event .tool-call summary > span { font-size: 11px; }
+.feed-event .tool-call.actor-nemotron summary > span { color: #a3e1bf; }
+.feed-event .evidence-ids { font-size: 11px; }
+
+/* Footer: count and the cap toggle */
+.feed-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); max-width: none; }
+.feed-more { min-height: 32px; padding: 4px 11px; border-radius: 6px; border: 1px solid #475667; background: transparent; color: var(--foreground); font-size: 12px; font-weight: 550; transition: background-color 160ms ease-out, border-color 160ms ease-out; }
+.feed-more:hover { background: var(--surface-raised); border-color: #6a7d91; }
+
+@media (max-width: 680px) {
+  .feed-filter { padding: 0 16px 12px; }
+  .feed-event.actor-nemotron { padding-left: 14px; }
+  .feed-foot { padding: 12px 16px; }
+  .feed-filter-note { margin-left: 0; flex-basis: 100%; }
+}
