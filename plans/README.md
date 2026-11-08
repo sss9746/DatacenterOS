@@ -2,6 +2,10 @@
 
 **Current scope:** [IMPLEMENTATION-SCOPE.md](IMPLEMENTATION-SCOPE.md). **Start from evidence:** [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md). **Next tasks:** [IMPLEMENTATION-TASKS.md](IMPLEMENTATION-TASKS.md). This guide supersedes the original kickoff schedule; existing lane/checkpoint reports remain historical evidence.
 
+**Real environment extension:** [Brev GPU telemetry and workload recovery implementation plan](REAL-ENVIRONMENT-IMPLEMENTATION.md) specifies the user-requested $60-credit integration, delivery levels, code changes and acceptance evidence. It is a proposal; the existing simulated environment and its proof gates remain distinct.
+
+**Next 5–6 hour sprint:** [Multi-agent fault recovery plan](MULTI-AGENT-HACKATHON-PLAN.md) scopes three communicating model agents, simultaneous-fault handling and recovery of stopped simulated jobs for one implementer. The user confirmed Brev remains observation-only for this sprint. The document is a proposal, with implementation timeboxes and live acceptance criteria.
+
 ## Owners and integration
 
 | Lane | Plan | Paths | Branch convention |
