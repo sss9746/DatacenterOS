@@ -1,5 +1,20 @@
 # Handoff: integrate `r/ui-v2` and rebuild the Workflows tab around the agent team
 
+> **Status 2026-11-08 09:30 — all five stages done and committed on `Prod-Multi-Agent-System`.**
+> - **Stage 1:** `r/ui-v2` merged in `dd61041`; Agent room has Cooling, Workload, Lead and Supervisor seats built from `team_message`.
+> - **Stage 2:** trace v2 live progress, `state.team_rounds` history, `team/progress.ts`; 572 agent tests pass.
+> - **Stage 3:** `components/team/*` team stage, transcript and timeline.
+> - **Stage 4:** RECORDED replay of the real L3 rounds.
+> - **Stage 5:** reduced `/design-review` (contrast passes AA, NEMOTRON/CODE tags enlarged) and docs.
+>
+> **Live check:** L3 team mode on `dcos-dev`, 17/18 (`apps/agent/live-results/agent-team-2026-11-08/L3-team-v2-dev/`). The stage updated live during both rounds. The peer-conversation check failed because Workload's finding was rejected for `no_question_reason`.
+>
+> **Still open:**
+> - A SIGKILL *during* a round (interrupted) is unit-tested only.
+> - 4 web e2e failures predate this work.
+>
+> **Next work:** `plans/BACKEND-PROD-INTEGRATION.md`. The text below is the original handoff, kept for reference.
+
 **Written:** 2026-11-08 08:15 CST, from commit `3ad6642` on `Prod-Multi-Agent-System`. Line numbers refer to that commit.
 **Status:** research and design only. Nothing has been merged, built or changed; this file is the whole output of that session.
 **Start here:** read this file, then `plans/MULTI-AGENT-HACKATHON-PLAN.md` §0 and §0.9, then begin at Stage 1. Re-check the clock and the facts below against the code before acting: they were true at `3ad6642`.
