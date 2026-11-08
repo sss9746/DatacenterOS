@@ -5,7 +5,7 @@
 // exactly where this left off. A command whose key already succeeded is skipped as succeeded, which is
 // what makes re-running `execute` with the same plan (same keys) safe.
 
-import type { ActionCommand, ActionStatus, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
+import type { ActionCommand, ActionStatus, ObservedSnapshot, PlanCandidate, SafetyDecision } from '@dcos/contracts';
 import type { EventPublisher } from './events.js';
 import {
   dbErrorCode,
@@ -117,6 +117,8 @@ export interface Coordinator {
   stopHeartbeat(): void;
   /** One heartbeat; false (and onLostOwnership) if the lease is gone. */
   heartbeatOnce(): Promise<boolean>;
+  /** Beat now if leaseMs/3 passed on the injected clock (or real time) since the last beat; no-op unless started. */
+  heartbeatIfDue(): Promise<void>;
   execute(workflowId: string, plan: ExecutablePlan, opts?: ExecuteOptions): Promise<ExecutionResult>;
   /** CAS-persist a stage with `patch` merged over the last persisted state (used by verify). */
   updateStage(stage: WorkflowStage, patch: Record<string, unknown>): Promise<WorkflowRecord | null>;
@@ -131,6 +133,8 @@ export interface Coordinator {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_LEASE_MS = 15_000;
+/** Real-time granularity at which the heartbeat ticker checks whether a beat is due. */
+const HEARTBEAT_CHECK_MS = 1_000;
 const DEFAULT_POLL_MS = 500;
 const DEFAULT_ACTION_TIMEOUT_SIM_MS = 15 * 60_000;
 const MAX_CLAIM_ATTEMPTS = 3;
@@ -176,7 +180,9 @@ function versionIndex(snap: ObservedSnapshot): Map<string, number> {
 
 /**
  * A dependency's own effect (e.g. a checkpoint bumping job-a's version) is anticipated by the plan, so
- * re-stamp only the resources touched by succeeded dependencies. Everything else (destination GPUs, nodes)
+ * re-stamp only the resources (target, job) touched by this workflow's own succeeded commands (the coordinator
+ * passes every in-plan command that succeeded; resume passes the ones the ledger shows succeeded, which include
+ * the dependencies). Everything else (destination GPUs, nodes)
  * keeps its plan-time version, so an unexpected change there still fails safety. Only called for commands
  * that were never submitted (an existing ledger row is never re-requested).
  */
@@ -204,6 +210,61 @@ export function restampForDependencies(
   return changed ? { ...cmd, expected_resource_versions: versions } : cmd;
 }
 
+const destinationsOf = (cmd: ActionCommand): string[] =>
+  Array.isArray(cmd.arguments.destination_gpu_ids) ? (cmd.arguments.destination_gpu_ids as string[]) : [];
+
+/**
+ * Why the decision_epoch move since plan time must NOT be re-stamped away, or null when it may be.
+ * Run after restampForDependencies: every versioned resource the command names (target, job, destinations)
+ * must still be at its expected version, so a version that moved WITHOUT this workflow's own commands touching
+ * it is a material change to THIS command (a new XID or unavailability on the target/destinations, a job that
+ * failed, ...). Destination GPUs must also still look placeable (ready, no latched XID). Epoch bumps from
+ * anything else (unrelated GPUs throttling, other jobs) are non-material to this command.
+ */
+export function epochRestampBlocker(cmd: ActionCommand, snap: ObservedSnapshot): string | null {
+  const current = versionIndex(snap);
+  for (const [id, expected] of Object.entries(cmd.expected_resource_versions)) {
+    const v = current.get(id);
+    if (v !== undefined && v !== expected) return `${id} changed (v${expected} -> v${v})`;
+  }
+  for (const g of destinationsOf(cmd)) {
+    const row = snap.gpus.find((x) => x.resource_id === g);
+    if (!row) return `${g} missing`;
+    if (row.availability !== 'ready') return `${g} ${row.availability}`;
+    if (row.last_xid_code !== null && row.last_xid_code !== undefined) return `${g} xid ${row.last_xid_code}`;
+  }
+  return null;
+}
+
+/**
+ * The payload to submit for a NOT-yet-submitted command (CONTRACTS §0.7 freshness). Real physics bumps
+ * decision_epoch when a checkpoint starts and when it completes (and around a migrate), so a later plan step
+ * carrying the plan-time epoch is always STALE_DECISION_EPOCH. So:
+ *   1. re-stamp the resource versions this workflow's own succeeded commands changed (restampForDependencies);
+ *   2. re-stamp `expected_decision_epoch` to the snapshot's CURRENT epoch, but only when nothing material
+ *      touched this command's resources (epochRestampBlocker). Otherwise the plan-time epoch is kept, the
+ *      command fails safety (local precheck / DB) and the replan path takes over.
+ * Never call this for a key the ledger already has: an existing row is adopted, never re-requested.
+ */
+export function restampForSubmission(
+  cmd: ActionCommand,
+  ownCommands: ActionCommand[],
+  snap: ObservedSnapshot,
+): ActionCommand {
+  const versioned = restampForDependencies(cmd, ownCommands, snap);
+  const epoch = snap.clock.decision_epoch;
+  if (versioned.expected_decision_epoch === epoch) return versioned;
+  if (epochRestampBlocker(versioned, snap) !== null) return versioned;
+  return { ...versioned, expected_decision_epoch: epoch };
+}
+
+/** Comparable view of the freshness fields re-stamping may change. */
+const freshnessKey = (c: ActionCommand): string =>
+  JSON.stringify([
+    c.expected_decision_epoch,
+    Object.entries(c.expected_resource_versions).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  ]);
+
 // ---------------------------------------------------------------------------
 // Coordinator
 // ---------------------------------------------------------------------------
@@ -211,22 +272,36 @@ export function restampForDependencies(
 export function createCoordinator(deps: CoordinatorDeps): Coordinator {
   const { db, physics, events, workerId, clock } = deps;
   const leaseMs = deps.leaseMs ?? DEFAULT_LEASE_MS;
-  const sleep = deps.sleep ?? realSleep;
+  const baseSleep = deps.sleep ?? realSleep;
   const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
   const actionTimeoutSimMs = deps.actionTimeoutSimMs ?? DEFAULT_ACTION_TIMEOUT_SIM_MS;
+  const beatEveryMs = Math.max(1, Math.floor(leaseMs / 3));
 
   let current: WorkflowLease | null = null;
   let version = 0;
   let persisted: Record<string, unknown> = {};
   let lost = false;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatOn = false;
+  let beating: Promise<boolean> | null = null;
+  let lastBeatClockMs = 0;
+  let lastBeatRealMs = 0;
+  const markBeat = (): void => {
+    lastBeatClockMs = clock.unixMs();
+    lastBeatRealMs = Date.now();
+  };
 
   const loseOwnership = (reason: string): void => {
     if (lost) return;
     lost = true;
-    if (timer) clearInterval(timer);
-    timer = null;
+    stopHeartbeat();
     deps.onLostOwnership?.(reason);
+  };
+
+  /** The injected sleep, followed by a heartbeat if one is due on the injected clock (see heartbeatIfDue). */
+  const sleep = async (ms: number): Promise<void> => {
+    await baseSleep(ms);
+    await heartbeatIfDue();
   };
 
   const defaultWaitFor: WaitFor = async (commandKey, opts) => {
@@ -256,6 +331,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
     version = lease.workflow.version;
     persisted = { ...lease.workflow.state };
     lost = false;
+    markBeat(); // a claim is as good as a beat
     const known = new Set(lease.workflow.incident_ids);
     if (incidentIds.some((id) => !known.has(id))) {
       const merged = [...new Set([...lease.workflow.incident_ids, ...incidentIds])];
@@ -286,18 +362,49 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
     }
   }
 
-  function startHeartbeat(): void {
-    if (timer || !current) return;
-    timer = setInterval(() => void heartbeatOnce(), Math.max(1, Math.floor(leaseMs / 3)));
+  /**
+   * Heartbeat scheduling. A beat is due once leaseMs/3 has passed on the INJECTED clock (the clock the lease is
+   * judged by), or on real wall time (a floor that keeps the previous production behaviour when the injected clock
+   * is frozen). Due-ness is checked (a) by a light real-time ticker and (b) after every injected sleep and before
+   * every workflow write, so a harness that accelerates time through clock/sleep (no real time passes, the ticker
+   * never fires) still beats before its lease expires. In production clock.unixMs() is Date.now(): same cadence.
+   */
+  async function heartbeatIfDue(): Promise<void> {
+    if (!heartbeatOn || !current || lost || beating) return;
+    const due = clock.unixMs() - lastBeatClockMs >= beatEveryMs || Date.now() - lastBeatRealMs >= beatEveryMs;
+    if (!due) return;
+    markBeat();
+    beating = heartbeatOnce().finally(() => {
+      beating = null;
+    });
+    await beating;
+  }
+
+  function scheduleTick(): void {
+    timer = setTimeout(() => {
+      if (!heartbeatOn) return;
+      void heartbeatIfDue();
+      scheduleTick();
+    }, Math.min(beatEveryMs, HEARTBEAT_CHECK_MS));
     (timer as { unref?: () => void }).unref?.();
   }
 
+  function startHeartbeat(): void {
+    if (heartbeatOn || !current) return;
+    heartbeatOn = true;
+    markBeat();
+    scheduleTick();
+  }
+
   function stopHeartbeat(): void {
-    if (timer) clearInterval(timer);
+    heartbeatOn = false;
+    if (timer) clearTimeout(timer);
     timer = null;
   }
 
   async function updateStage(stage: WorkflowStage, patch: Record<string, unknown>): Promise<WorkflowRecord | null> {
+    if (!current || lost) return null;
+    await heartbeatIfDue();
     if (!current || lost) return null;
     const next = { ...persisted, ...patch };
     try {
@@ -452,11 +559,26 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
           return;
         }
       }
-      const snap = await db.getObservedSnapshot();
-      const depCmds = cmd.depends_on_command_keys.map((k) => this.byKey.get(k)).filter((c): c is ActionCommand => !!c);
-      const toSubmit = restampForDependencies(cmd, depCmds, snap);
-      if (toSubmit !== cmd) {
-        // Persist the exact payload BEFORE submitting so a resume resubmits the same key + payload.
+      // Never submitted (no ledger row): re-stamp freshness to the current snapshot (restampForSubmission).
+      const own = this.input.commands.filter((c) => this.st.completed_keys.includes(c.command_key));
+      let snap = await db.getObservedSnapshot();
+      let toSubmit = restampForSubmission(cmd, own, snap);
+      let d = this.evaluate(snap, toSubmit);
+      if (d.decision === 'retry_new_snapshot') {
+        // The snapshot moved under us: re-read, re-stamp with the same rules, re-check once.
+        snap = await db.getObservedSnapshot();
+        toSubmit = restampForSubmission(cmd, own, snap);
+        d = this.evaluate(snap, toSubmit);
+      }
+      if (!(d.decision === 'allow' || (d.decision === 'needs_approval' && cmd.operation === 'escalate'))) {
+        const violations = d.violations.length > 0 ? d.violations : [d.decision === 'needs_approval' ? 'NEEDS_APPROVAL' : 'RETRY_NEW_SNAPSHOT'];
+        await this.block(toSubmit, violations, 'local');
+        return;
+      }
+      const prev = this.st.commands[index];
+      if (!prev || freshnessKey(prev) !== freshnessKey(toSubmit)) {
+        // Persist the exact payload BEFORE submitting so a resume resubmits the same key + payload (or, if this
+        // request landed, finds the key in the ledger and adopts it: a submitted key is never re-stamped).
         this.st.commands[index] = structuredClone(toSubmit);
         await this.persist();
         if (lost) {
@@ -465,8 +587,6 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
           return;
         }
       }
-      const denied = await this.precheck(toSubmit, snap);
-      if (denied) return;
       await this.submit(toSubmit);
     }
 
@@ -484,18 +604,9 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
       await this.drive(cmd, s);
     }
 
-    /** Local evaluateSafety on a fresh snapshot. Returns true when the command was blocked. */
-    private async precheck(cmd: ActionCommand, snap: ObservedSnapshot): Promise<boolean> {
-      let fresh = snap;
-      let d = physics.evaluateSafety(fresh, cmd, { decision_epoch: fresh.clock.decision_epoch, leased_resource_ids: [] });
-      if (d.decision === 'retry_new_snapshot') {
-        fresh = await db.getObservedSnapshot();
-        d = physics.evaluateSafety(fresh, cmd, { decision_epoch: fresh.clock.decision_epoch, leased_resource_ids: [] });
-      }
-      if (d.decision === 'allow' || (d.decision === 'needs_approval' && cmd.operation === 'escalate')) return false;
-      const violations = d.violations.length > 0 ? d.violations : [d.decision === 'needs_approval' ? 'NEEDS_APPROVAL' : 'RETRY_NEW_SNAPSHOT'];
-      await this.block(cmd, violations, 'local');
-      return true;
+    /** Local evaluateSafety against `snap` (the same check the request_action reducer re-runs). */
+    private evaluate(snap: ObservedSnapshot, cmd: ActionCommand): SafetyDecision {
+      return physics.evaluateSafety(snap, cmd, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] });
     }
 
     private async block(cmd: ActionCommand, violations: string[], where: 'local' | 'db'): Promise<void> {
@@ -639,6 +750,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
     startHeartbeat,
     stopHeartbeat,
     heartbeatOnce,
+    heartbeatIfDue,
     execute,
     updateStage,
     isOwner: () => current !== null && !lost,
