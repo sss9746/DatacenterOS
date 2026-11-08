@@ -99,6 +99,7 @@ interface ActionRecord {
   claimedAtMs: number | null;
   claimedBy: string | null;
   safety: ActionSafety | null;
+  startSafety: ActionSafety | null;
   history: ActionHistoryEntry[];
 }
 
@@ -249,7 +250,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       claimed_by: rec.claimedBy,
       due_sim_time_ms: rec.dueSimMs,
       safety: rec.safety,
-      start_safety: null,
+      start_safety: rec.startSafety,
       history: rec.history,
     });
 
@@ -260,6 +261,29 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     const dest = (cmd.arguments as { destination_gpu_ids?: unknown }).destination_gpu_ids;
     if (Array.isArray(dest)) dest.forEach((g) => typeof g === 'string' && ids.add(g));
     return [...ids].sort();
+  };
+
+  /**
+   * The wider lock set live `closureOf` builds from the world: also the job's GPUs, a node target's
+   * GPUs and whole destination nodes. Start uses it so a dependency's own version bumps are exempt,
+   * exactly as in the live reducer. (`closureOf` above stays narrow for the mock's claims.)
+   */
+  const liveLockSet = (cmd: ActionCommand): string[] => {
+    if (cmd.operation === 'escalate') return []; // live: a human hand-off locks nothing
+    const ids = new Set(closureOf(cmd));
+    const add = (id: string) => ids.add(id);
+    snap.job_states.find((j) => j.job_id === (cmd.job_id ?? cmd.target_resource_id))?.allocated_gpu_ids.forEach(add);
+    snap.gpus.filter((g) => g.node_id === cmd.target_resource_id).forEach((g) => add(g.resource_id));
+    if (cmd.operation === 'migrate_restart') {
+      const args = cmd.arguments as { destination_gpu_ids?: unknown; destination_node_ids?: unknown };
+      const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+      const destGpus = new Set(strings(args.destination_gpu_ids));
+      const nodes = new Set(strings(args.destination_node_ids));
+      snap.gpus.filter((g) => destGpus.has(g.resource_id)).forEach((g) => nodes.add(g.node_id));
+      nodes.forEach(add);
+      snap.gpus.filter((g) => nodes.has(g.node_id)).forEach((g) => add(g.resource_id));
+    }
+    return [...ids];
   };
 
   const leasedResourceIds = (exceptKey?: string): string[] => {
@@ -556,6 +580,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
         claimedAtMs: null,
         claimedBy: null,
         safety,
+        startSafety: null,
         history: [],
       };
       logEvent(rec, { safety });
@@ -604,6 +629,38 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
           throw new DbError('INVALID_TRANSITION', `${commandKey} depends on ${dep}, which has not succeeded`);
         }
       }
+
+      // Same as live start_action: a violation found now fails the action and frees its claim
+      // (claims only count while claimed/running). Returned, not thrown (§0.11 #3).
+      const rejectStart = (startSafety: ActionSafety): ActionStatus => {
+        rec.startSafety = startSafety;
+        const { violations, decision, evidence } = startSafety;
+        transition(rec, 'failed', { reason_code: 'SAFETY_REJECTED', result: { ...rec.status.result, violations, start_safety: { decision, violations, evidence } } }, { start_safety: violations });
+        return clone(rec.status);
+      };
+      const depClosure = new Set(
+        rec.cmd.depends_on_command_keys.flatMap((dep) => {
+          const depCmd = actions.get(dep)!.cmd;
+          return depCmd.job_id ? [...liveLockSet(depCmd), depCmd.job_id] : liveLockSet(depCmd);
+        }),
+      );
+      const staleIds = Object.entries(rec.cmd.expected_resource_versions)
+        .filter(([id, v]) => !depClosure.has(id) && versionOf(id) !== undefined && versionOf(id) !== v)
+        .map(([id]) => id);
+      if (staleIds.length > 0) {
+        return rejectStart({ decision: 'retry_new_snapshot', violations: ['STALE_RESOURCE_VERSION'], checked_decision_epoch: null, evidence: { stale_resource_ids: staleIds } });
+      }
+      if (opts.evaluateSafety) {
+        const epoch = snap.clock.decision_epoch;
+        const d = opts.evaluateSafety(clone(snap), { ...rec.cmd, expected_decision_epoch: epoch, expected_resource_versions: {} }, {
+          decision_epoch: epoch,
+          leased_resource_ids: leasedResourceIds(commandKey),
+        });
+        if (d.decision !== 'allow' && (d.decision !== 'needs_approval' || d.violations.length > 0)) {
+          return rejectStart({ decision: d.decision, violations: [...d.violations], checked_decision_epoch: null, evidence: clone(d.evidence) });
+        }
+      }
+
       rec.dueSimMs = simNow() + (DURATION_MS[rec.cmd.operation] ?? snap.clock.step_ms);
       transition(rec, 'running', { result: { ...rec.status.result, due_sim_time_ms: rec.dueSimMs } }, { enqueued: true });
       return clone(rec.status);

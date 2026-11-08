@@ -60,6 +60,14 @@ function parseJsonObject(field: string, text: string): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 
+/**
+ * The one execution rule, used at request and at start (§0.13 #5): any §0.7 violation blocks,
+ * incl. EVIDENCE_STALE. Only a needs_approval with no violation (approval reasons in evidence) stays
+ * executable; the agent/UI gate it (§0.11 #17).
+ */
+const isRejected = (d: SafetyDecision): boolean =>
+  d.decision !== 'allow' && (d.decision !== 'needs_approval' || d.violations.length > 0);
+
 const commandOf = (row: ActionRow): ActionCommand => {
   const result = JSON.parse(row.result_json) as { command?: ActionCommand };
   if (!result.command) throw new Error(`action ${row.command_key} has no stored command`);
@@ -221,9 +229,7 @@ export const request_action = spacetimedb.reducer({ action_command_json: t.strin
     decision_epoch: run.decision_epoch,
     leased_resource_ids: leasedByOthers(ctx, cmd.run_id),
   });
-  // Any §0.7 violation rejects (incl. EVIDENCE_STALE, same as the mock). Only a needs_approval with
-  // no violation (approval reasons in evidence) stays executable; the agent/UI gate it (§0.11 #17).
-  const rejected = decision.decision !== 'allow' && (decision.decision !== 'needs_approval' || decision.violations.length > 0);
+  const rejected = isRejected(decision);
   const safety = { decision: decision.decision, violations: decision.violations, checked_decision_epoch: decision.checked_decision_epoch, evidence: decision.evidence };
 
   const row: ActionRow = {
@@ -356,21 +362,31 @@ export const start_action = spacetimedb.reducer(
       .filter(([id, v]) => !depClosure.has(id) && versionOf(world, id) !== undefined && versionOf(world, id) !== v)
       .map(([id]) => id);
     if (stale.length > 0) {
+      // Same outcome as a stale version at request time: failed / SAFETY_REJECTED, returned not thrown.
+      const violations = ['STALE_RESOURCE_VERSION'];
+      const evidence = { stale_resource_ids: stale };
       releaseLeases(ctx, row.action_id);
-      transition(ctx, row, 'failed', { reason_code: 'STALE_RESOURCE_VERSION', result_json: patchResult(row, { violations: ['STALE_RESOURCE_VERSION'], stale_resource_ids: stale }) }, { stale_resource_ids: stale });
+      transition(
+        ctx,
+        row,
+        'failed',
+        { reason_code: 'SAFETY_REJECTED', result_json: patchResult(row, { violations, stale_resource_ids: stale, start_safety: { decision: 'retry_new_snapshot', violations, evidence } }) },
+        { start_safety: violations, stale_resource_ids: stale }
+      );
       return;
     }
 
     // Fresh safety check before dispatch: physics only checks physical feasibility, so thermal /
-    // power headroom etc. must still hold now. Freshness was checked above (versions, with the
-    // dependency exception), so the command is restamped to the current epoch/versions here.
+    // power headroom and evidence age must still hold now. Versions were checked above (with the
+    // dependency exception), so the command is restamped to the current epoch/versions here; every
+    // other violation, incl. EVIDENCE_STALE that appeared after the request, blocks the start.
     const run = ctx.db.run.run_id.find(row.run_id)!;
     const recheck = evaluateSafety(
       toObserved(world),
       { ...cmd, expected_decision_epoch: run.decision_epoch, expected_resource_versions: {} },
       { decision_epoch: run.decision_epoch, leased_resource_ids: leasedByOthers(ctx, row.run_id, row.action_id) }
     );
-    if (recheck.decision === 'deny') {
+    if (isRejected(recheck)) {
       releaseLeases(ctx, row.action_id);
       transition(
         ctx,

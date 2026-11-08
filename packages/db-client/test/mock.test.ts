@@ -406,6 +406,145 @@ describe('createMockClient', () => {
     expect(mig!.status).toEqual(await db.getActionStatus('wf-1:mig:job-a'));
   });
 
+  describe('startAction fails closed (R2)', () => {
+    type Evaluate = NonNullable<NonNullable<Parameters<typeof createMockClient>[0]>['evaluateSafety']>;
+    type Decision = ReturnType<Evaluate>;
+
+    /** Allows the request, then answers the start-time recheck with `atStart`. */
+    const setup = (atStart: Pick<Decision, 'decision' | 'violations'> & { evidence?: Record<string, unknown> }) => {
+      const contexts: Parameters<Evaluate>[2][] = [];
+      const commands: ActionCommand[] = [];
+      const requested = new Set<string>();
+      const evaluateSafety: Evaluate = (_o, cmd, ctx) => {
+        contexts.push(ctx);
+        commands.push(cmd);
+        const first = !requested.has(cmd.command_key);
+        requested.add(cmd.command_key);
+        return {
+          schema_version: '1.1.0', run_id: cmd.run_id, plan_id: cmd.plan_id, action_id: cmd.action_id,
+          decision: first ? 'allow' : atStart.decision, violations: first ? [] : atStart.violations,
+          checked_decision_epoch: 0, checked_resource_ids: [], evidence: first ? {} : atStart.evidence ?? {},
+        };
+      };
+      return { db: createMockClient({ evaluateSafety }), contexts, commands };
+    };
+    const claimAndStart = async (db: ReturnType<typeof createMockClient>, key = 'wf-1:ckpt:job-a', version = 1) => {
+      const { fencing_token } = await db.claimAction(key, version, 'worker-1');
+      return db.startAction(key, fencing_token);
+    };
+
+    it('needs_approval with no violations still runs (§0.11 #17)', async () => {
+      const { db } = setup({ decision: 'needs_approval', violations: [], evidence: { approval_reasons: ['HIGH_PRIORITY_JOB_DISRUPTION'] } });
+      await db.requestAction(checkpointCmd());
+      await expect(claimAndStart(db)).resolves.toMatchObject({ status: 'running' });
+    });
+
+    it('needs_approval carrying EVIDENCE_STALE fails, records evidence and frees the claim', async () => {
+      const { db } = setup({ decision: 'needs_approval', violations: ['EVIDENCE_STALE'], evidence: { stale_evidence_ids: ['gpu-r1-n1-0'] } });
+      let details: ActionDetail[] = [];
+      db.onActionDetails((d) => (details = d));
+      await db.requestAction(checkpointCmd());
+      const s = await claimAndStart(db);
+      expect(isSafetyRejected(s)).toBe(true);
+      expect(s.result.violations).toEqual(['EVIDENCE_STALE']);
+      expect(details[0]!.start_safety).toMatchObject({ decision: 'needs_approval', violations: ['EVIDENCE_STALE'], evidence: { stale_evidence_ids: ['gpu-r1-n1-0'] } });
+      expect(details[0]!.due_sim_time_ms).toBeNull();
+      // the claim is gone: another command can take the same job
+      await db.requestAction(checkpointCmd({ command_key: 'wf-1:ckpt:job-a:2', action_id: 'act-2' }));
+      await expect(db.claimAction('wf-1:ckpt:job-a:2', 1, 'worker-2')).resolves.toBeDefined();
+    });
+
+    it.each([['deny', 'DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'], ['retry_new_snapshot', 'STALE_DECISION_EPOCH']] as const)('%s at start fails', async (decision, violation) => {
+      const { db } = setup({ decision, violations: [violation] });
+      await db.requestAction(checkpointCmd());
+      const s = await claimAndStart(db);
+      expect(isSafetyRejected(s)).toBe(true);
+      expect(s.result.violations).toEqual([violation]);
+    });
+
+    it('rechecks with its own claim excluded, restamped to the current epoch', async () => {
+      const { db, contexts, commands } = setup({ decision: 'allow', violations: [] });
+      const before = await db.getObservedSnapshot();
+      const jobVersion = before.job_states.find((j) => j.job_id === 'job-a')!.version;
+      await db.requestAction(checkpointCmd({ expected_decision_epoch: before.clock.decision_epoch, expected_resource_versions: { 'job-a': jobVersion } }));
+      const { fencing_token } = await db.claimAction('wf-1:ckpt:job-a', 1, 'worker-1');
+      await db.injectFault(fault('cooling_pump_degradation', 'pump-a')); // bumps the epoch, not job-a's version
+      const epochNow = (await db.getObservedSnapshot()).clock.decision_epoch;
+      expect(epochNow).toBeGreaterThan(before.clock.decision_epoch);
+      await expect(db.startAction('wf-1:ckpt:job-a', fencing_token)).resolves.toMatchObject({ status: 'running' });
+      expect(contexts).toHaveLength(2);
+      expect(contexts[1]).toMatchObject({ decision_epoch: epochNow });
+      expect(contexts[1]!.leased_resource_ids).not.toContain('job-a');
+      expect(commands[1]).toMatchObject({ expected_decision_epoch: epochNow });
+      expect(commands[1]!.expected_resource_versions).toEqual({});
+    });
+
+    it('an escalate dependency exempts no GPUs, as in live', async () => {
+      const db = createMockClient();
+      const gpuId = 'gpu-r2-n1-0';
+      const gpuVersion = (await db.getObservedSnapshot()).gpus.find((g) => g.resource_id === gpuId)!.version;
+      await db.requestAction(checkpointCmd({ command_key: 'wf-1:esc:job-a', action_id: 'act-esc', operation: 'escalate', arguments: { reason: 'operator review' } }));
+      await db.requestAction(checkpointCmd({
+        command_key: 'wf-1:mig:job-a', action_id: 'act-2', operation: 'migrate_restart',
+        depends_on_command_keys: ['wf-1:esc:job-a'], arguments: { destination_gpu_ids: ['gpu-r1-n1-0'] },
+        expected_resource_versions: { [gpuId]: gpuVersion },
+      }));
+      await claimAndStart(db, 'wf-1:esc:job-a');
+      for (let i = 0; i < 2; i++) db.tick();
+      expect((await db.getActionStatus('wf-1:esc:job-a'))!.status).toBe('succeeded');
+      await db.injectFault(fault('gpu_xid_74', gpuId));
+      const s = await claimAndStart(db, 'wf-1:mig:job-a');
+      expect(isSafetyRejected(s)).toBe(true);
+      expect(s.result.violations).toEqual(['STALE_RESOURCE_VERSION']);
+    });
+
+    it('a source GPU version changed after its dependency finished is exempt, as in live', async () => {
+      const db = createMockClient();
+      const gpuId = 'gpu-r2-n1-0';
+      const gpuVersion = (await db.getObservedSnapshot()).gpus.find((g) => g.resource_id === gpuId)!.version;
+      await db.requestAction(checkpointCmd());
+      await db.requestAction(checkpointCmd({
+        command_key: 'wf-1:mig:job-a', action_id: 'act-2', operation: 'migrate_restart',
+        depends_on_command_keys: ['wf-1:ckpt:job-a'], arguments: { destination_gpu_ids: ['gpu-r1-n1-0'] },
+        expected_resource_versions: { [gpuId]: gpuVersion },
+      }));
+      await claimAndStart(db);
+      for (let i = 0; i < 31; i++) db.tick();
+      await db.injectFault(fault('gpu_xid_74', gpuId)); // degrades the GPU without failing job-a
+      expect((await db.getObservedSnapshot()).gpus.find((g) => g.resource_id === gpuId)!.version).not.toBe(gpuVersion);
+      await expect(claimAndStart(db, 'wf-1:mig:job-a')).resolves.toMatchObject({ status: 'running' });
+    });
+
+    it('a resource version that changed after the request fails with SAFETY_REJECTED', async () => {
+      const db = createMockClient();
+      const gpuId = 'gpu-r1-n1-0';
+      const version = (await db.getObservedSnapshot()).gpus.find((g) => g.resource_id === gpuId)!.version;
+      await db.requestAction(checkpointCmd({ expected_resource_versions: { [gpuId]: version } }));
+      const { fencing_token } = await db.claimAction('wf-1:ckpt:job-a', 1, 'worker-1');
+      await db.injectFault(fault('gpu_xid_79', gpuId));
+      expect((await db.getObservedSnapshot()).gpus.find((g) => g.resource_id === gpuId)!.version).not.toBe(version);
+      const s = await db.startAction('wf-1:ckpt:job-a', fencing_token);
+      expect(isSafetyRejected(s)).toBe(true);
+      expect(s.result).toMatchObject({ violations: ['STALE_RESOURCE_VERSION'], start_safety: { evidence: { stale_resource_ids: [gpuId] } } });
+    });
+
+    it('a job version changed by its own dependency is tolerated', async () => {
+      const db = createMockClient();
+      const jobVersion = (await db.getObservedSnapshot()).job_states.find((j) => j.job_id === 'job-a')!.version;
+      await db.requestAction(checkpointCmd());
+      await db.requestAction(checkpointCmd({
+        command_key: 'wf-1:mig:job-a', action_id: 'act-2', operation: 'migrate_restart',
+        depends_on_command_keys: ['wf-1:ckpt:job-a'], arguments: { destination_gpu_ids: ['gpu-r1-n1-0'] },
+        expected_resource_versions: { 'job-a': jobVersion },
+      }));
+      await claimAndStart(db);
+      for (let i = 0; i < 31; i++) db.tick();
+      expect((await db.getActionStatus('wf-1:ckpt:job-a'))!.status).toBe('succeeded');
+      expect((await db.getObservedSnapshot()).job_states.find((j) => j.job_id === 'job-a')!.version).not.toBe(jobVersion);
+      await expect(claimAndStart(db, 'wf-1:mig:job-a')).resolves.toMatchObject({ status: 'running' });
+    });
+  });
+
   it('parseDbError turns reducer strings into coded errors', () => {
     const e = parseDbError(new Error('LEASE_HELD: wf-1 owned by worker-a'));
     expect(isDbError(e, 'LEASE_HELD')).toBe(true);

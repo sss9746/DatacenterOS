@@ -225,6 +225,33 @@ describe('coordinator.execute', () => {
     expect(requestedKeys(db)).toHaveLength(1);
   });
 
+  it('a safety rejection RETURNED by start_action is recorded and shown as blocked', async () => {
+    const { db, coord, snap } = setup();
+    const p = makePlan(snap);
+    const ckKey = p.commands[0]?.command_key as string;
+    db.rejectStart(ckKey, ['EVIDENCE_STALE']);
+    const res = await coord.execute(WF, p);
+    expect(res.outcomes[0]).toMatchObject({ status: 'blocked', violations: ['EVIDENCE_STALE'], reason_code: 'SAFETY_REJECTED' });
+    expect(res.outcomes[1]).toMatchObject({ status: 'skipped', reason_code: 'DEPENDENCY_NOT_SUCCEEDED' });
+    const blocked = db.agentEvents.filter((e) => e.stage === 'safety' && e.summary.startsWith('BLOCKED'));
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]!.tool_calls[0]).toMatchObject({ tool: 'start_action', result_summary: 'denied: EVIDENCE_STALE' });
+  });
+
+  it('a claim conflict that finds the action already safety-rejected is blocked, not a generic failure', async () => {
+    const { db, coord, snap } = setup();
+    const p = makePlan(snap);
+    const realClaim = db.claimAction.bind(db);
+    vi.spyOn(db, 'claimAction').mockImplementationOnce(async (key, version) => {
+      db.rejectStart(key, ['EVIDENCE_STALE']);
+      const other = await realClaim(key, version, 'other-worker');
+      await db.startAction(key, other.fencing_token);
+      throw new DbError('VERSION_CONFLICT', 'another worker got there first');
+    });
+    const res = await coord.execute(WF, p);
+    expect(res.outcomes[0]).toMatchObject({ status: 'blocked', violations: ['EVIDENCE_STALE'] });
+  });
+
   it('a safety rejection RETURNED by the DB is recorded as blocked', async () => {
     const inner = new FakePhysics();
     const { db, coord, snap } = setup({ coordPhysics: allowAll(inner) });

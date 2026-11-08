@@ -144,6 +144,40 @@ describe('resume hand-off to the agent loop (continueExecute)', () => {
     expect(why).toContain('DEST_GPU_UNHEALTHY');
   });
 
+  it('a safety rejection while reclaiming a dead claim is blocked, so the persisted plan is replanned', async () => {
+    const w = makeWorld();
+    const plan = makePlan(w.snap);
+    const ck = plan.commands[0]!.command_key;
+    const k = killable(w.db, (m, a, p) => m === 'claimAction' && a[0] === ck && p === 'after');
+    const ev1 = createEventPublisher({ db: k.db, runId: RUN_ID, clock: w.clock, redact: (s) => s });
+    const c1 = createCoordinator({ db: k.db, physics: w.physics, events: ev1, workerId: 'worker-1', clock: w.clock, pollMs: 1, sleep: w.sleep });
+    await c1.ensureWorkflow(WF, ['inc-1']);
+    void c1.execute(WF, plan);
+    await k.killed;
+    w.db.rejectStart(ck, ['EVIDENCE_STALE']); // the evidence aged while nobody was watching
+    w.db.advanceWallMs(60_000);
+
+    const handoffs: ResumeHandoff[] = [];
+    const ev2 = createEventPublisher({ db: w.db, runId: RUN_ID, clock: w.clock, redact: (s) => s, startSeq: 1000 });
+    const report = await resumeOpenWorkflows({
+      db: w.db,
+      physics: w.physics,
+      events: ev2,
+      workerId: 'worker-2',
+      clock: w.clock,
+      sleep: w.sleep,
+      continueExecute: async (h) => {
+        handoffs.push(h);
+        return { escalated: false };
+      },
+    });
+    expect(handoffs).toHaveLength(1);
+    expect(handoffs[0]!.reconciled[0]).toMatchObject({ command_key: ck, ledger_status: 'failed', decision: 'blocked' });
+    expect(handoffs[0]!.invalidReason).toContain('safety-rejected');
+    expect(handoffs[0]!.invalidReason).toContain('EVIDENCE_STALE');
+    expect(report.items[0]).toMatchObject({ action: 'resumed_execute', note: 'REPLANNED' });
+  });
+
   it('XID while the agent was dead: resume hands the invalid plan over instead of executing it blind', async () => {
     const w = makeWorld();
     const plan = makePlan(w.snap);
