@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke-nim.ts",
     "demo": "tsx scripts/demo-local.ts",
+    "live-recovery": "tsx scripts/live-recovery-test.ts",
     "fixtures": "tsx test/fixtures/make-fixtures.ts"
   },
   "dependencies": {
