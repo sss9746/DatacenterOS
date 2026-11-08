@@ -138,3 +138,13 @@
 #workflows .wf-card, #workflows .wf-section-body, #workflows .wf-status, #workflows .wf-labels dd, #workflows .empty strong { color: var(--ink, #1F2A1E); }
 #workflows .wf-muted, #workflows .wf-note, #workflows .wf-key, #workflows .wf-labels dt, #workflows .empty p, #workflows dt { color: var(--ink-muted, #5B6650); }
 #workflows .example-note { color: var(--orange-ink, #A8380F); background: var(--orange-soft, #FFD9CB); }
+/* Default-screen card: title + stripe, ≤ 3 bullets, one resume line; the rest is behind "Evidence". */
+.wf-brief-head h3 { font-size: 15px; font-weight: 650; line-height: 1.35; }
+.wf-brief { list-style: disc; margin: 10px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; line-height: 1.5; color: var(--ink, #1F2A1E); }
+.wf-brief li::marker { color: var(--sage, #7F886A); }
+.wf-resume-line { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 13px; color: var(--orange-ink, #A8380F); font-weight: 600; max-width: none; }
+.wf-evidence > summary small { margin-left: 10px; font-weight: 400; font-size: 12.5px; color: var(--ink-muted, #5B6650); }
+.wf-evidence > summary code { font-size: 12px; }
+.wf-evidence > .wf-section-body { padding-top: 10px; }
+.wf-id code { font-size: 13px; margin-right: auto; }
+.wf-evidence .wf-section { background: var(--paper-inset, #EDE4CE); }

@@ -117,3 +117,10 @@
 #scoreboard .sb-note, #scoreboard .benchmark-empty, #scoreboard .benchmark-empty > p, #scoreboard .benchmark-empty small, #scoreboard .sb-rehearsal small, #scoreboard th small, #scoreboard td small, #scoreboard .empty p, #scoreboard .sb-toolbar, #scoreboard .scoreboard-intro { color: var(--ink-muted, #5B6650); }
 #scoreboard .data-warning { color: var(--amber-ink, #7A5A12); background: color-mix(in srgb, var(--amber, #E3B35A) 22%, var(--paper, #FAF6EC)); }
 #scoreboard .button-ghost { color: var(--ink-muted, #5B6650); }
+/* Two lines under the three numbers; everything else is behind details. */
+.sb-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 0 20px 10px; font-size: 13px; color: var(--ink, #1F2A1E); line-height: 1.5; max-width: none; font-variant-numeric: tabular-nums; }
+.sb-line-provenance { color: var(--ink-muted, #5B6650); padding-bottom: 16px; }
+#scoreboard .sb-all > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+#scoreboard .sb-all > summary small { display: inline; margin: 0; font-weight: 400; font-size: 12.5px; color: var(--ink-muted, #5B6650); }
+#scoreboard .sb-all > .sb-section { padding-left: 0; padding-right: 0; }
+@media (max-width: 680px) { .sb-line { padding-left: 16px; padding-right: 16px; } }

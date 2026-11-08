@@ -124,14 +124,14 @@ export function DemoControls({ store, canAdmin, open, selectedGpuId, selectedPum
     </summary>
     <div className="demo-controls-body">
       <ol className="demo-steps" aria-label="Demo steps">
-        <StepButton n={1} id={`${id}-pump`} title="Break cooling pump A" why={`pump-a loses ${percent(DEFAULT_PUMP_LOSS)} capacity next tick; racks 2–4 start heating`} disabledReason={disabledReason} busy={busy === 'pump'} onClick={breakPump} note={notes.pump}/>
-        <StepButton n={2} id={`${id}-probe`} title="Try unsafe move to hot rack 6" why={`asks to move ${PROBE_JOB_ID} onto r6; the safety check decides`} disabledReason={disabledReason ?? probeConflictNow} busy={busy === 'probe'} onClick={tryUnsafeMove} note={notes.probe}>
+        <StepButton n={1} id={`${id}-pump`} title="Break cooling pump A" why={`Pump A loses ${percent(DEFAULT_PUMP_LOSS)} of its cooling next tick; the racks it cools start heating`} disabledReason={disabledReason} busy={busy === 'pump'} onClick={breakPump} note={notes.pump}/>
+        <StepButton n={2} id={`${id}-probe`} title="Try unsafe move to hot rack 6" why="Asks to move a training job onto the hottest rack; the safety check answers" disabledReason={disabledReason ?? probeConflictNow} busy={busy === 'probe'} onClick={tryUnsafeMove} note={notes.probe}>
           {probeStatus && probeResult && <ProbeInline status={probeStatus} detail={probeDetail} commandKey={probeResult.commandKey} mode={mode}/>}
         </StepButton>
-        <StepButton n={3} id={`${id}-xid`} title="Fail a GPU (XID 79)" why={`${target.gpuId} becomes unreachable; its job rolls back to its checkpoint`} disabledReason={disabledReason} busy={busy === 'xid'} onClick={failGpu} note={notes.xid}>
+        <StepButton n={3} id={`${id}-xid`} title="Fail a GPU (XID 79)" why="The target GPU goes dark; its job falls back to its last checkpoint" disabledReason={disabledReason} busy={busy === 'xid'} onClick={failGpu} note={notes.xid}>
           <p className="demo-target">Target: <code>{target.gpuId}</code> · {XID_SOURCE_LABEL[target.source]}{target.source === 'plan' && target.planId ? <> <code>{target.planId}</code></> : null}</p>
         </StepButton>
-        <StepButton n={4} id={`${id}-reset`} title="Reset run" why={mode === 'live' ? 'recreates run-demo-1 for every viewer; stop the agent first' : 'puts the preview back to its initial state'} disabledReason={disabledReason} busy={busy === 'reset'} ariaExpanded={confirmReset} onClick={() => setConfirmReset(true)} note={notes.reset}>
+        <StepButton n={4} id={`${id}-reset`} title="Reset run" why={mode === 'live' ? 'Restarts the shared run for every viewer; stop the agent first' : 'Puts the preview back to the start'} disabledReason={disabledReason} busy={busy === 'reset'} ariaExpanded={confirmReset} onClick={() => setConfirmReset(true)} note={notes.reset}>
           {confirmReset && <div className="demo-confirm" role="group" aria-label="Confirm reset">
             <p>Reset {mode === 'live' ? 'run-demo-1 for every connected viewer' : 'this preview'}?</p>
             <Button variant="destructive" size="sm" disabled={Boolean(disabledReason)} onClick={() => void reset()}>Confirm reset</Button>

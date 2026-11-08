@@ -73,13 +73,32 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
   const closed = wf.stage === 'done' || wf.stage === 'escalated';
   const lease = wf.lease_owner === null ? 'no owner' : closed ? `${wf.lease_owner} (workflow closed)` : wf.lease_expires_unix_ms > now ? `${wf.lease_owner} · expires in ${formatSpan(wf.lease_expires_unix_ms - now)}` : `${wf.lease_owner} · lease expired`;
   const age = view.lastEventSimMs !== null && simNow !== null ? ` (${formatSpan(simNow - view.lastEventSimMs)} before current sim time)` : '';
+  const v = view.verification;
+  const stripe = v?.verified === true ? 'recovered' : v?.verified === false ? 'review' : null;
+  const needsHuman = v?.verified === false || (v?.unresolved.length ?? 0) > 0 || view.status.kind === 'escalated' || view.status.kind === 'operator_review';
+  // ≤ 3 plain-English bullets: what happened, what the agent did (persisted handoff verbatim), what remains. Deduplicated.
+  const bullets = [...new Set([
+    view.incidents.find((i) => i.hypothesis)?.hypothesis ?? view.incidents.find((i) => i.title)?.title ?? null,
+    v?.handoff ? `${v.handoff}${example ? ' (scripted)' : ''}` : view.status.detail,
+    v?.unresolved[0] ?? view.nextStep?.text ?? (v?.verified === true ? 'No unresolved infrastructure reported' : null),
+  ].filter((line): line is string => Boolean(line)))].slice(0, 3);
+  const resumeLine = view.resumed ? `Agent restarted ${view.resumed.count !== null && view.resumed.count > 1 ? `${view.resumed.count} times` : 'once'}${view.resumedWithoutDuplicate === true ? '; no duplicate action' : view.resumedWithoutDuplicate === false ? '; the ledger shows a repeated action' : ''}` : null;
   return <article className={`wf-card wf-kind-${view.status.kind}`} aria-labelledby={headingId}>
-    <header className="wf-card-head">
-      <h3 id={headingId}><code>{wf.workflow_id}</code></h3>
+    <header className="wf-card-head wf-brief-head">
+      <h3 id={headingId}>{view.incidents.find((i) => i.title)?.title ?? wf.workflow_id}</h3>
+      {stripe ? <span className={`wf-stripe wf-stripe-${stripe}`}>{stripe === 'recovered' ? <CheckCircle2 size={14} aria-hidden="true"/> : <CircleDashed size={14} aria-hidden="true"/>}{stripe === 'recovered' ? 'Recovered' : 'Not verified'}</span> : <Badge tone={STATUS_TONE[view.status.kind]}>{view.status.label}</Badge>}
+      {needsHuman && <span className="wf-stripe wf-stripe-human"><UserRound size={14} aria-hidden="true"/>Needs a human</span>}
+      {example && <span className="wf-stripe wf-stripe-example">Example</span>}
+    </header>
+    <ul className="wf-brief">{bullets.map((line, i) => <li key={i} className="wf-wrap">{line}</li>)}</ul>
+    {resumeLine && <p className="wf-resume-line"><RotateCcw size={13} aria-hidden="true"/>{resumeLine}</p>}
+    <details className="wf-section wf-evidence"><summary>Evidence<small>workflow <code>{wf.workflow_id}</code> · stages, plan, lease, candidates, ledger</small></summary><div className="wf-section-body">
+    <div className="wf-card-head">
+      <span className="wf-id"><code>{wf.workflow_id}</code></span>
       <Badge tone={STATUS_TONE[view.status.kind]}>{view.status.label}</Badge>
       {view.resumed && <Badge tone="agent"><RotateCcw size={11} aria-hidden="true"/>Resumed{view.resumed.count !== null && view.resumed.count > 1 ? ` ×${view.resumed.count}` : ''}</Badge>}
       {example && <Badge tone="warning">Example</Badge>}
-    </header>
+    </div>
     <ul className="wf-incidents" aria-label="Incidents in this workflow">
       {view.incidents.length ? view.incidents.map((inc) => <li key={inc.incident_id}><strong>{inc.title ?? 'Incident record not loaded'}</strong><span><code>{inc.incident_id}</code>{inc.state ? ` · ${inc.state}` : ''}</span></li>) : <li><span>No incident linked yet</span></li>}
     </ul>
@@ -100,6 +119,7 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
     </dl>
     <Candidates round={view.candidates} example={example} plan={plan} planId={view.planId}/>
     <Handoff view={view} example={example}/>
+    </div></details>
   </article>;
 });
 
