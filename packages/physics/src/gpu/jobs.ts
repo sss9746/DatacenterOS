@@ -39,13 +39,21 @@ export function releaseJob(world: PhysicsWorld, job: JobState): void {
 }
 
 /**
+ * The job's own failure transition: status failed, progress back to durable work, GPUs released. No rollback to any
+ * earlier placement (an old placement was released when it was left) and no change to hardware state.
+ */
+export function failJobInPlace(world: PhysicsWorld, job: JobState): void {
+  job.status = 'failed';
+  job.progress_work_units = job.durable_work_units;
+  releaseJob(world, job);
+}
+
+/**
  * A non-elastic job fails: progress falls back to the last durable (completed, accessible) checkpoint, its GPUs are
  * released, any checkpoint it was writing fails (never becomes durable), and its in-flight commands fail.
  */
 export function failJob(world: PhysicsWorld, h: HiddenState, ctx: TickCtx, job: JobState): void {
-  job.status = 'failed';
-  job.progress_work_units = job.durable_work_units;
-  releaseJob(world, job);
+  failJobInPlace(world, job);
   for (const f of [...h.in_flight]) {
     if ((f.command.job_id ?? f.command.target_resource_id) !== job.job_id) continue;
     if (f.checkpoint_id) {
