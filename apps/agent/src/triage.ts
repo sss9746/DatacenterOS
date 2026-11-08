@@ -359,6 +359,13 @@ function incidentPrefix(family: SymptomFamily, anchor: string): string {
   return `inc-${family}-${anchor}-b`;
 }
 
+/**
+ * The time-independent identity of an incident id: `inc-<family>-<anchor>` without the `-b<bucket>` suffix. A
+ * stateless re-triage (the evaluation policy builds a fresh in-memory db per call) re-derives the bucket from the
+ * symptoms' first-seen time in that call's view, so the suffix can roll over for the same underlying incident.
+ */
+export const incidentIdentity = (incidentId: string): string => incidentId.replace(/-b\d+$/, '');
+
 function pickIncidentId(family: SymptomFamily, anchor: string, start: number, window: number, existing: Incident[], taken: Set<string>): string {
   const prefix = incidentPrefix(family, anchor);
   const reuse = existing

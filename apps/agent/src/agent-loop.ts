@@ -288,11 +288,17 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     }
   }
 
-  const waitSim = async (simMs: number): Promise<void> => {
+  /**
+   * Sleep until `simMs` of sim time passed. With `coord`, a heartbeat is sent after every sleep when one is due on the
+   * injected clock: verify's progress window can span several lease lengths in an accelerated-time harness, where the
+   * coordinator's real-time ticker never fires (same rule as the coordinator's own action polls).
+   */
+  const waitSim = async (simMs: number, coord?: Coordinator): Promise<void> => {
     const start = (await db.getObservedSnapshot()).clock.sim_time_ms;
     const maxPolls = Math.ceil((simMs * 4) / Math.max(1, actionPollMs)) + 20;
     for (let i = 0; i < maxPolls; i++) {
       await sleep(actionPollMs);
+      await coord?.heartbeatIfDue();
       if ((await db.getObservedSnapshot()).clock.sim_time_ms >= start + simMs) return;
     }
   };
@@ -447,7 +453,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       stageRef.stage = 'verify';
       await coord.updateStage('verify', {});
       const v = await verifyRecovery(
-        { db, events, waitSim, persist: (stage, patch) => coord.updateStage(stage, patch) },
+        { db, events, waitSim: (simMs) => waitSim(simMs, coord), persist: (stage, patch) => coord.updateStage(stage, patch) },
         { workflowId: wfId, plan: current, result: exec },
       );
       report.verification = v;
