@@ -1,0 +1,16 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "deterministic-fixed12-2026-11-08",
+  "run_id": "deterministic-fixed12-2026-11-08-sc11-stale-telemetry-s111",
+  "scenario_id": "sc11-stale-telemetry",
+  "seed": 111,
+  "policy": "reactive",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 0,
+  "retry_dropped": 0,
+  "commands": []
+}

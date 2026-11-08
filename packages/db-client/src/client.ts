@@ -20,6 +20,7 @@ import type {
   AgentEventInput,
   DbChange,
   Evidence,
+  PlanRecord,
   RunConfig,
   SymptomRecord,
   WorkflowLease,
@@ -92,6 +93,10 @@ export interface SubscriptionApi {
   onActionDetails(cb: (details: ActionDetail[]) => void): Unsubscribe;
   onAgentEvents(cb: (events: AgentEventInput[]) => void): Unsubscribe;
   onEvaluation(cb: (results: EvaluationResult[]) => void): Unsubscribe;
+  /** Additive: every submitted plan. The selected one is `workflow.plan_id`. */
+  onPlans(cb: (plans: PlanRecord[]) => void): Unsubscribe;
+  /** Additive: every workflow, including `done`, where the final handoff is in `state.verification`. */
+  onWorkflows(cb: (workflows: WorkflowRecord[]) => void): Unsubscribe;
 }
 
 export interface DbClient extends AgentApi, GatewayApi, AdminApi, SubscriptionApi {

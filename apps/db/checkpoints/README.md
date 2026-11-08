@@ -4,7 +4,19 @@
 
 The P2 lane split into one file per task. Source of truth for scope: [`plans/LANE-P2-db.md`](../../../plans/LANE-P2-db.md). If a checkpoint file and the lane file disagree, the lane file wins (and CONTRACTS §0 beats both).
 
-## Board
+## R-sprint board (current)
+Split: [`plans/team/KAUSHIK.md`](../../../plans/team/KAUSHIK.md). If this board disagrees with the specs, the specs win.
+
+| # | Checkpoint | Due | Gate | Depends on | Status |
+|---|---|---|---|---|---|
+| K0 | [Branch, baseline, local target](P2-K0-branch-baseline.md) | before K1 | — | — | ☐ |
+| K1 | [R2: `start_action` fails closed](P2-K1-start-fail-closed.md) | M1 03:30 | Gate 2 | K0 | ☐ |
+| K3b | [Plan + workflow read helpers](P2-K3b-plan-workflow-reads.md) ‖ | when Karthik reaches C1.5 | Gate 3 | K0 | ☐ |
+| K2 | [R0: provenance round-trip](P2-K2-provenance-roundtrip.md) | before M2 republish | Gate 4 | `origin/r/r0-provenance` | ☐ |
+| K3 | [Republish `dcos-dev` + controlled reset](P2-K3-republish-reset.md) | M2 05:00 | Gates 2–3 | R1, K1, K2 | ☐ |
+| K4 | [Prod switch](P2-K4-prod-switch.md) | M4 08:30 | Gates 3–4 | Suvan's approval | ☐ |
+
+## Board (kickoff, historical)
 | # | Checkpoint | Due | Gate | Depends on | Status |
 |---|---|---|---|---|---|
 | 0 | [Setup + booth questions](P2-0-setup.md) | 8:15 PM | — | — | ☑ (booth Qs never asked; not blocking) |
@@ -26,7 +38,8 @@ Status key: ☐ not started · ◐ in progress · ☑ done (all "Done when" boxe
 1. **Codex (architect)** reads the checkpoint file and writes into its `## Architect notes` section: anything it wants changed or pinned down. It may leave the section empty.
 2. **Claude (coder)** implements it, runs the "Done when" checks and fills in `## Implementation report` (files, how verified, open questions).
 3. **Codex reviews** the diff (`codex review` run by Claude, or by you in Codex.app) and appends findings under `## Architect notes`.
-4. **Kaushik** runs the commit command that Claude prints, ticks the board above, and updates [`plans/status/P2.md`](../../../plans/status/P2.md) at each sync.
+4. **Claude** ends the checkpoint with a quick summary report (what changed, how it was verified, what's still open) and the exact `git add` / `git commit` / `git push` commands for the current sprint branch. Claude never runs them.
+5. **Kaushik** runs those commands, ticks the board above, and updates [`plans/status/P2.md`](../../../plans/status/P2.md) at each sync.
 
 ## Rules that apply to every checkpoint
 - Edit only `apps/db/**`, `packages/db-client/**` and `plans/status/P2.md`.

@@ -11,14 +11,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EvaluationResult } from '@dcos/contracts';
 import {
-  evaluateSafety, loadScenarios, reactivePolicy, simulatePlan, thresholdPolicy, type Scenario,
+  evaluateSafety, loadScenarios, reactivePolicy, runScenarioDetailed, simulatePlan, thresholdPolicy,
+  type Scenario, type ScenarioRunDetails,
 } from '../../../packages/physics/src/gpu/index.js';
-import { runScenarioDetailed, type ScenarioRunDetails } from '../../../packages/physics/src/gpu/run.js';
 import { loadConfig } from '../../agent/src/config.js';
 import { createNimLlm } from '../../agent/src/llm.js';
 import { createNemotronPolicy, EVENT_DRIVEN_CADENCE, type NemotronPolicy } from '../../agent/src/policy.js';
 import type { LlmPort, PhysicsPort } from '../../agent/src/ports.js';
 import type { EvaluationAdapter, Policy, ScenarioIdentity } from './runner.js';
+import { modeLabel } from './report.js';
 
 export const FIXED_12_PREFIXES = ['sc01', 'sc03', 'sc04', 'sc05', 'sc07', 'sc08', 'sc09', 'sc10', 'sc11', 'sc13', 'sc14', 'sc17'] as const;
 export const PHYSICS_PROFILE_VERSION = 'dcos-gpu-physics@0.1.0';
@@ -84,13 +85,8 @@ export function promptVersion(): string {
   return `prompts-${h.digest('hex').slice(0, 12)}`;
 }
 
-/** Visible label derived from provenance, never from the policy name alone. */
-export function modeLabel(p: Provenance): string {
-  if (!p.model_enabled) return p.fallback_decisions > 0 ? 'deterministic-only' : 'rules';
-  if (p.fallback_decisions > 0) return 'mixed-fallback';
-  if (p.model_requests === 0) return 'model-enabled, no model call needed';
-  return p.live_model_responses === 0 && p.cache_hits > 0 ? 'model-assisted (cached replay)' : p.cache_hits > 0 ? 'model-assisted (live+cached)' : 'model-assisted (live)';
-}
+/** Visible label derived from provenance, never from the policy name alone (shared with the scoreboard). */
+export { modeLabel } from './report.js';
 
 function physicsPort(): PhysicsPort {
   return {

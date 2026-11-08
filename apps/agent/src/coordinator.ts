@@ -609,7 +609,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
       return physics.evaluateSafety(snap, cmd, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] });
     }
 
-    private async block(cmd: ActionCommand, violations: string[], where: 'local' | 'db'): Promise<void> {
+    private async block(cmd: ActionCommand, violations: string[], where: 'local' | 'db' | 'start'): Promise<void> {
       this.record(cmd, { status: 'blocked', violations, reason_code: 'SAFETY_REJECTED' });
       await events.emit('safety', {
         workflowId: this.workflowId,
@@ -618,7 +618,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
         actor: 'code',
         toolCalls: [
           {
-            tool: where === 'local' ? 'evaluate_safety' : 'request_action',
+            tool: where === 'local' ? 'evaluate_safety' : where === 'start' ? 'start_action' : 'request_action',
             args_summary: describe(cmd),
             result_summary: `denied: ${violations.join(',')}`,
             actor: 'code',
@@ -657,11 +657,21 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
     /** Move a ledger row forward from wherever it is to a terminal outcome. */
     private async drive(cmd: ActionCommand, initial: ActionStatus): Promise<void> {
+      // Also reached after a claim conflict, when another worker's start was the one rejected.
+      if (isSafetyRejected(initial)) {
+        await this.block(cmd, violationsOf(initial), 'db');
+        return;
+      }
       let s = initial;
       const calls: ToolCallSummary[] = [{ tool: 'request_action', args_summary: describe(cmd), result_summary: s.status }];
       if (s.status === 'requested') {
         const started = await this.claimAndStart(cmd, s, calls);
         if (!started) return;
+        // start_action's safety recheck can reject after the request was accepted; same outcome as on resume.
+        if (isSafetyRejected(started)) {
+          await this.block(cmd, violationsOf(started), 'start');
+          return;
+        }
         s = started;
       }
       if (s.status === 'claimed') {

@@ -1,0 +1,41 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "deterministic-fixed12-2026-11-08",
+  "run_id": "deterministic-fixed12-2026-11-08-sc04-failed-gpu-xid79-s104",
+  "scenario_id": "sc04-failed-gpu-xid79",
+  "seed": 104,
+  "policy": "nemotron",
+  "horizon_sim_s": 300,
+  "gate": "safety",
+  "ticks": 300,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 900000,
+  "duplicate_commands_ignored": 0,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "wf-policy-run-demo-1-idea8acd35e38:migrate_restart:job-a:1",
+      "action_id": "act:wf-policy-run-demo-1-idea8acd35e38:migrate_restart:job-a:1",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 660000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 661000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 781000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": "succeeded",
+      "unsafe_executed": []
+    }
+  ]
+}

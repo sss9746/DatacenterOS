@@ -1,0 +1,331 @@
+{
+  "kind": "dcos-evaluation-manifest",
+  "batch_id": "deterministic-fixed12-2026-11-08",
+  "code_revision": "c4b10b3a076447266b5b92d88e6ae82398294177",
+  "physics_profile_version": "dcos-gpu-physics@0.1.0",
+  "policy_versions": {
+    "reactive": "reactive-rules@c4b10b3a0764",
+    "threshold": "threshold-rules@c4b10b3a0764",
+    "nemotron": "nemotron-policy(deterministic-only;event-driven)@c4b10b3a0764"
+  },
+  "prompt_version": "prompts-c4d654bd3d51",
+  "model": {
+    "enabled": false,
+    "id": null,
+    "label": "deterministic-only (--no-llm); cannot substantiate a Nemotron performance claim"
+  },
+  "cadence": "event-driven cadence: called every tick on the same ObservedSnapshot as the baselines; re-plans only when decision_epoch, observation_event_ids, GPU availability/XID, node availability, cooling state, job status or signals change, or when a deferred mitigation's re-check is due (the planner's re-check time, >= 30 sim-s, while one is deferred), else returns [] (no new commands, no LLM call)",
+  "latency_model": "zero_simulated_decision_latency",
+  "horizons_sim_s": {
+    "sc01-thermal-warning-only": 600,
+    "sc03-severe-pump": 600,
+    "sc04-failed-gpu-xid79": 300,
+    "sc05-pump-gpu-mid-checkpoint": 600,
+    "sc07-no-spare-capacity": 600,
+    "sc08-non-preemptible-affected": 600,
+    "sc09-hot-destination": 600,
+    "sc10-checkpoint-storage-inaccessible": 600,
+    "sc11-stale-telemetry": 600,
+    "sc13-near-complete-job-stay": 420,
+    "sc14-preventive-move-hurts": 600,
+    "sc17-demo-destination-xid79": 600
+  },
+  "delay_label": "job_completion_delay_s is a finite-horizon work deficit (lower bound truncated at the case horizon), not measured wall completion time.",
+  "policy_stats": {
+    "cacheHits": 0,
+    "llmFailures": 91,
+    "llmRequests": 0
+  },
+  "case_ids": [
+    "sc01-thermal-warning-only",
+    "sc03-severe-pump",
+    "sc04-failed-gpu-xid79",
+    "sc05-pump-gpu-mid-checkpoint",
+    "sc07-no-spare-capacity",
+    "sc08-non-preemptible-affected",
+    "sc09-hot-destination",
+    "sc10-checkpoint-storage-inaccessible",
+    "sc11-stale-telemetry",
+    "sc13-near-complete-job-stay",
+    "sc14-preventive-move-hurts",
+    "sc17-demo-destination-xid79"
+  ],
+  "cases": [
+    {
+      "scenario_id": "sc01-thermal-warning-only",
+      "seed": 101,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc01-thermal-warning-only-s101",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc01-thermal-warning-only-s101-reactive.trace.json",
+          "trace_sha256": "c068f8c790140141be43383600da7703596624b285a7b64360728f95963b0cb7",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc01-thermal-warning-only-s101-threshold.trace.json",
+          "trace_sha256": "d21ac45f92b3653e16bc6f8d9270f76285cdf2722cbe0879681bb9c8108750f0",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc01-thermal-warning-only-s101-nemotron.trace.json",
+          "trace_sha256": "421b6ff2dd8e13b2d035abcf7af07307ba043dcb539537ca67ce9be4b5c7fc1a",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc03-severe-pump",
+      "seed": 103,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc03-severe-pump-s103",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc03-severe-pump-s103-reactive.trace.json",
+          "trace_sha256": "a056685ab3c759ea2874f063756bdb802c300c3eb078194f93aeae4690689b73",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc03-severe-pump-s103-threshold.trace.json",
+          "trace_sha256": "842bac64e20e29beab48141ae7c1e64163d7f48e7c996a0ff8f523353f04fa62",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc03-severe-pump-s103-nemotron.trace.json",
+          "trace_sha256": "7aa033fb26b6ae6db29e1828762a2bd172b1bdbd24241817a24f944d1de1ef36",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc04-failed-gpu-xid79",
+      "seed": 104,
+      "horizon_s": 300,
+      "run_id": "deterministic-fixed12-2026-11-08-sc04-failed-gpu-xid79-s104",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc04-failed-gpu-xid79-s104-reactive.trace.json",
+          "trace_sha256": "d8d86157f8e1f6d19d263960cb20ae42fd7d45ec83638b3f892dde8596926a65",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc04-failed-gpu-xid79-s104-threshold.trace.json",
+          "trace_sha256": "6b780d7f1845293b3b4f472e973dfd00e089de899f57757bd930b5bd306088d9",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc04-failed-gpu-xid79-s104-nemotron.trace.json",
+          "trace_sha256": "29356443715edc9fdda0a2300800dd2506012a5e7c02c32d305d6952853cc290",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc05-pump-gpu-mid-checkpoint",
+      "seed": 105,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc05-pump-gpu-mid-checkpoint-s105",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc05-pump-gpu-mid-checkpoint-s105-reactive.trace.json",
+          "trace_sha256": "ee12e6ced38f2a5749dbedb3f2eb8e94e383e5294b9ce2fedd9f460ff898b10a",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc05-pump-gpu-mid-checkpoint-s105-threshold.trace.json",
+          "trace_sha256": "f0f93516deb10ce4f5f30b26ded343d092cc113267a8cf58ba2b3a4b3411e942",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc05-pump-gpu-mid-checkpoint-s105-nemotron.trace.json",
+          "trace_sha256": "40d04beb4015645ee6da18029a0221f762a25a9c02ae5cd9374413ac6ad68da9",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc07-no-spare-capacity",
+      "seed": 107,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc07-no-spare-capacity-s107",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc07-no-spare-capacity-s107-reactive.trace.json",
+          "trace_sha256": "8a9cdb3e6131e44e7ad298470cf0de8e4579fc22142d99ac0fa89e0d12ba5755",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc07-no-spare-capacity-s107-threshold.trace.json",
+          "trace_sha256": "d6288f19fc7de49209dd7f5ee61347c18ddfdfc0aa75eb7df1eecfc731b192f1",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc07-no-spare-capacity-s107-nemotron.trace.json",
+          "trace_sha256": "35303aa85e55dc3720afc794b68bec113b31e7e4e087d18bcfaae022f239dd5c",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc08-non-preemptible-affected",
+      "seed": 108,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc08-non-preemptible-affected-s108",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc08-non-preemptible-affected-s108-reactive.trace.json",
+          "trace_sha256": "b6064313d7feb3f0663189b081351c25805d2556aed9c291d489c6ed4a1e0f22",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc08-non-preemptible-affected-s108-threshold.trace.json",
+          "trace_sha256": "ced8b5364b54c897acc1c9ad5c1f8f42f16b31cbb81b0f69eecea1ee5a974fca",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc08-non-preemptible-affected-s108-nemotron.trace.json",
+          "trace_sha256": "83a46bea52d0f501df10148a11f5685dd86e846dd5671f2cc46cbabdd04a131c",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc09-hot-destination",
+      "seed": 109,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc09-hot-destination-s109",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc09-hot-destination-s109-reactive.trace.json",
+          "trace_sha256": "056f263978e280b7324e76361de273cc47471263cea4b9e7d8d629284308bf5c",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc09-hot-destination-s109-threshold.trace.json",
+          "trace_sha256": "60021ecc01203fdd3ca0a1307b02d980050a74731cc08a6c49622bac9feb5eb5",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc09-hot-destination-s109-nemotron.trace.json",
+          "trace_sha256": "30f0667f408e45dca34d14131ea431b679fdcc8616dab0eb9112b970502ef1d0",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc10-checkpoint-storage-inaccessible",
+      "seed": 110,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc10-checkpoint-storage-inaccessible-s110",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc10-checkpoint-storage-inaccessible-s110-reactive.trace.json",
+          "trace_sha256": "c8627afe61bfa10d5c38d408aeee37b3c85fed9415b619230e4354e16b05a60f",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc10-checkpoint-storage-inaccessible-s110-threshold.trace.json",
+          "trace_sha256": "b699728b457c50e669932d78dc0d838c93e4e67216e5ebd7ccc8bdcc5712bb17",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc10-checkpoint-storage-inaccessible-s110-nemotron.trace.json",
+          "trace_sha256": "72037bfe36f0338c152a89b550d8b96c95610cfd8e00fbeea74336244c2560f5",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc11-stale-telemetry",
+      "seed": 111,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc11-stale-telemetry-s111",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc11-stale-telemetry-s111-reactive.trace.json",
+          "trace_sha256": "e080a573b61770acffc7f297404b4e880b61b02e5bfc8704746f34b8c79d3ad9",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc11-stale-telemetry-s111-threshold.trace.json",
+          "trace_sha256": "1c03721d7e885c61f5f4be80c197d80c316ac9387698d700959ba66eef467d29",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc11-stale-telemetry-s111-nemotron.trace.json",
+          "trace_sha256": "b628829c08c68443a28239ff354196922b7f030c631b41d4b6a33b2af69ed4f3",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc13-near-complete-job-stay",
+      "seed": 113,
+      "horizon_s": 420,
+      "run_id": "deterministic-fixed12-2026-11-08-sc13-near-complete-job-stay-s113",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc13-near-complete-job-stay-s113-reactive.trace.json",
+          "trace_sha256": "29eadb52b35c2a226718b41d5ba16f0516467a3f88600222528e13071a0a7369",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc13-near-complete-job-stay-s113-threshold.trace.json",
+          "trace_sha256": "d191b3cbba153e6ca802349c7e22c6bed118f28d2f66fbd95ad5e3471d9f112b",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc13-near-complete-job-stay-s113-nemotron.trace.json",
+          "trace_sha256": "e7081d6541a78dc31dc4b6919ffc9118b675c3ab039b2f7ef438c1b1cab3c975",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc14-preventive-move-hurts",
+      "seed": 114,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc14-preventive-move-hurts-s114",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc14-preventive-move-hurts-s114-reactive.trace.json",
+          "trace_sha256": "cd82bdcf71cb1943d0b9f47ab608bdedf78f247d7dbdd5d6ffe7831e4b351f2f",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc14-preventive-move-hurts-s114-threshold.trace.json",
+          "trace_sha256": "33cc16a13ab8ba3f2873c09c491b18ca6ac4543500c9049e54e00e894ab8fe79",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc14-preventive-move-hurts-s114-nemotron.trace.json",
+          "trace_sha256": "5fb419731a7f024c4886b1b713d6c7f95049685af9f384bd184c895e340afaa8",
+          "mode": "deterministic-only"
+        }
+      }
+    },
+    {
+      "scenario_id": "sc17-demo-destination-xid79",
+      "seed": 117,
+      "horizon_s": 600,
+      "run_id": "deterministic-fixed12-2026-11-08-sc17-demo-destination-xid79-s117",
+      "rows": {
+        "reactive": {
+          "trace_file": "traces/sc17-demo-destination-xid79-s117-reactive.trace.json",
+          "trace_sha256": "29055e6144ce4c111b08a0be34781eda995f0f3b9bfa298992fe41b2c91dccec",
+          "mode": "rules"
+        },
+        "threshold": {
+          "trace_file": "traces/sc17-demo-destination-xid79-s117-threshold.trace.json",
+          "trace_sha256": "1c7a2e08afb0423b51d856d2f2f4de4ab09a9386b81a58c9a19d07ea6943dbee",
+          "mode": "rules"
+        },
+        "nemotron": {
+          "trace_file": "traces/sc17-demo-destination-xid79-s117-nemotron.trace.json",
+          "trace_sha256": "fa761561ecd9c1723d1995b108fa260e31337679f3acfd8dd87195be24c2ce56",
+          "mode": "deterministic-only"
+        }
+      }
+    }
+  ]
+}

@@ -27,6 +27,7 @@ import type {
   SignalEvent,
   TelemetryEvent,
 } from '@dcos/contracts';
+import { validatePayload } from '@dcos/contracts';
 import type { ConnectOptions, DbClient, Unsubscribe } from './client.js';
 import { DbConnection } from './generated/index.js';
 import type * as G from './generated/types.js';
@@ -39,6 +40,7 @@ import {
   type AgentEventInput,
   type DbChange,
   type Evidence,
+  type PlanRecord,
   type RunConfig,
   type SymptomRecord,
   type WorkflowLease,
@@ -233,17 +235,49 @@ const toAgentEvent = (r: G.AgentEvent): AgentEventInput => ({
   observed_unix_ms: r.observedUnixMs,
 });
 
-const toEvaluation = (r: G.EvaluationResult): EvaluationResult => ({
-  schema_version: V,
-  run_id: r.runId,
-  scenario_id: r.scenarioId,
-  seed: r.seed,
-  policy: r.policy as EvaluationResult['policy'],
-  ...parse<Omit<EvaluationResult, 'schema_version' | 'run_id' | 'scenario_id' | 'seed' | 'policy'>>(r.metricsJson, {
-    lost_work_units: 0, job_completion_delay_s: 0, gpu_busy_waste_s: 0, unnecessary_preemptions: 0,
-    unsafe_actions_executed: 0, unsafe_actions_blocked: 0, successful_recoveries: 0, failed_recoveries: 0, agent_crash_resumes: 0,
-  }),
-});
+/** null for an unreadable or invalid row: an unknown result is dropped, never shown as zeros (SCOPE §7). */
+export const toEvaluation = (r: G.EvaluationResult): EvaluationResult | null => {
+  const metrics = parse<Record<string, unknown> | null>(r.metricsJson, null);
+  const row = {
+    ...metrics,
+    schema_version: V,
+    run_id: r.runId,
+    scenario_id: r.scenarioId,
+    seed: r.seed,
+    policy: r.policy,
+  };
+  const v = metrics ? validatePayload('EvaluationResult', row) : { ok: false as const, errors: ['metrics_json is not readable'] };
+  if (!v.ok) {
+    console.warn(`@dcos/db-client: dropping invalid evaluation_result ${r.resultId}: ${v.errors.slice(0, 3).join('; ')}`);
+    return null;
+  }
+  return row as unknown as EvaluationResult;
+};
+
+/** The stored plan with its wire fields rebuilt; null if a stored JSON column is unreadable. */
+export const toPlan = (r: G.Plan): PlanRecord | null => {
+  const incidentIds = parse<PlanCandidate['incident_ids'] | null>(r.incidentIdsJson, null);
+  const commandKeys = parse<PlanCandidate['command_keys'] | null>(r.commandKeysJson, null);
+  const assumptions = parse<string[] | null>(r.assumptionsJson, null);
+  const metrics = parse<Pick<PlanCandidate, 'expected_completion_delay_sim_s' | 'expected_lost_work_units' | 'expected_gpu_busy_waste_s' | 'failure_risk_estimate'> | null>(r.expectedMetricsJson, null);
+  if (!incidentIds || !commandKeys || !assumptions || !metrics) {
+    console.warn(`@dcos/db-client: dropping unreadable plan ${r.planId}`);
+    return null;
+  }
+  return {
+    schema_version: V,
+    plan_id: r.planId,
+    run_id: r.runId,
+    workflow_id: r.workflowId,
+    incident_ids: incidentIds,
+    based_on_decision_epoch: r.basedOnDecisionEpoch,
+    assumptions,
+    command_keys: commandKeys,
+    ...metrics,
+    explanation: r.explanation,
+    status: r.status,
+  };
+};
 
 // ---------------------------------------------------------------------------------------------
 // connect()
@@ -615,7 +649,10 @@ export async function connect(opts: ConnectOptions): Promise<DbClient> {
       }, cb),
     onAgentEvents: (cb) =>
       watch([w(db.agentEvent)], () => [...db.agentEvent.iter()].map(toAgentEvent).sort((a, b) => a.sim_time_ms - b.sim_time_ms), cb),
-    onEvaluation: (cb) => watch([w(db.evaluationResult)], () => [...db.evaluationResult.iter()].map(toEvaluation), cb),
+    onEvaluation: (cb) =>
+      watch([w(db.evaluationResult)], () => [...db.evaluationResult.iter()].map(toEvaluation).filter((x): x is EvaluationResult => x !== null), cb),
+    onPlans: (cb) => watch([w(db.plan)], () => [...db.plan.iter()].map(toPlan).filter((x): x is PlanRecord => x !== null), cb),
+    onWorkflows: (cb) => watch([w(db.workflow), w(db.workflowIncident)], () => [...db.workflow.iter()].map(toWorkflow), cb),
 
     close() {
       changeSubs.clear();

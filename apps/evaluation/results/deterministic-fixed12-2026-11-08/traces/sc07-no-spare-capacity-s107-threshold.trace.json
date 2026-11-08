@@ -1,0 +1,65 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "deterministic-fixed12-2026-11-08",
+  "run_id": "deterministic-fixed12-2026-11-08-sc07-no-spare-capacity-s107",
+  "scenario_id": "sc07-no-spare-capacity",
+  "seed": 107,
+  "policy": "threshold",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 0,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "threshold.job-b.checkpoint.after.ckpt-job-b-1",
+      "action_id": "threshold.job-b.checkpoint.after.ckpt-job-b-1",
+      "operation": "checkpoint",
+      "job_id": "job-b",
+      "target_resource_id": "job-b",
+      "issued_sim_time_ms": 930000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 931000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 961000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "threshold.job-a.checkpoint.after.ckpt-job-a-1",
+      "action_id": "threshold.job-a.checkpoint.after.ckpt-job-a-1",
+      "operation": "checkpoint",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 931000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 932000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 962000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    }
+  ]
+}

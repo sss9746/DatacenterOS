@@ -9,7 +9,10 @@
 //
 // TIMING: a command starts at the tick's end time t1 and gets due_sim_ms = t1 + its duration (checkpoint
 //   checkpoint_duration_ms = 30 s, migrate_restart restart_duration_ms = 120 s, everything else one step: the next
-//   tick, CONTRACTS §0.12 #5). It completes on the first LATER tick whose t1 ≥ due, after that tick's faults applied (completion revalidates). Its key then
+//   tick, CONTRACTS §0.12 #5). It completes on the first LATER tick whose t1 ≥ due, after that tick's faults applied:
+//   completion revalidates against this tick's true state (completion.ts: a checkpoint needs its source intact and
+//   its storage up; a restart needs the exact destination still its own, healthy, fresh, within projected thermal /
+//   power headroom and with its checkpoint storage reachable, else the job fails and its allocation is released). Its key then
 //   lands in completed_command_keys or failed_command_keys; invalid commands fail on the tick they are requested.
 //   commandOutcome() (CONTRACTS §0.12 #4) gives { status, reason_code? }; inFlightCommands() (§0.12 #5) gives due
 //   times for the DB's action rows. Arguments by operation follow §0.11 #1 (args.ts); anything else is
@@ -20,7 +23,8 @@
 import type { ActionCommand, Checkpoint, JobState, PhysicsWorld } from '@dcos/contracts';
 import { argumentProblems } from './args.js';
 import { POWER_CAP_W, WIRE_SCHEMA_VERSION as V } from './constants.js';
-import { JOB_FATAL_FAILURES, finishCommand, releaseJob, type TickCtx } from './jobs.js';
+import { checkpointCompletionProblem, restartCompletionProblem } from './completion.js';
+import { failJobInPlace, finishCommand, releaseJob, type TickCtx } from './jobs.js';
 import {
   cloneJson,
   faultConditions,
@@ -245,21 +249,25 @@ function startCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ctx: 
 
 // ---- complete -------------------------------------------------------------------------------------
 
-/** Returns null on success, else the failure reason. Runs after this tick's faults (revalidation). */
+/**
+ * Returns null on success, else the failure reason. Runs after this tick's faults: the delayed operations revalidate
+ * against this tick's true state (completion.ts, SCOPE §4 "Delayed completion" / "Restart completion").
+ */
 function completeCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ctx: TickCtx, f: InFlightCommand): string | null {
   const c = f.command;
   switch (c.operation) {
     case 'checkpoint': {
       const job = jobOf(world, c);
       const row = world.observable.checkpoints.find((x) => x.checkpoint_id === f.checkpoint_id)!;
-      const ok = job.status === 'checkpointing' && storageUp(world, topo, row.storage_resource_id);
-      if (job.status === 'checkpointing') job.status = f.resume_status ?? 'running';
-      if (!ok) {
+      const problem = checkpointCompletionProblem(world, h, topo, job, row);
+      if (problem === 'JOB_FAILED_DURING_OPERATION') failJobInPlace(world, job); // a source GPU died on the due tick
+      else if (job.status === 'checkpointing') job.status = f.resume_status ?? 'running';
+      if (problem !== null) {
         row.status = 'failed';
         row.accessible = false;
-        return 'CHECKPOINT_NOT_ACCESSIBLE';
+        return problem;
       }
-      // durable only now: the write finished and the storage is still accessible
+      // durable only now: the write finished, the source is intact and the storage is still accessible
       row.status = 'complete';
       row.complete_sim_time_ms = ctx.t1;
       job.durable_work_units = row.progress_work_units;
@@ -268,12 +276,15 @@ function completeCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ct
     }
     case 'migrate_restart': {
       const job = jobOf(world, c);
-      if (job.status !== 'restarting') return 'JOB_STATE_INVALID';
-      const dead = job.allocated_gpu_ids.some((g) => {
-        const fl = h.gpu_failure[g];
-        return fl !== undefined && JOB_FATAL_FAILURES.has(fl);
-      });
-      if (dead) return 'DEST_GPU_UNHEALTHY'; // (failJobsOnDeadGpus normally gets there first)
+      const problem = restartCompletionProblem(world, h, topo, ctx.t1, f, job, specOf(world, job.job_id));
+      if (problem !== null) {
+        // Completion failure (SCOPE §4): the job is not running and the action failed with the precise reason. The
+        // destination allocation is released coherently (no orphaned restarting job, no partial allocation), progress
+        // stays at durable work, the failed hardware state is retained, and the old placement (released at start) is
+        // never rolled back to. The workflow replans or escalates.
+        if (job.status === 'restarting') failJobInPlace(world, job);
+        return problem;
+      }
       job.status = 'running';
       return null;
     }
