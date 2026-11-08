@@ -66,7 +66,9 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await page.getByLabel('Run view').selectOption('recovery');
   await go(page, 'Recovery activity');
   await expect(page.locator('#activity .incident')).toHaveCount(2);
-  // The event log shows the newest 6 events until "Show all"; every event stays counted in the footer.
+  // The full event log lives on the Workflows page (Event log tab): newest 6 events until "Show all"; every event stays counted in the footer.
+  await go(page, 'Workflows');
+  await page.getByRole('tab', { name: 'Event log' }).click();
   const log = page.locator('#event-log');
   await expect(log.locator('.feed-event')).toHaveCount(6);
   await expect(log).toContainText('Showing 6 of 20');
@@ -78,7 +80,7 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await log.getByRole('button', { name: 'Show all (20)' }).click();
   const exclude = log.locator('.tool-call', { hasText: 'list_placement_candidates' }).first();
   await exclude.locator('summary').click(); await expect(exclude).toContainText('Example: exclude');
-  await go(page, 'Workflows');
+  await page.getByRole('tab', { name: 'Workflows' }).click();
   await expect(page.locator('#workflows .wf-card')).toHaveCount(2);
   await expect(page.locator('#workflows')).toContainText('wf-example-cooling');
   await expect(page.locator('#workflows')).toContainText('wf-example-xid');
