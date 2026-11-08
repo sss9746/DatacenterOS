@@ -13,7 +13,10 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await page.goto('/?presenter=1'); await page.getByLabel('Run view').selectOption('demo');
   await expect(page.getByRole('button', { name: /Rack \d/ })).toHaveCount(8);
   await expect(page.locator('[data-gpu]')).toHaveCount(8);
+  // Secondary panels live behind the Details tabs; a tab must be active before its controls are visible.
+  await page.getByRole('tab', { name: 'Scoreboard' }).click();
   await expect(page.getByRole('heading', { name: 'No matched evaluation runs yet' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Jobs' }).click();
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   const clock = await page.getByTestId('sim-clock').innerText(); await page.waitForTimeout(1100); expect(await page.getByTestId('sim-clock').innerText()).toBe(clock);
   await page.getByRole('button', { name: /Rack 4/ }).click();
@@ -37,19 +40,21 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await expect(page.locator('.wf-card')).toHaveCount(2);
   await expect(page.locator('#workflows')).toContainText('wf-example-cooling');
   await expect(page.locator('#workflows')).toContainText('wf-example-xid');
-  // The feed shows the newest 6 events until "Show all"; every event stays counted in the footer.
+  // The feed (Full log tab) shows the newest 6 events until "Show all"; every event stays counted in the footer.
+  await page.getByRole('tab', { name: 'Full log' }).click();
   await expect(page.locator('.feed-event')).toHaveCount(6);
-  await expect(page.locator('#activity')).toContainText('Showing 6 of 17');
-  await page.getByRole('button', { name: 'Show all (17)' }).click();
-  await expect(page.locator('.feed-event')).toHaveCount(17);
+  await expect(page.locator('#activity')).toContainText('Showing 6 of 20');
+  await page.getByRole('button', { name: 'Show all (20)' }).click();
+  await expect(page.locator('.feed-event')).toHaveCount(20);
   await expect(page.locator('.feed-event.actor-nemotron')).toHaveCount(4);
   await page.getByRole('button', { name: /^Nemotron/ }).click();
   await expect(page.locator('.feed-event')).toHaveCount(4);
-  await expect(page.locator('#activity')).toContainText('13 hidden by filter');
+  await expect(page.locator('#activity')).toContainText('16 hidden by filter');
   await page.getByRole('button', { name: /^All/ }).click();
-  await page.getByRole('button', { name: 'Show all (17)' }).click();
+  await page.getByRole('button', { name: 'Show all (20)' }).click();
   const exclude = page.locator('.tool-call', { hasText: 'list_placement_candidates' }).first();
   await exclude.locator('summary').click(); await expect(exclude).toContainText('Example: exclude');
+  await page.getByRole('tab', { name: 'Ledger' }).click();
   await expect(page.locator('#ledger')).toContainText('BLOCKED');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expectAccessibleAndContained(page);
@@ -101,6 +106,7 @@ test('scoreboard: deterministic rehearsal batch is labelled by provenance, never
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
   const board = page.locator('#scoreboard');
+  await page.getByRole('tab', { name: 'Scoreboard' }).click();
   await expect(board).toContainText('No matched evaluation runs yet');
   await board.getByRole('button', { name: 'Load deterministic rehearsal batch (mock only)' }).click();
   await expect(board).toContainText('rehearsal-fixed12-nollm');
