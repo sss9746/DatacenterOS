@@ -7,7 +7,8 @@ import type { ActionCommand, Incident, PlanCandidate } from '@dcos/contracts';
  * the dashboard derives the two workflows exactly as it would from the DB. Deterministic: the mock clock only moves
  * on the explicit `tick()` calls below.
  *
- * Story: a cooling workflow (checkpoint running, a move BLOCKED by a stale snapshot epoch, replanned to a power cap)
+ * Story: a cooling workflow (checkpoint, a job-b move BLOCKED by a stale snapshot epoch, replanned to a power cap, then
+ * job-a moved r2+r3 → r1+r5 from its completed checkpoint; every option the planner weighed persisted as state.candidates)
  * and an independent XID 79 workflow (cordon, agent lease lapse and resume, verified handoff with the GPU unrepaired).
  */
 const V = '1.1.0' as const;
@@ -77,7 +78,19 @@ export async function loadRecoveryExample(client: MockDbClient) {
   const ckpt = command(coolWf, plan1, cooling.incident_id, 'example-cooling-1-ckpt-job-a', 'checkpoint', 'job-a', 'job-a', {}, e0);
   const r7 = snapshot.gpus.filter((g) => g.resource_id.startsWith('gpu-r7-')).map((g) => g.resource_id).slice(0, 8);
   const move = command(coolWf, plan1, cooling.incident_id, 'example-cooling-1-move-job-b', 'migrate_restart', 'job-b', 'job-b', { destination_gpu_ids: r7 }, e0);
-  await cool.stage('plan', { plan_id: plan1, attempt: 1 });
+  // Same shape as the planner's PersistedCandidate (apps/agent/src/planner.ts): every option it evaluated per job, chosen and
+  // rejected, with scripted example metrics. `predicted_work_deficit_units` is always null, as in the real planner today.
+  const candidate = (job_id: string, option: string, commands_summary: string, lost: number | null, waste: number | null, safety: 'allow' | 'needs_approval' | 'deny' | 'not_checked', violations: string[], chosen: boolean, reason: string, decided_by: AgentActor, snapshot_epoch: number) =>
+    ({ job_id, option, commands_summary, predicted_lost_work_units: lost, predicted_work_deficit_units: null, predicted_gpu_busy_waste_s: waste, safety, violations, chosen, reason: `Example: ${reason}`, decided_by, snapshot_epoch, as_of_sim_time_ms: t });
+  const candidates1 = [
+    candidate('job-a', 'checkpoint', 'job-a: checkpoint', 0, 30, 'allow', [], true, 'protects 410 wu of unsaved progress before loop A heats further; 30 s of GPU time while the checkpoint writes.', 'nemotron', e0),
+    candidate('job-a', 'keep_running', 'job-a: keep_running', 410, 0, 'not_checked', [], false, 'safe but not chosen (rank 2): lost work 410 vs 0 wu for job-a:checkpoint if the rack reaches shutdown.', 'nemotron', e0),
+    candidate('job-a', 'power_cap', 'job-a: power_cap 500 W', 0, 95, 'allow', [], false, 'safe but not chosen (rank 3): same lost work as checkpoint but 95 s of throttled GPU time.', 'nemotron', e0),
+    candidate('job-b', 'checkpoint_then_migrate', 'after job-a:ckpt → job-b: migrate_restart r7', 0, 120, 'allow', [], true, 'rack r7 has thermal headroom and is on loop B; the restart costs 120 s of GPU-busy time, no work.', 'nemotron', e0),
+    candidate('job-b', 'migrate_restart', 'after job-a:ckpt → job-b: migrate_restart r6', 0, 120, 'deny', ['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'], false, 'rejected by deterministic safety: DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT', 'nemotron', e0),
+    candidate('job-b', 'keep_running', 'job-b: keep_running', 180, 0, 'not_checked', [], false, 'safe but not chosen (rank 3): lost work 180 vs 0 wu for job-b:checkpoint_then_migrate.', 'nemotron', e0),
+  ];
+  await cool.stage('plan', { plan_id: plan1, attempt: 1, candidates: candidates1 });
   await client.submitPlan(plan(coolWf, plan1, cooling.incident_id, [ckpt.command_key, move.command_key], 0, 120));
   await publish(coolWf, cooling.incident_id, 'plan', 'nemotron', 'checkpoint job-a now, then move job-b to the cooler rack r7 (scripted choice).', [
     ...option('job-a:keep', 'job-a: keep_running', 'lost 410 wu · delay 0 s'),
@@ -103,7 +116,15 @@ export async function loadRecoveryExample(client: MockDbClient) {
 
   const plan2 = 'plan-example-cooling-2';
   const cap = command(coolWf, plan2, cooling.incident_id, 'example-cooling-2-cap-job-b', 'power_cap', 'job-b', 'job-b', { power_limit_w: 500 }, e1);
-  await cool.stage('replan', { previous_plan_id: plan1, superseded: true, plan_id: plan2, attempt: 2, kept_keys: [ckpt.command_key], reason: 'destination gpu-r7-n1-0 reported XID 79 and the move was rejected' });
+  // As the planner's mergeCandidates: the replan replaces job-b's entries and keeps job-a's.
+  const candidates2 = [
+    ...candidates1.filter((c) => c.job_id !== 'job-b'),
+    candidate('job-b', 'power_cap', 'after job-a:ckpt → job-b: power_cap 500 W', 0, 40, 'allow', [], true, 'destination r7 now carries XID 79, so cap job-b at 500 W in place: no lost work, 40 s of throttled GPU time.', 'nemotron', e1),
+    candidate('job-b', 'migrate_restart', 'after job-a:ckpt → job-b: migrate_restart r8', 0, 120, 'needs_approval', ['HIGH_PRIORITY_JOB_DISRUPTION'], false, 'safe but not chosen (rank 2): a cross-zone move to loop B needs operator approval and 120 s of GPU-busy time.', 'nemotron', e1),
+    candidate('job-b', 'migrate_restart', 'after job-a:ckpt → job-b: migrate_restart r7', null, null, 'deny', ['DEST_GPU_UNHEALTHY', 'STALE_DECISION_EPOCH'], false, 'rejected by deterministic safety: DEST_GPU_UNHEALTHY, STALE_DECISION_EPOCH', 'code', e1),
+    candidate('job-b', 'keep_running', 'job-b: keep_running', 180, 0, 'not_checked', [], false, 'safe but not chosen (rank 3): lost work 180 vs 0 wu for job-b:power_cap.', 'nemotron', e1),
+  ];
+  await cool.stage('replan', { previous_plan_id: plan1, superseded: true, plan_id: plan2, attempt: 2, kept_keys: [ckpt.command_key], reason: 'destination gpu-r7-n1-0 reported XID 79 and the move was rejected', candidates: candidates2 });
   await publish(coolWf, cooling.incident_id, 'replan', 'code', `replanning ${plan1}: destination gpu-r7-n1-0 reported XID 79.`);
   // Scripted cross-agent exchange: the cooling owner checks a loop-B placement with the second worker before listing it.
   await publish(coolWf, cooling.incident_id, 'replan', 'code', 'message to example-agent-beta-2: rack r8 is on loop B, your zone; any objection to listing it as a job-b fallback?', [
@@ -138,7 +159,14 @@ export async function loadRecoveryExample(client: MockDbClient) {
   const planMove = 'plan-example-cooling-3';
   const r1r5 = snapshot.gpus.filter((g) => /^gpu-r[15]-/.test(g.resource_id)).map((g) => g.resource_id);
   const moveA = command(coolWf, planMove, cooling.incident_id, 'example-cooling-3-move-job-a', 'migrate_restart', 'job-a', 'job-a', { destination_gpu_ids: r1r5 }, e2);
-  await cool.stage('plan', { plan_id: planMove, attempt: 3, previous_plan_id: plan2 });
+  // As the planner's mergeCandidates: this round replaces job-a's entries (its checkpoint is done) and keeps job-b's.
+  // The chosen job-a option is the move that actually executes below (moveA → r1 + r5).
+  const candidates3 = [
+    candidate('job-a', 'migrate_restart', 'job-a: migrate_restart r1+r5', 0, 120, 'allow', [], true, `loop A is still degraded after the checkpoint: move job-a to the cool racks r1 + r5 from ${ckptRow?.checkpoint_id ?? 'its latest checkpoint'}; 120 s of GPU-busy restart, no lost work.`, 'nemotron', e2),
+    candidate('job-a', 'keep_running', 'job-a: keep_running', 0, 0, 'not_checked', [], false, 'safe but not chosen (rank 2): nothing to lose right after the checkpoint, but loop A keeps heating; staying is a thermal risk.', 'nemotron', e2),
+    ...candidates2.filter((c) => c.job_id !== 'job-a'),
+  ];
+  await cool.stage('plan', { plan_id: planMove, attempt: 3, previous_plan_id: plan2, candidates: candidates3 });
   await client.submitPlan(plan(coolWf, planMove, cooling.incident_id, [moveA.command_key], 0, 120));
   await publish(coolWf, cooling.incident_id, 'plan', 'nemotron', 'loop A is still degraded: move job-a to the cool racks r1 + r5 from its fresh checkpoint (scripted choice).', [
     ...option('job-a:move:r1r5', 'job-a: migrate_restart r1+r5', 'lost 0 wu · delay 120 s'),

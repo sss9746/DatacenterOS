@@ -250,7 +250,13 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(cool.waiting?.operation).toBe('migrate_restart'); // the story now ends with job-a moving r2+r3 → r1+r5 from its completed checkpoint
     expect(cool.groups.blocked.map((l) => l.reason)).toEqual(['STALE_DECISION_EPOCH']);
     expect(cool.attempt).toBe(3);
-    expect(cool.candidates?.options.find((o) => o.option_id === 'job-a:move:r1r5')?.chosen).toBe(true);
+    // The fixture persists `state.candidates[]` in the planner's shape, so the persisted round wins over the plan-event round.
+    expect(cool.candidates?.source).toBe('workflow_state');
+    // Round 3 replaced job-a's rows (mergeCandidates): the chosen job-a option is the move to r1 + r5 that actually executes.
+    expect(cool.candidates?.options.find((o) => o.option_id === 'job-a:migrate_restart')).toMatchObject({ chosen: true, simulated: 'job-a: migrate_restart r1+r5', persisted: { safety: 'allow' } });
+    expect(cool.candidates?.options.filter((o) => o.persisted?.job_id === 'job-a').map((o) => o.persisted?.option)).toEqual(['migrate_restart', 'keep_running']);
+    expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:power_cap')?.chosen).toBe(true);
+    expect(cool.candidates?.options.filter((o) => o.persisted?.job_id === 'job-b').map((o) => o.persisted?.safety)).toEqual(['allow', 'needs_approval', 'deny', 'not_checked']);
     expect(xid.status.kind).toBe('verified');
     expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-alpha-1', count: 1 });
     expect(xid.workflow.lease_owner).toBe('example-agent-beta-2');

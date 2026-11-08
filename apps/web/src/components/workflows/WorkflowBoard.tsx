@@ -1,10 +1,11 @@
-import { memo, useMemo } from 'react';
-import type { ActionDetail, AgentActor, AgentEventInput, PlanRecord, WorkflowRecord } from '@dcos/db-client';
+import { memo, useMemo, useState } from 'react';
+import type { ActionDetail, AgentActor, AgentEventInput, Evidence, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import type { Incident, ObservedSnapshot } from '@dcos/contracts';
 import { CheckCircle2, CircleDashed, Code2, RotateCcw, ShieldAlert, Sparkles, UserRound } from 'lucide-react';
 import { Badge, Empty, Panel } from '../ui/panel';
 import { ownerLabel } from '../../app/page-props';
 import { duration } from '../../lib/utils';
+import { DecisionTrace } from '../decision/DecisionTrace';
 import {
   actorLabel,
   actorSummary,
@@ -34,6 +35,8 @@ export interface WorkflowBoardProps {
   plans?: PlanRecord[];
   /** Wall clock for lease expiry labels (defaults to Date.now() at render). */
   nowUnixMs?: number;
+  /** Run-wide evidence window (`getEvidence`): incident links give the Detect step its resources and symptoms. */
+  evidence?: Evidence | null;
 }
 
 const STATUS_TONE: Record<StatusKind, string> = {
@@ -48,16 +51,27 @@ const STATUS_TONE: Record<StatusKind, string> = {
 };
 
 /** Per-workflow progress: one card per persisted workflow, driven by DB rows, agent events and the action ledger. */
-export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs }: WorkflowBoardProps) {
+export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs, evidence = null }: WorkflowBoardProps) {
   const views = useMemo(() => buildWorkflowViews({ workflows, events, actionDetails, incidents, snapshot }), [workflows, events, actionDetails, incidents, snapshot]);
   const source = example ? 'Scripted example' : mode === 'live' ? 'Live DB' : 'Mock data';
   const simNow = snapshot?.clock.sim_time_ms ?? null;
   const now = nowUnixMs ?? Date.now();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = views.find((v) => v.workflow.workflow_id === selectedId) ?? views[0] ?? null;
   return <Panel title="Workflows" id="workflows" className="wf-panel" detail={<span className="wf-panel-badges"><Badge>{views.length} {views.length === 1 ? 'workflow' : 'workflows'}</Badge><Badge tone={example ? 'example' : 'neutral'}>{source}</Badge></span>}>
     {example && <p className="example-note">Scripted example workflows, written through the mock client APIs. No model, planner or safety engine ran.</p>}
     {views.length === 0
       ? <Empty title="No workflow opened">{mode === 'mock' ? 'No agent is running in mock mode, so the orchestrator has not opened a workflow. Choose the recovery example to see scripted workflows.' : 'The orchestrator has not opened a workflow yet. One appears per incident group once the agent claims it.'}</Empty>
-      : <ol className="wf-list" aria-label="Workflows">{views.map((view) => <li key={view.workflow.workflow_id}><WorkflowCard view={view} example={example} simNow={simNow} now={now} plan={view.planId ? plans.find((p) => p.plan_id === view.planId) ?? null : null}/></li>)}</ol>}
+      : <>
+        {views.length > 1 && <div className="dt-selector" role="group" aria-label="Choose a workflow to trace">{views.map((v) => <button key={v.workflow.workflow_id} type="button" className="dt-select" aria-pressed={selected?.workflow.workflow_id === v.workflow.workflow_id} onClick={() => setSelectedId(v.workflow.workflow_id)}><span className="dt-select-title">{cardTitle(v)}</span><Badge tone={STATUS_TONE[v.status.kind]}>{v.status.label}</Badge></button>)}</div>}
+        {selected && <section className="dt-panel" aria-labelledby={`dt-${selected.workflow.workflow_id}-heading`}>
+          <div className="dt-panel-head"><h3 id={`dt-${selected.workflow.workflow_id}-heading`}>Decision trace · {cardTitle(selected)}</h3><Badge tone={STATUS_TONE[selected.status.kind]}>{selected.status.label}</Badge>{example && <Badge tone="example">Example</Badge>}<code className="wf-key" title="Workflow id">{selected.workflow.workflow_id}</code></div>
+          <p className="dt-panel-note">How this decision was made, step by step: what was detected, every option the planner weighed, their predicted cost, the safety check on each, who chose what and why, what ran, and whether the verifier confirmed it. Missing data reads “not recorded”.</p>
+          <DecisionTrace view={selected} plans={plans} incidents={incidents} evidence={evidence} example={example}/>
+        </section>}
+        <h3 className="dt-cards-head">All workflows</h3>
+        <ol className="wf-list" aria-label="Workflows">{views.map((view) => <li key={view.workflow.workflow_id}><WorkflowCard view={view} example={example} simNow={simNow} now={now} plan={view.planId ? plans.find((p) => p.plan_id === view.planId) ?? null : null}/></li>)}</ol>
+      </>}
   </Panel>;
 }
 
@@ -149,10 +163,10 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
 function CandidateSummary({ round, example }: { round: CandidateRound | null; example: boolean }) {
   if (!round || !round.options.length) return null;
   const sorted = [...round.options].sort((a, b) => Number(b.chosen === true) - Number(a.chosen === true));
-  return <ul className="wf-candidates" aria-label="Candidate options">{sorted.map((o) => {
+  return <ul className="wf-candidates" aria-label="Candidate options">{sorted.map((o, i) => {
     const name = o.persisted ? `${o.persisted.job_id} · ${o.persisted.option.replace(`${o.persisted.job_id}:`, '')}` : o.option_id;
     const reason = o.persisted?.reason ?? (o.chosen === true ? 'chosen by the planner' : o.blocked ? 'blocked by safety' : 'not chosen');
-    return <li key={o.option_id} className={o.chosen === true ? 'wf-cand wf-cand-chosen' : o.blocked ? 'wf-cand wf-cand-blocked' : 'wf-cand'} title={o.option_id}>
+    return <li key={`${o.option_id}-${i}`} className={o.chosen === true ? 'wf-cand wf-cand-chosen' : o.blocked ? 'wf-cand wf-cand-blocked' : 'wf-cand'} title={o.option_id}>
       <span className="wf-cand-verdict">{o.chosen === true ? <CheckCircle2 size={13} aria-hidden="true"/> : o.blocked ? <ShieldAlert size={13} aria-hidden="true"/> : <CircleDashed size={13} aria-hidden="true"/>}{o.chosen === true ? 'Chosen' : o.blocked ? 'Blocked' : o.persisted ? 'Rejected' : 'Alternative'}</span>
       <span className="wf-cand-name">{name}</span>
       <span className="wf-cand-reason wf-wrap">{reason}</span>
@@ -213,7 +227,7 @@ function Candidates({ round, example, plan, planId }: { round: CandidateRound | 
         {round.source === 'events' && (round.choice
           ? <p className="wf-narrative"><ActorBadge actor={round.choice.actor} example={example}/><span className="wf-wrap">choose_options: {round.choice.reported}</span></p>
           : <p className="wf-muted">No option-level choice was published; the chosen option cannot be identified by id. The plan summary above names it.</p>)}
-        {round.options.length > 0 && <ul className="wf-options">{round.options.map((o) => <li key={o.option_id} className={o.chosen ? 'wf-option-chosen' : ''}>
+        {round.options.length > 0 && <ul className="wf-options">{round.options.map((o, i) => <li key={`${o.option_id}-${i}`} className={o.chosen ? 'wf-option-chosen' : ''}>
           <div className="wf-option-head"><code>{o.option_id}</code>{o.chosen === true && <Badge tone="agent">Chosen</Badge>}{o.chosen === false && <Badge>{o.persisted ? 'Rejected' : 'Alternative'}</Badge>}{o.blocked && <Badge tone="danger">Blocked by safety</Badge>}</div>
           {o.persisted ? <PersistedOption o={o} example={example} showDeficit={round.showDeficit}/> : <>
             <dl>
