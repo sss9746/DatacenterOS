@@ -2,7 +2,15 @@
 // Shapes match apps/agent/src/ports.ts on lane/p3-agent (CONTRACTS §0.11 #7, #10, #14, #15),
 // so P3 can replace its local copies with `import type { … } from '@dcos/db-client'`.
 
-import type { ActionStatus, Incident, IncidentLink, SignalEvent, TelemetryEvent } from '@dcos/contracts';
+import type {
+  ActionCommand,
+  ActionStatus,
+  Incident,
+  IncidentLink,
+  SafetyDecision,
+  SignalEvent,
+  TelemetryEvent,
+} from '@dcos/contracts';
 
 /** F-NV1 stages (CONTRACTS §0.8). */
 export type AgentStage = 'triage' | 'diagnose' | 'plan' | 'safety' | 'execute' | 'replan' | 'verify';
@@ -95,6 +103,47 @@ export type DbChange =
   | { kind: 'resource_version'; resource_id: string; version: number; sim_time_ms: number }
   | { kind: 'signal'; signal: SignalEvent }
   | { kind: 'action_status'; status: ActionStatus };
+
+// ---------------------------------------------------------------------------
+// Action details (P4 handoff #4): a read-only public projection of the ledger.
+// Live: `action` row (stored command + safety in result_json) + `action_event` rows. No new tables.
+// ---------------------------------------------------------------------------
+
+/** A safety check recorded on the action. `evidence` is evaluateSafety's own (actual vs required headroom etc.). */
+export interface ActionSafety {
+  decision: SafetyDecision['decision'];
+  violations: string[];
+  /** null when the check did not record it (start-time recheck). */
+  checked_decision_epoch: number | null;
+  evidence: Record<string, unknown>;
+}
+
+/** One status transition (live `action_event`), oldest first. */
+export interface ActionHistoryEntry {
+  status: ActionStatus['status'];
+  /** Action version after this transition. */
+  version: number;
+  sim_time_ms: number;
+  observed_unix_ms: number;
+  reason_code: string | null;
+  /** Transition-specific detail, e.g. `{ safety }`, `{ outcome }`, `{ verification }`. */
+  detail: Record<string, unknown>;
+}
+
+/** Everything the ledger UI shows about one action. */
+export interface ActionDetail {
+  /** Same object `onActions` returns for this action. */
+  status: ActionStatus;
+  /** The command as requested: operation, target, job, arguments, dependencies, incidents, expected versions. */
+  command: ActionCommand;
+  claimed_by: string | null;
+  due_sim_time_ms: number | null;
+  /** Safety decision at request time. null only in the mock when no `evaluateSafety` is plugged in and nothing was violated. */
+  safety: ActionSafety | null;
+  /** Safety recheck at start time, present only when it rejected the start. */
+  start_safety: ActionSafety | null;
+  history: ActionHistoryEntry[];
+}
 
 /** Run configuration accepted by `configureRun` (P2-4 speed; P2-9 fan rule). */
 export interface RunConfig {

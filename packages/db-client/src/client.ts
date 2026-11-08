@@ -16,6 +16,7 @@ import type {
   TelemetryEvent,
 } from '@dcos/contracts';
 import type {
+  ActionDetail,
   AgentEventInput,
   DbChange,
   Evidence,
@@ -87,6 +88,8 @@ export interface SubscriptionApi {
   onJobs(cb: (jobs: JobState[]) => void): Unsubscribe;
   onIncidents(cb: (incidents: Incident[]) => void): Unsubscribe;
   onActions(cb: (actions: ActionStatus[]) => void): Unsubscribe;
+  /** Additive: actions with their command, safety evidence and status history, sorted by requested time. */
+  onActionDetails(cb: (details: ActionDetail[]) => void): Unsubscribe;
   onAgentEvents(cb: (events: AgentEventInput[]) => void): Unsubscribe;
   onEvaluation(cb: (results: EvaluationResult[]) => void): Unsubscribe;
 }

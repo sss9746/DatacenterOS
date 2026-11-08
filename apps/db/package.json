@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "gate2": "tsx scripts/gate2.ts",
     "smoke:ledger": "node scripts/ledger-smoke.mjs",
-    "smoke:workflow": "node scripts/workflow-smoke.mjs"
+    "smoke:workflow": "node scripts/workflow-smoke.mjs",
+    "bootstrap": "tsx scripts/bootstrap.ts"
   },
   "dependencies": {
     "@dcos/contracts": "workspace:*",
