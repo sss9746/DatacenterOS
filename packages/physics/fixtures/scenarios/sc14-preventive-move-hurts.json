@@ -1,0 +1,23 @@
+{
+  "scenario_id": "sc14-preventive-move-hurts",
+  "seed": 114,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §9 preventive move that hurts performance: pump-a drops to 10% capacity at 30 s but recovers after 90 s. r2-r4 warm by ≈7 °C (peak ≈77 °C, never throttle) and cool back. Any checkpoint+move only costs job-a/job-b time.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc14-preventive-move-hurts.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 30000,
+      "duration_sim_ms": 90000,
+      "severity": 0.9,
+      "parameters": {
+        "capacity_factor": 0.1
+      },
+      "seed_offset": 0
+    }
+  ]
+}

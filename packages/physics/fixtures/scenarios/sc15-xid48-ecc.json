@@ -1,0 +1,21 @@
+{
+  "scenario_id": "sc15-xid48-ecc",
+  "seed": 115,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 300,
+  "description": "XID 48 (double-bit ECC, ARCH §2) on job-b GPU gpu-r4-n1-6 at 90 s: the GPU stays reachable but degraded and job-b fails back to its durable checkpoint. Right answer: cordon (cordon is not repair) and restart elsewhere.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc15-xid48-ecc.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r4-n1-6",
+      "kind": "gpu_xid_48",
+      "start_sim_time_ms": 90000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 0
+    }
+  ]
+}

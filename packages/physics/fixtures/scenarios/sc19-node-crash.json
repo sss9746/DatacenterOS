@@ -1,0 +1,21 @@
+{
+  "scenario_id": "sc19-node-crash",
+  "seed": 119,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "Node crash: node-r4-n1 (job-b) crashes at 60 s and reboots after 300 s. job-b fails back to durable at 60 s; the node GPUs return to ready at 360 s, but the job stays failed until restarted.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc19-node-crash.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "node-r4-n1",
+      "kind": "node_crash",
+      "start_sim_time_ms": 60000,
+      "duration_sim_ms": 300000,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 0
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "scenario_id": "sc13-near-complete-job-stay",
+  "seed": 113,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 420,
+  "description": "ARCH §9 near-complete job where staying wins: job-b starts at 58 000 / 60 000 work units (checkpoint 50 sim-s old, initial_overrides) and pump-a degrades 60% at 10 s. job-b finishes at ≈250 s before r4 throttles; a checkpoint+move (30 s + 120 s restart) would only delay it.",
+  "initial_overrides": {
+    "jobs": {
+      "job-b": {
+        "progress_work_units": 58000,
+        "durable_work_units": 57600
+      }
+    }
+  },
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc13-near-complete-job-stay.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 0
+    }
+  ]
+}

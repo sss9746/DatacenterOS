@@ -1,0 +1,65 @@
+{
+  "scenario_id": "sc02-harmless-temp-spike",
+  "seed": 102,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 300,
+  "description": "ARCH §9 harmless temperature spike: four job-a GPUs on r3 run +10 °C hot (≈80 °C, below the 85 °C throttle) from 60 s for 45 s, then return to ≈70 °C. Right answer: keep running.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc02-harmless-temp-spike.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-0",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 60000,
+      "duration_sim_ms": 45000,
+      "severity": 0.5,
+      "parameters": {
+        "extra_temp_c": 10
+      },
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc02-harmless-temp-spike.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-1",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 60000,
+      "duration_sim_ms": 45000,
+      "severity": 0.5,
+      "parameters": {
+        "extra_temp_c": 10
+      },
+      "seed_offset": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc02-harmless-temp-spike.03",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-2",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 60000,
+      "duration_sim_ms": 45000,
+      "severity": 0.5,
+      "parameters": {
+        "extra_temp_c": 10
+      },
+      "seed_offset": 2
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc02-harmless-temp-spike.04",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-3",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 60000,
+      "duration_sim_ms": 45000,
+      "severity": 0.5,
+      "parameters": {
+        "extra_temp_c": 10
+      },
+      "seed_offset": 3
+    }
+  ]
+}
