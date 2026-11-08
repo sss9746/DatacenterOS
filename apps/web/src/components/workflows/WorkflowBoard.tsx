@@ -83,7 +83,7 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now }: 
     </ol>
     <p className={`wf-status wf-status-${view.status.kind}`}><strong>{view.status.label}.</strong> {view.status.detail}</p>
     {view.replan && wf.stage !== 'replan' && <p className="wf-note">Replanned{view.replan.previous_plan_id ? <> from <code>{view.replan.previous_plan_id}</code></> : ''}: {view.replan.reason ?? 'reason not recorded'}.</p>}
-    {view.resumed && <p className="wf-note">Resumed at {simAt(view.resumed.sim_time_ms)}, {view.resumed.source === 'reconcile_tool_calls' ? 'from ledger reconciliation tool calls' : 'from the resume event summary'}: <span className="wf-wrap">{view.resumed.detail}</span></p>}
+    {view.resumed && <p className="wf-note">Resumed at {simAt(view.resumed.sim_time_ms)}, {view.resumed.source === 'workflow_state' ? 'recorded in the persisted workflow state' : view.resumed.source === 'reconcile_tool_calls' ? 'from ledger reconciliation tool calls' : 'from the resume event summary'}: <span className="wf-wrap">{view.resumed.detail}</span></p>}
     <dl className="wf-labels">
       <div><dt>Plan</dt><dd>{view.planId ? <code>{view.planId}</code> : 'not recorded'}</dd></div>
       <div><dt>Plan attempt</dt><dd>{view.attempt ?? 'not recorded'}</dd></div>
@@ -144,22 +144,32 @@ function Handoff({ view, example }: { view: WorkflowView; example: boolean }) {
     <summary>{view.terminal ? 'Handoff' : 'Actions so far'} · {view.actions.length} {view.actions.length === 1 ? 'action' : 'actions'}</summary>
     <div className="wf-section-body">
       {!view.terminal && <p className="wf-muted">Handoff not written yet: the agent persists it when it verifies or escalates.</p>}
-      <div className="wf-group"><h4>Evidence and hypothesis</h4>{view.incidents.some((i) => i.hypothesis) ? <ul>{view.incidents.map((i) => <li key={i.incident_id}><span className="wf-wrap">{i.hypothesis ?? 'No hypothesis recorded.'}</span><code className="wf-key">{i.incident_id}</code></li>)}</ul> : <p className="wf-muted">No hypothesis recorded on the linked incidents.</p>}</div>
+      <div className="wf-group"><h4>Evidence and hypothesis</h4>{v && v.hypotheses.length ? <ul>{v.hypotheses.map((h, i) => <li key={i}><span className="wf-wrap">{h}</span><span className="wf-muted">persisted handoff</span></li>)}</ul> : view.incidents.some((i) => i.hypothesis) ? <ul>{view.incidents.map((i) => <li key={i.incident_id}><span className="wf-wrap">{i.hypothesis ?? 'No hypothesis recorded.'}</span><code className="wf-key">{i.incident_id}</code></li>)}</ul> : <p className="wf-muted">No hypothesis recorded on the linked incidents.</p>}</div>
       <h4 className="wf-subhead">Workload mitigation</h4>
-      <p className="wf-labels-inline">Affected jobs: {view.affectedJobs.length ? view.affectedJobs.join(', ') : 'none in this workflow’s commands'}</p>
+      <p className="wf-labels-inline">Affected jobs: {v && v.affectedJobs.length ? v.affectedJobs.map((j) => `${j.job_id}${j.status ? ` (${j.status}${j.racks.length ? `, ${j.racks.join(' + ')}` : ''})` : ''}`).join(', ') : view.affectedJobs.length ? view.affectedJobs.join(', ') : 'none in this workflow’s commands'}</p>
       <ActionList title="Completed (ledger)" lines={g.completed}/>
       <ActionList title="In progress" lines={g.inProgress}/>
       <ActionList title="Blocked" lines={g.blocked}/>
       <ActionList title="Failed or cancelled" lines={g.failed}/>
       {view.actions.length === 0 && <p className="wf-muted">No actions requested by this workflow.</p>}
       {view.outcomes.length > 0 && <div className="wf-group"><h4>Checkpoint and placement</h4><ul>{view.outcomes.map((o) => <li key={o.command_key}><span><strong>{o.kind}</strong> {o.subject} · {o.ledger}</span><span className="wf-muted">Currently observed: {o.observed}</span></li>)}</ul></div>}
+      {v?.actions && <div className="wf-group"><h4>Persisted handoff: action outcomes</h4><ul>
+        {([['Verified', v.actions.verified], ['Completed, not verified', v.actions.unverified], ['Not run', v.actions.not_run]] as const).filter(([, keys]) => keys.length).map(([label, keys]) => <li key={label}><span><strong>{label}</strong></span><span className="wf-muted wf-wrap">{keys.join(', ')}</span></li>)}
+        {v.actions.blocked.map((b) => <li key={`b-${b.command_key}`}><span><strong>BLOCKED</strong> <code className="wf-key">{b.command_key}</code></span><span className="wf-muted wf-wrap">{b.violations.join(', ') || 'no violation codes recorded'}</span></li>)}
+        {v.actions.failed.map((f) => <li key={`f-${f.command_key}`}><span><strong>Failed</strong> <code className="wf-key">{f.command_key}</code></span><span className="wf-muted">{f.reason_code}</span></li>)}
+      </ul></div>}
+      {v && (v.checkpointOutcome.length > 0 || v.placementOutcome.length > 0) && <div className="wf-group"><h4>Persisted checkpoint and placement outcome</h4><ul>
+        {v.checkpointOutcome.map((c) => <li key={`c-${c.checkpoint_id}`}><span><strong>Checkpoint</strong> {c.job_id} · {c.status}</span><span className="wf-muted">{c.accessible === null ? 'accessibility not recorded' : c.accessible ? 'accessible' : 'not accessible'}{c.progress_work_units !== null ? ` · ${c.progress_work_units} work units` : ''}</span></li>)}
+        {v.placementOutcome.map((pl) => <li key={`p-${pl.job_id}`}><span><strong>Placement</strong> {pl.job_id}</span><span className="wf-muted wf-wrap">{pl.racks.length ? pl.racks.join(' + ') : 'no racks recorded'}{pl.gpu_ids.length ? ` · ${pl.gpu_ids.length} GPUs` : ''}</span></li>)}
+      </ul></div>}
       <div className="wf-group"><h4>Verification</h4>{v ? <>
-        <p>{v.verified === true ? 'Verified' : v.verified === false ? 'Not verified: operator review' : 'Result not recorded'} · as of {v.asOf ? (v.asOf.from !== null ? `${duration(v.asOf.from)}–${duration(v.asOf.to)} sim` : `${duration(v.asOf.to)} sim`) : 'time not recorded'}</p>
+        <p>{v.outcome ? <><strong>{v.outcome.replaceAll('_', ' ')}</strong> · </> : null}{v.verified === true ? 'Verified' : v.verified === false ? 'Not verified: operator review' : 'Result not recorded'} · evidence {v.asOf ? (v.asOf.from !== null ? `${duration(v.asOf.from)}–${duration(v.asOf.to)} sim` : `as of ${duration(v.asOf.to)} sim`) : 'time not recorded'}{v.source === 'code' ? ' · deterministic verifier' : ''}</p>
         {v.handoff && <blockquote className="wf-handoff wf-wrap">{v.handoff}{example ? ' (scripted)' : ''}</blockquote>}
+        {v.remainingRisk && <p className="wf-wrap"><strong>Remaining risk:</strong> {v.remainingRisk}</p>}
       </> : <p className="wf-muted">No verification result persisted.</p>}</div>
       <h4 className="wf-subhead">Infrastructure still needing service</h4>
       <p className="wf-muted">Currently observed in the latest snapshot. Agent actions mitigate workloads; they never repair a pump or a GPU.</p>
-      {v && v.unresolved.length > 0 && <div className="wf-group"><h4>Persisted by the agent</h4><ul>{v.unresolved.map((u, i) => <li key={i}><span className="wf-wrap">{u}</span></li>)}</ul></div>}
+      {v && v.unresolved.length > 0 && <div className="wf-group"><h4>Persisted by the agent (unresolved infrastructure)</h4><ul>{v.unresolved.map((u, i) => <li key={i}><span className="wf-wrap">{u}</span></li>)}</ul></div>}
       <InfraList title="Cooling (cluster-wide)" lines={view.infra.cooling}/>
       <InfraList title="GPUs this workflow touched" lines={view.infra.relatedGpus}/>
       <InfraList title="Other unavailable GPUs" lines={view.infra.otherGpus}/>

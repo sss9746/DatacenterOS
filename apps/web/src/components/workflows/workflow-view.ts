@@ -61,33 +61,72 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
 
+export interface PersistedActions {
+  completed: string[];
+  verified: string[];
+  unverified: string[];
+  blocked: Array<{ command_key: string; violations: string[] }>;
+  failed: Array<{ command_key: string; reason_code: string }>;
+  not_run: string[];
+}
 export interface VerificationRecord {
   verified: boolean | null;
   escalate: boolean | null;
   handoff: string | null;
-  /** Sim time(s) of the snapshots used as evidence: one time today, an interval if the agent persists two. */
+  /** Evidence sim time(s): R3 `verification_interval_sim_ms`, else `as_of_sim_time_ms` (number or pair). */
   asOf: { from: number | null; to: number } | null;
-  /** Only when the agent persists an explicit field (R3); never mined from the handoff text. */
+  /** Only when the agent persists an explicit field (R3 `next_human_action`); never mined from the handoff text. */
   nextStep: string | null;
-  /** Unresolved infrastructure as persisted by the agent (R3), if any. */
+  /** R3 `unresolved_infrastructure`: pump/GPU conditions that still need a human. */
   unresolved: string[];
+  /** R3 fields (apps/agent/src/verify.ts `OperatorHandoff`); null when the agent did not persist them. */
+  outcome: string | null;
+  remainingRisk: string | null;
+  source: string | null;
+  hypotheses: string[];
+  actions: PersistedActions | null;
+  checkpointOutcome: Array<{ job_id: string; checkpoint_id: string; status: string; accessible: boolean | null; progress_work_units: number | null }>;
+  placementOutcome: Array<{ job_id: string; gpu_ids: string[]; racks: string[] }>;
+  affectedJobs: Array<{ job_id: string; status: string | null; progress_work_units: number | null; durable_work_units: number | null; racks: string[] }>;
 }
 
-const NEXT_STEP_KEYS = ['next_human_step', 'next_operator_step', 'next_step', 'next_action'] as const;
-const UNRESOLVED_KEYS = ['unresolved', 'unresolved_infrastructure', 'remaining_risk'] as const;
+/** R3 names first (`REQUIRED_HANDOFF_FIELDS`); the rest are accepted only for older agent builds. */
+const NEXT_STEP_KEYS = ['next_human_action', 'next_human_step', 'next_operator_step', 'next_step', 'next_action'] as const;
+const UNRESOLVED_KEYS = ['unresolved_infrastructure', 'unresolved'] as const;
+const strList = (x: unknown): string[] => (Array.isArray(x) ? x.filter((y): y is string => typeof y === 'string') : []);
+const records = (x: unknown): Record<string, unknown>[] => (Array.isArray(x) ? x.filter(isRecord) : []);
 
-/** `workflow.state.verification`, written by the agent's verifier (`{ verified, escalate, handoff, as_of_sim_time_ms }`). */
+function readPersistedActions(x: unknown): PersistedActions | null {
+  if (!isRecord(x)) return null;
+  return {
+    completed: strList(x.completed), verified: strList(x.verified), unverified: strList(x.unverified), not_run: strList(x.not_run),
+    blocked: records(x.blocked).map((b) => ({ command_key: str(b.command_key) ?? 'unknown key', violations: strList(b.violations) })),
+    failed: records(x.failed).map((f) => ({ command_key: str(f.command_key) ?? 'unknown key', reason_code: str(f.reason_code) ?? 'no reason code' })),
+  };
+}
+
+/** `workflow.state.verification`, the agent's persisted operator handoff (R3 `OperatorHandoff`; older builds wrote only the first four fields). */
 export function readVerification(state: Record<string, unknown>): VerificationRecord | null {
   const v = state.verification;
   if (!isRecord(v)) return null;
   const at = v.as_of_sim_time_ms;
+  const interval = v.verification_interval_sim_ms;
   let asOf: VerificationRecord['asOf'] = null;
-  if (num(at) !== null) asOf = { from: null, to: at as number };
+  if (Array.isArray(interval) && interval.length === 2 && num(interval[0]) !== null && num(interval[1]) !== null) asOf = { from: interval[0] as number, to: interval[1] as number };
+  else if (num(at) !== null) asOf = { from: null, to: at as number };
   else if (Array.isArray(at) && at.length === 2 && num(at[0]) !== null && num(at[1]) !== null) asOf = { from: at[0] as number, to: at[1] as number };
   const nextStep = NEXT_STEP_KEYS.map((k) => str(v[k])).find((x) => x !== null) ?? null;
   const unresolvedRaw = UNRESOLVED_KEYS.map((k) => v[k]).find((x) => Array.isArray(x) || typeof x === 'string');
   const unresolved = Array.isArray(unresolvedRaw) ? unresolvedRaw.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))) : typeof unresolvedRaw === 'string' ? [unresolvedRaw] : [];
-  return { verified: bool(v.verified), escalate: bool(v.escalate), handoff: str(v.handoff), asOf, nextStep, unresolved };
+  const evidence = isRecord(v.evidence) ? v.evidence : {};
+  return {
+    verified: bool(v.verified), escalate: bool(v.escalate), handoff: str(v.handoff), asOf, nextStep, unresolved,
+    outcome: str(v.outcome), remainingRisk: str(v.remaining_risk), source: str(v.source), hypotheses: strList(evidence.hypotheses),
+    actions: readPersistedActions(v.actions),
+    checkpointOutcome: records(v.checkpoint_outcome).map((c) => ({ job_id: str(c.job_id) ?? 'unknown job', checkpoint_id: str(c.checkpoint_id) ?? 'unknown checkpoint', status: str(c.status) ?? 'unknown', accessible: bool(c.accessible), progress_work_units: num(c.progress_work_units) })),
+    placementOutcome: records(v.placement_outcome).map((p) => ({ job_id: str(p.job_id) ?? 'unknown job', gpu_ids: strList(p.gpu_ids), racks: strList(p.racks) })),
+    affectedJobs: records(v.affected_jobs).map((j) => ({ job_id: str(j.job_id) ?? 'unknown job', status: str(j.status), progress_work_units: num(j.progress_work_units), durable_work_units: num(j.durable_work_units), racks: strList(j.racks) })),
+  };
 }
 
 /** Planner attempt: `state.attempt` (persisted by plan/replan). `WorkflowRecord.attempt` is the lease-claim count, not this. */
@@ -269,7 +308,7 @@ export function unresolvedInfra(snapshot: ObservedSnapshot | null, commands: rea
 const RECONCILE_RE = /→\s*(skip|wait|claim_start|resubmit_same_key|blocked|reclaim_after_timeout|needs_operator)\s*$/;
 const RESUME_SUMMARY_RE = /^(?:Example:\s*)?(?:resumed after agent restart|continuing \S+ from stage \S+ after agent restart)/i;
 
-export interface ResumeEvidence { source: 'reconcile_tool_calls' | 'event_summary'; event_id: string; sim_time_ms: number; detail: string }
+export interface ResumeEvidence { source: 'workflow_state' | 'reconcile_tool_calls' | 'event_summary'; event_id: string; sim_time_ms: number; detail: string }
 
 /**
  * "Resumed" only with evidence. The agent persists no resume field, so the strongest signal is the resume path's
@@ -277,7 +316,13 @@ export interface ResumeEvidence { source: 'reconcile_tool_calls' | 'event_summar
  * resume/continuation event summary. Lease re-claims alone (`WorkflowRecord.attempt` > 1) are NOT treated as a resume:
  * the agent also re-claims after an error retry.
  */
-export function resumeEvidence(events: readonly AgentEventInput[]): ResumeEvidence | null {
+export function resumeEvidence(events: readonly AgentEventInput[], state: Record<string, unknown> = {}): ResumeEvidence | null {
+  // Primary: the persisted marker `state.resumed = { by_worker, at_sim_time_ms, action }` written by the resume path.
+  const marker = state.resumed;
+  if (isRecord(marker) && num(marker.at_sim_time_ms) !== null) {
+    const parts = [str(marker.by_worker) ? `by ${marker.by_worker as string}` : null, str(marker.action)].filter((x): x is string => x !== null);
+    return { source: 'workflow_state', event_id: 'workflow.state.resumed', sim_time_ms: marker.at_sim_time_ms as number, detail: parts.join(' · ') || 'resume recorded' };
+  }
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     const calls = e.tool_calls.filter((t) => t.tool === 'get_action_status' && RECONCILE_RE.test(t.result_summary));
@@ -529,7 +574,7 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
         current,
         status: statusOf(wf, verification, waiting, escalationReason, replan?.reason ?? null),
         waiting,
-        resumed: resumeEvidence(events),
+        resumed: resumeEvidence(events, wf.state),
         verification,
         escalationReason,
         replan,

@@ -144,12 +144,25 @@ export async function loadRecoveryExample(client: MockDbClient) {
   await gpuWf.lapse('example-agent-1');
   await gpuWf.claim('example-agent-2');
   await publish(xidWf, xid.incident_id, 'execute', 'code', 'resumed after agent restart: cordon_gpu gpu-r7-n1-0 already succeeded (skipped), nothing left to run.', [call('get_action_status', cordon.command_key, 'succeeded → skip')]);
-  await gpuWf.stage('verify', {});
+  const resumedAt = (await client.getObservedSnapshot()).clock.sim_time_ms;
+  await gpuWf.stage('verify', { resumed: { by_worker: 'example-agent-2', at_sim_time_ms: resumedAt, action: 'resumed_verify' } });
   const note = 'gpu-r7-n1-0 still cordoned (not repaired), no jobs on it';
   await client.verifyAction(cordon.command_key, { verified: true, note: `Example: ${note}`, gpu_id: 'gpu-r7-n1-0', availability: 'cordoned', repaired: false });
   await publish(xidWf, xid.incident_id, 'verify', 'code', 'verified: 1/1 checks passed.', [call('verify_action', cordon.command_key, 'verified')]);
   const handoff = `Example: Recovery verified. ${note} [${cordon.command_key}]. Cordoned GPUs still need hardware service.`;
-  await gpuWf.stage('done', { verification: { verified: true, escalate: false, handoff, as_of_sim_time_ms: t } });
+  // Same shape as the R3 verifier's OperatorHandoff (apps/agent/src/verify.ts), with scripted example values.
+  await gpuWf.stage('done', { verification: {
+    version: 1, source: 'code', verified: true, escalate: false, outcome: 'recovered', handoff, as_of_sim_time_ms: t,
+    verification_interval_sim_ms: [Math.max(0, t - 10_000), t],
+    evidence: { incident_ids: [xid.incident_id], hypotheses: [`${xid.incident_id}: ${xid.title} — ${xid.hypothesis}`], decision_epoch: (await client.getObservedSnapshot()).clock.decision_epoch, max_gpu_evidence_age_sim_ms: 0 },
+    affected_jobs: [],
+    actions: { completed: [cordon.command_key], verified: [cordon.command_key], unverified: [], blocked: [], failed: [], not_run: [] },
+    checkpoint_outcome: [], placement_outcome: [],
+    unresolved_infrastructure: ['Example: gpu-r7-n1-0 cordoned after XID 79; needs hardware service (not repaired)'],
+    remaining_risk: 'Example: none for workloads; one fewer spare GPU until the cordoned GPU is serviced.',
+    next_human_action: 'Example: service gpu-r7-n1-0, then uncordon it through the operator process.',
+    checks: [{ command_key: cordon.command_key, operation: 'cordon_gpu', ok: true, note: `Example: ${note}` }],
+  } });
   await publish(xidWf, xid.incident_id, 'verify', 'code', `handoff: ${handoff.replace(/^Example: /, '')}`);
   await client.upsertIncident({ ...xid, state: 'monitoring', version: 2, updated_sim_time_ms: t }, []);
 }

@@ -194,9 +194,41 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(cool.attempt).toBe(2);
     expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:cap')?.chosen).toBe(true);
     expect(xid.status.kind).toBe('verified');
-    expect(xid.resumed?.source).toBe('reconcile_tool_calls');
+    expect(xid.resumed?.source).toBe('workflow_state');
     expect(xid.workflow.lease_owner).toBe('example-agent-2');
     expect(xid.infra.relatedGpus.map((g) => g.resource_id)).toEqual(['gpu-r7-n1-0']);
     expect(events.every((e) => e.summary.startsWith('Example:'))).toBe(true);
   });
 });
+
+describe('R3 handoff and persisted resume marker', () => {
+  it('reads the R3 OperatorHandoff fields by their exact names', () => {
+    const v = readVerification({ verification: {
+      version: 1, source: 'code', verified: false, escalate: true, outcome: 'escalated', handoff: 'h', as_of_sim_time_ms: 9,
+      verification_interval_sim_ms: [3, 9], evidence: { hypotheses: ['inc-1: pump A — shared cooling'] },
+      affected_jobs: [{ job_id: 'job-a', status: 'running', progress_work_units: 5, durable_work_units: 4, racks: ['r7'] }],
+      actions: { completed: ['k1'], verified: [], unverified: ['k1'], blocked: [{ command_key: 'k2', violations: ['DEST_GPU_BUSY'] }], failed: [], not_run: ['k3'] },
+      checkpoint_outcome: [{ job_id: 'job-a', checkpoint_id: 'c1', status: 'complete', accessible: true, progress_work_units: 4 }],
+      placement_outcome: [{ job_id: 'job-a', gpu_ids: ['g1'], racks: ['r7'] }],
+      unresolved_infrastructure: ['pump-a degraded'], remaining_risk: 'job-b unprotected', next_human_action: 'Service pump A',
+    } })!;
+    expect(v).toMatchObject({ outcome: 'escalated', asOf: { from: 3, to: 9 }, nextStep: 'Service pump A', unresolved: ['pump-a degraded'], remainingRisk: 'job-b unprotected', source: 'code' });
+    expect(v.actions?.blocked).toEqual([{ command_key: 'k2', violations: ['DEST_GPU_BUSY'] }]);
+    expect(v.actions?.not_run).toEqual(['k3']);
+    expect(v.checkpointOutcome[0]).toMatchObject({ checkpoint_id: 'c1', accessible: true });
+    expect(v.placementOutcome[0]?.racks).toEqual(['r7']);
+    expect(v.affectedJobs[0]?.job_id).toBe('job-a');
+    expect(v.hypotheses).toHaveLength(1);
+  });
+  it('treats missing R3 fields as not recorded, never invented', () => {
+    const v = readVerification({ verification: { verified: true, handoff: 'old shape', as_of_sim_time_ms: 5 } })!;
+    expect(v).toMatchObject({ outcome: null, remainingRisk: null, actions: null, nextStep: null, unresolved: [] });
+  });
+  it('prefers the persisted state.resumed marker over event heuristics', () => {
+    const r = resumeEvidence([], { resumed: { by_worker: 'agent-2', at_sim_time_ms: 42_000, action: 'resumed_execute' } });
+    expect(r).toMatchObject({ source: 'workflow_state', sim_time_ms: 42_000 });
+    expect(r?.detail).toContain('agent-2');
+    expect(resumeEvidence([], { resumed: { by_worker: 'agent-2' } })).toBeNull();
+  });
+});
+
