@@ -1,0 +1,436 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-08T03:35:22.833219Z",
+  "title": "Design System: DataCenterOS dashboard",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Background",
+        "tonalRamp": [
+          "oklch(15.0% 0.0091 256.8)",
+          "oklch(26.0% 0.0124 256.8)",
+          "oklch(38.0% 0.0150 256.8)",
+          "oklch(49.0% 0.0161 256.8)",
+          "oklch(61.0% 0.0158 256.8)",
+          "oklch(72.0% 0.0141 256.8)",
+          "oklch(84.0% 0.0110 256.8)",
+          "oklch(95.0% 0.0074 256.8)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "shell": {
+        "role": "neutral",
+        "displayName": "Shell",
+        "tonalRamp": [
+          "oklch(15.0% 0.0121 251.8)",
+          "oklch(26.0% 0.0165 251.8)",
+          "oklch(38.0% 0.0200 251.8)",
+          "oklch(49.0% 0.0215 251.8)",
+          "oklch(61.0% 0.0210 251.8)",
+          "oklch(72.0% 0.0187 251.8)",
+          "oklch(84.0% 0.0146 251.8)",
+          "oklch(95.0% 0.0099 251.8)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "tonalRamp": [
+          "oklch(15.0% 0.0114 254.9)",
+          "oklch(26.0% 0.0156 254.9)",
+          "oklch(38.0% 0.0188 254.9)",
+          "oklch(49.0% 0.0202 254.9)",
+          "oklch(61.0% 0.0198 254.9)",
+          "oklch(72.0% 0.0177 254.9)",
+          "oklch(84.0% 0.0138 254.9)",
+          "oklch(95.0% 0.0093 254.9)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Surface raised",
+        "tonalRamp": [
+          "oklch(15.0% 0.0139 251.1)",
+          "oklch(26.0% 0.0189 251.1)",
+          "oklch(38.0% 0.0229 251.1)",
+          "oklch(49.0% 0.0246 251.1)",
+          "oklch(61.0% 0.0241 251.1)",
+          "oklch(72.0% 0.0215 251.1)",
+          "oklch(84.0% 0.0168 251.1)",
+          "oklch(95.0% 0.0113 251.1)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Foreground",
+        "tonalRamp": [
+          "oklch(15.0% 0.0048 247.9)",
+          "oklch(26.0% 0.0066 247.9)",
+          "oklch(38.0% 0.0080 247.9)",
+          "oklch(49.0% 0.0086 247.9)",
+          "oklch(61.0% 0.0084 247.9)",
+          "oklch(72.0% 0.0075 247.9)",
+          "oklch(84.0% 0.0058 247.9)",
+          "oklch(95.0% 0.0039 247.9)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(15.0% 0.0149 250.0)",
+          "oklch(26.0% 0.0204 250.0)",
+          "oklch(38.0% 0.0246 250.0)",
+          "oklch(49.0% 0.0265 250.0)",
+          "oklch(61.0% 0.0259 250.0)",
+          "oklch(72.0% 0.0231 250.0)",
+          "oklch(84.0% 0.0180 250.0)",
+          "oklch(95.0% 0.0121 250.0)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "tonalRamp": [
+          "oklch(15.0% 0.0156 250.7)",
+          "oklch(26.0% 0.0213 250.7)",
+          "oklch(38.0% 0.0258 250.7)",
+          "oklch(49.0% 0.0277 250.7)",
+          "oklch(61.0% 0.0271 250.7)",
+          "oklch(72.0% 0.0242 250.7)",
+          "oklch(84.0% 0.0188 250.7)",
+          "oklch(95.0% 0.0127 250.7)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "agent": {
+        "role": "primary",
+        "displayName": "Agent",
+        "tonalRamp": [
+          "oklch(15.0% 0.0515 162.0)",
+          "oklch(26.0% 0.0703 162.0)",
+          "oklch(38.0% 0.0850 162.0)",
+          "oklch(49.0% 0.0913 162.0)",
+          "oklch(61.0% 0.0894 162.0)",
+          "oklch(72.0% 0.0798 162.0)",
+          "oklch(84.0% 0.0622 162.0)",
+          "oklch(95.0% 0.0419 162.0)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "Warning",
+        "tonalRamp": [
+          "oklch(15.0% 0.0507 75.9)",
+          "oklch(26.0% 0.0693 75.9)",
+          "oklch(38.0% 0.0838 75.9)",
+          "oklch(49.0% 0.0900 75.9)",
+          "oklch(61.0% 0.0881 75.9)",
+          "oklch(72.0% 0.0786 75.9)",
+          "oklch(84.0% 0.0613 75.9)",
+          "oklch(95.0% 0.0413 75.9)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "danger": {
+        "role": "secondary",
+        "displayName": "Danger",
+        "tonalRamp": [
+          "oklch(15.0% 0.0526 23.5)",
+          "oklch(26.0% 0.0718 23.5)",
+          "oklch(38.0% 0.0868 23.5)",
+          "oklch(49.0% 0.0933 23.5)",
+          "oklch(61.0% 0.0913 23.5)",
+          "oklch(72.0% 0.0815 23.5)",
+          "oklch(84.0% 0.0635 23.5)",
+          "oklch(95.0% 0.0428 23.5)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "job-a": {
+        "role": "secondary",
+        "displayName": "Job a",
+        "tonalRamp": [
+          "oklch(15.0% 0.0324 243.7)",
+          "oklch(26.0% 0.0443 243.7)",
+          "oklch(38.0% 0.0536 243.7)",
+          "oklch(49.0% 0.0576 243.7)",
+          "oklch(61.0% 0.0564 243.7)",
+          "oklch(72.0% 0.0503 243.7)",
+          "oklch(84.0% 0.0392 243.7)",
+          "oklch(95.0% 0.0264 243.7)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "job-b": {
+        "role": "secondary",
+        "displayName": "Job b",
+        "tonalRamp": [
+          "oklch(15.0% 0.0318 302.6)",
+          "oklch(26.0% 0.0434 302.6)",
+          "oklch(38.0% 0.0525 302.6)",
+          "oklch(49.0% 0.0564 302.6)",
+          "oklch(61.0% 0.0552 302.6)",
+          "oklch(72.0% 0.0493 302.6)",
+          "oklch(84.0% 0.0384 302.6)",
+          "oklch(95.0% 0.0259 302.6)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "job-c": {
+        "role": "secondary",
+        "displayName": "Job c",
+        "tonalRamp": [
+          "oklch(15.0% 0.0404 83.5)",
+          "oklch(26.0% 0.0551 83.5)",
+          "oklch(38.0% 0.0667 83.5)",
+          "oklch(49.0% 0.0716 83.5)",
+          "oklch(61.0% 0.0701 83.5)",
+          "oklch(72.0% 0.0626 83.5)",
+          "oklch(84.0% 0.0488 83.5)",
+          "oklch(95.0% 0.0329 83.5)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "focus": {
+        "role": "neutral",
+        "displayName": "Focus",
+        "tonalRamp": [
+          "oklch(15.0% 0.0278 240.9)",
+          "oklch(26.0% 0.0379 240.9)",
+          "oklch(38.0% 0.0459 240.9)",
+          "oklch(49.0% 0.0493 240.9)",
+          "oklch(61.0% 0.0483 240.9)",
+          "oklch(72.0% 0.0431 240.9)",
+          "oklch(84.0% 0.0336 240.9)",
+          "oklch(95.0% 0.0226 240.9)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "Selection",
+        "tonalRamp": [
+          "oklch(15.0% 0.0257 242.2)",
+          "oklch(26.0% 0.0351 242.2)",
+          "oklch(38.0% 0.0425 242.2)",
+          "oklch(49.0% 0.0456 242.2)",
+          "oklch(61.0% 0.0447 242.2)",
+          "oklch(72.0% 0.0398 242.2)",
+          "oklch(84.0% 0.0311 242.2)",
+          "oklch(95.0% 0.0209 242.2)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "primary-text": {
+        "role": "primary",
+        "displayName": "Primary text",
+        "tonalRamp": [
+          "oklch(15.0% 0.0187 162.2)",
+          "oklch(26.0% 0.0255 162.2)",
+          "oklch(38.0% 0.0309 162.2)",
+          "oklch(49.0% 0.0332 162.2)",
+          "oklch(61.0% 0.0325 162.2)",
+          "oklch(72.0% 0.0290 162.2)",
+          "oklch(84.0% 0.0226 162.2)",
+          "oklch(95.0% 0.0152 162.2)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Primary hover",
+        "tonalRamp": [
+          "oklch(15.0% 0.0423 162.3)",
+          "oklch(26.0% 0.0577 162.3)",
+          "oklch(38.0% 0.0699 162.3)",
+          "oklch(49.0% 0.0750 162.3)",
+          "oklch(61.0% 0.0735 162.3)",
+          "oklch(72.0% 0.0655 162.3)",
+          "oklch(84.0% 0.0511 162.3)",
+          "oklch(95.0% 0.0344 162.3)"
+        ],
+        "tonalRampSource": "Generated preview only; not an implemented token scale."
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Page headline",
+        "purpose": "Cluster operations heading; 25px at mobile widths."
+      },
+      "title": {
+        "displayName": "Panel title",
+        "purpose": "Compact operational section headings."
+      },
+      "body": {
+        "displayName": "Root body",
+        "purpose": "Inherited system sans base; compact content uses smaller explicit sizes."
+      },
+      "label": {
+        "displayName": "Control label",
+        "purpose": "Buttons and desktop navigation."
+      },
+      "clock": {
+        "displayName": "Clock",
+        "purpose": "Simulation and session wall time, with tabular numerals."
+      },
+      "metric": {
+        "displayName": "Progress metric",
+        "purpose": "Training progress percentage with tabular numerals."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "button-state",
+        "value": "background-color 160ms ease-out, border-color 160ms ease-out",
+        "purpose": "Button hover transitions; src/styles.css:89."
+      },
+      {
+        "name": "gpu-state",
+        "value": "background-color 180ms ease-out",
+        "purpose": "GPU cell state transitions; src/styles.css:127."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition: none !important; animation: none !important; scroll-behavior: auto",
+        "purpose": "Applied when prefers-reduced-motion is reduce; src/styles.css:375\u2013378."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide-min",
+        "value": "1700px"
+      },
+      {
+        "name": "compact-max",
+        "value": "1200px"
+      },
+      {
+        "name": "stack-max",
+        "value": "930px"
+      },
+      {
+        "name": "mobile-max",
+        "value": "680px"
+      },
+      {
+        "name": "narrow-max",
+        "value": "380px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Implemented primary variant; src/components/ui/button.tsx and src/styles.css:89\u201399.",
+      "html": "<button type=\"button\" class=\"ds-button-primary\">Run action</button>",
+      "css": ".ds-button-primary{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border:1px solid transparent;border-radius:6px;padding:7px 13px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:12px;font-weight:550;line-height:1.5;white-space:nowrap;cursor:pointer;transition:background-color 160ms ease-out,border-color 160ms ease-out;background:var(--agent,#8bd6b1);color:#14291f;}.ds-button-primary:hover{background:#abe8c9;}.ds-button-primary:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}.ds-button-primary:disabled{cursor:not-allowed;opacity:.48}@media(prefers-reduced-motion:reduce){.ds-button-primary{transition:none}}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Implemented secondary variant; src/components/ui/button.tsx and src/styles.css:89\u201399.",
+      "html": "<button type=\"button\" class=\"ds-button-secondary\">Pause</button>",
+      "css": ".ds-button-secondary{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border:1px solid transparent;border-radius:6px;padding:7px 13px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:12px;font-weight:550;line-height:1.5;white-space:nowrap;cursor:pointer;transition:background-color 160ms ease-out,border-color 160ms ease-out;background:var(--surface-raised,#202a35);border-color:#475667;color:var(--foreground,#e8edf2);}.ds-button-secondary:hover{background:#2c3b4b;}.ds-button-secondary:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}.ds-button-secondary:disabled{cursor:not-allowed;opacity:.48}@media(prefers-reduced-motion:reduce){.ds-button-secondary{transition:none}}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Implemented ghost variant; src/components/ui/button.tsx and src/styles.css:89\u201399.",
+      "html": "<button type=\"button\" class=\"ds-button-ghost\">Export results</button>",
+      "css": ".ds-button-ghost{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border:1px solid transparent;border-radius:6px;padding:7px 13px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:12px;font-weight:550;line-height:1.5;white-space:nowrap;cursor:pointer;transition:background-color 160ms ease-out,border-color 160ms ease-out;background:transparent;color:var(--muted,#a6b4c3);}.ds-button-ghost:hover{background:var(--surface-raised,#202a35);color:var(--foreground,#e8edf2);}.ds-button-ghost:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}.ds-button-ghost:disabled{cursor:not-allowed;opacity:.48}@media(prefers-reduced-motion:reduce){.ds-button-ghost{transition:none}}"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Implemented destructive variant; src/components/ui/button.tsx and src/styles.css:89\u201399.",
+      "html": "<button type=\"button\" class=\"ds-button-destructive\">Confirm reset</button>",
+      "css": ".ds-button-destructive{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border:1px solid transparent;border-radius:6px;padding:7px 13px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:12px;font-weight:550;line-height:1.5;white-space:nowrap;cursor:pointer;transition:background-color 160ms ease-out,border-color 160ms ease-out;background:#532d32;border-color:#9d6065;color:#ffe3df;}.ds-button-destructive:hover{background:#743a41;}.ds-button-destructive:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}.ds-button-destructive:disabled{cursor:not-allowed;opacity:.48}@media(prefers-reduced-motion:reduce){.ds-button-destructive{transition:none}}"
+    },
+    {
+      "name": "Native Select",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "Run and fault selectors; src/styles.css:88.",
+      "html": "<select class=\"ds-select\" aria-label=\"Simulation speed\"><option>1\u00d7 speed</option><option>2\u00d7 speed</option></select>",
+      "css": ".ds-select{min-height:34px;border:1px solid var(--line,#303c49);border-radius:6px;background:var(--surface,#171e27);color:var(--foreground,#e8edf2);padding:6px 28px 6px 10px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:12px;line-height:1.5;max-width:100%;cursor:pointer}.ds-select:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}.ds-select:disabled{cursor:not-allowed;opacity:.48}"
+    },
+    {
+      "name": "Section Navigation",
+      "kind": "nav",
+      "refersTo": "navigation",
+      "description": "Desktop section navigation; the implementation styles the first link as selected. Source: src/styles.css:64\u201369.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Preview sections\"><a href=\"#topology\">Cluster</a><a href=\"#jobs\">Training jobs</a></nav>",
+      "css": ".ds-nav{display:flex;flex-direction:column;gap:6px;background:var(--shell,#111922);padding:12px;width:166px}.ds-nav a{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:6px;color:var(--muted,#a6b4c3);font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:12px;font-weight:550;line-height:1.5;text-decoration:none}.ds-nav a:first-child{background:#243341;color:#e2edf6}.ds-nav a:hover{background:var(--surface-raised,#202a35);color:var(--foreground,#e8edf2)}.ds-nav a:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}"
+    },
+    {
+      "name": "Status Badges",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Noninteractive neutral, warning, danger, and agent labels; src/styles.css:100\u2013103.",
+      "html": "<div class=\"ds-badges\"><span class=\"ds-badge\">SIMULATED</span><span class=\"ds-badge ds-warning\">Warning</span><span class=\"ds-badge ds-danger\">Failed</span><span class=\"ds-badge ds-agent\">Checkpointing</span></div>",
+      "css": ".ds-badges{display:flex;gap:8px;flex-wrap:wrap}.ds-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:10px;font-weight:550;line-height:1.35;white-space:nowrap;border-radius:4px;color:#c1cbd5;background:#293440}.ds-warning{color:#f5d49e;background:#3d3326}.ds-danger{color:#ffbcb3;background:#442a2d}.ds-agent{color:#a3e1bf;background:#243c33}"
+    },
+    {
+      "name": "Operational Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Labelled section with a compact heading and honest empty state; src/styles.css:111\u2013114,195\u2013197.",
+      "html": "<section class=\"ds-panel\" aria-labelledby=\"ds-panel-title\"><div class=\"ds-panel-heading\"><h2 id=\"ds-panel-title\">Policy benchmarks</h2></div><div class=\"ds-empty\"><strong>No matched evaluation runs yet</strong><p>No benchmark values are prefilled.</p></div></section>",
+      "css": ".ds-panel{background:var(--surface,#171e27);border:1px solid var(--line,#303c49);border-radius:12px;min-width:0;overflow:clip;color:var(--foreground,#e8edf2);font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;line-height:1.5}.ds-panel-heading{min-height:62px;padding:17px 20px;display:flex;gap:12px;justify-content:space-between;align-items:center}.ds-panel h2{margin:0;font-size:15px;font-weight:600;letter-spacing:-.015em}.ds-empty{padding:14px 20px 27px;color:var(--muted,#a6b4c3)}.ds-empty strong{color:#ced8e2;font-size:12px;font-weight:500}.ds-empty p{font-size:12px;margin:7px 0 0;line-height:1.7}"
+    },
+    {
+      "name": "GPU Thermal Cells",
+      "kind": "custom",
+      "refersTo": "gpu-cell",
+      "description": "Thermal state and selection are independent. Static illustrative samples; no telemetry is implied. Source: src/styles.css:127\u2013138.",
+      "html": "<div class=\"ds-gpus\" aria-label=\"Illustrative thermal states\"><button class=\"ds-gpu ds-normal ds-selected\" aria-pressed=\"true\" aria-label=\"Selected illustrative GPU, 62 degrees Celsius\">62</button><button class=\"ds-gpu ds-warm\" aria-label=\"Illustrative warm GPU, 82 degrees Celsius\">82</button><button class=\"ds-gpu ds-hot\" aria-label=\"Illustrative hot GPU, 87 degrees Celsius\">87</button><button class=\"ds-gpu ds-fault\" aria-label=\"Illustrative faulted GPU, XID 79\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg>79</button><span class=\"ds-gpu ds-missing\" aria-label=\"No data\">\u2014</span></div>",
+      "css": ".ds-gpus{display:grid;grid-template-columns:repeat(5,minmax(40px,1fr));gap:5px}.ds-gpu{position:relative;min-width:0;height:35px;border:1px solid #3f576c;border-radius:4px;display:flex;gap:3px;align-items:center;justify-content:center;font-family:\"SFMono-Regular\",Consolas,\"Liberation Mono\",monospace;font-variant-numeric:tabular-nums;font-size:12px;font-weight:500;cursor:pointer;transition:background-color 180ms ease-out}.ds-normal{background:#273d4b;color:#d8e7f2}.ds-warm{background:#55432e;border-color:#9f8054;color:#ffe0b2}.ds-hot{background:#684334;border-color:#b28064;color:#ffe1ca}.ds-fault{background:#5f3036;border-color:#b97479;color:#ffdbd6}.ds-missing{background:#20262e;color:var(--muted,#a6b4c3);border-style:dashed;cursor:default}.ds-gpu:hover{filter:brightness(1.23)}.ds-gpu:focus-visible{outline:2px solid #b3d4ed;outline-offset:3px}.ds-gpu.ds-selected{outline:2px solid #e0edf6;outline-offset:1px;z-index:1}@media(prefers-reduced-motion:reduce){.ds-gpu{transition:none}}"
+    },
+    {
+      "name": "Durable Training Progress",
+      "kind": "custom",
+      "refersTo": "job-progress",
+      "description": "Overlaid work and durable checkpoint fills; illustrative widths only. Source: src/styles.css:179\u2013187.",
+      "html": "<div class=\"ds-progress\" role=\"progressbar\" aria-label=\"Illustrative training progress\" aria-valuemin=\"0\" aria-valuemax=\"100\" aria-valuenow=\"70\"><i class=\"ds-work\"></i><i class=\"ds-durable\"></i><span class=\"ds-checkpoint\"></span></div>",
+      "css": ".ds-progress{height:8px;border-radius:2px;background:#2b3642;position:relative;width:100%;min-width:180px;--ds-job-color:var(--job-a,#9abedc)}.ds-progress i{display:block;height:100%;position:absolute;left:0;top:0;max-width:100%;border-radius:2px}.ds-work{width:70%;background:color-mix(in srgb,var(--ds-job-color) 42%,#1b2631)}.ds-durable{width:45%;background:var(--ds-job-color)}.ds-checkpoint{left:45%;width:2px;height:14px;background:#e5edf2;position:absolute;top:-3px;transform:translateX(-50%)}"
+    }
+  ],
+  "narrative": {
+    "overview": "The implemented dashboard follows the team's dark operator console brief. Ink-blue shell surfaces surround slate panels; measured off-white typography keeps dense operational information readable. Mint identifies agent activity and primary actions, while amber and red communicate concern and failure.\n\nThis document records the current implementation. The source of truth is [src/styles.css](src/styles.css), supported by [PRODUCT.md](PRODUCT.md) and the [cluster surface brief](.impeccable/surfaces/cluster.md). Source locations below refer to the stylesheet at documentation time. Spacing and radius names in the frontmatter describe repeated values; the stylesheet does not define a corresponding CSS variable for every entry.",
+    "keyCharacteristics": [
+      "Compact controls, fixed-size system typography, and tabular measurements.",
+      "Flat bordered surfaces with restrained tonal layering.",
+      "Thermal state, job identity, and selection use separate visual treatments.",
+      "Provenance, unavailable data, and failure states remain explicit."
+    ],
+    "rules": [],
+    "dos": [
+      "Do preserve the team's dark operator console palette and compact density.",
+      "Do reserve mint for agent activity and primary actions, and keep job identity separate from thermal state.",
+      "Do preserve keyboard focus, GPU selection outlines, native controls, and horizontal table scrolling.",
+      "Do distinguish durable checkpoints from work in progress and label unavailable values.",
+      "Do keep simulation, scripted examples, hardware readings, and evaluation provenance visible beside their data."
+    ],
+    "donts": [
+      "Don't add shadows or glows to the existing flat surface system.",
+      "Don't rely on color alone for faults, selection, or data provenance.",
+      "Don't collapse or omit GPU columns to make a narrow viewport fit.",
+      "Don't present fixture playback as a live agent or populate missing benchmarks with invented values.",
+      "Don't replace the fixed operational type scale with fluid promotional headings."
+    ]
+  }
+}
