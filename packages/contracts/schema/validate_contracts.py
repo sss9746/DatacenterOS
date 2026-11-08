@@ -16,7 +16,8 @@ map_types = {
     'hardware_sample_microphone': 'HardwareSample',
     'action_command': 'ActionCommand',
     'job_spec': 'JobSpec',
-    'fault_injection_private': 'FaultInjection'
+    'fault_injection_private': 'FaultInjection',
+    'evaluation_result_provenance': 'EvaluationResult'
 }
 
 unmapped = sorted(set(fixtures) - set(map_types))

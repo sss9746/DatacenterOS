@@ -105,6 +105,28 @@ export interface EvaluationResult {
   successful_recoveries: number;
   failed_recoveries: number;
   agent_crash_resumes: number;
+  /**
+   * Optional strict run provenance (CONTRACTS 0.14). When present every field is required; absence means legacy/unknown.
+   */
+  provenance?: {
+    batch_id: Identifier;
+    code_revision: string;
+    physics_profile_version: string;
+    policy_version: string;
+    model_id: string | null;
+    prompt_version: string | null;
+    model_enabled: boolean;
+    model_requests: number;
+    live_model_responses: number;
+    cache_hits: number;
+    fallback_decisions: number;
+    decision_wall_time_ms: number;
+    horizon_sim_s: number;
+    latency_model: 'zero_simulated_decision_latency';
+    unfinished_job_ids: Identifier[];
+    failed_job_ids: Identifier[];
+    trace_sha256: string;
+  };
 }
 /**
  * Private scenario ground truth; never expose to the agent.
