@@ -6,3 +6,4 @@ export { toObserved, PRIVATE_KEYS } from './observe.js';
 export { step } from './step.js';
 export { enqueueCommands, inFlightCommands, commandOutcome, type InFlightView } from './actions.js';
 export type { CommandOutcome } from './world.js';
+export { loadScenarios, scenarioWorld, scenarioRunId, dueFaults, scenarioTickInput, type Scenario, type ScenarioInitialOverrides } from './scenarios.js';

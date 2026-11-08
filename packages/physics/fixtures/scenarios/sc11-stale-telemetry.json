@@ -1,0 +1,131 @@
+{
+  "scenario_id": "sc11-stale-telemetry",
+  "seed": 111,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §9 telemetry stale: the sensors of rack-r3 and its 8 GPUs go stale at 5 s (frozen values, quality stale) and pump-a degrades 60% at 10 s. r2/r4 visibly heat while r3 looks healthy; r3 is truly as hot as r2.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "rack-r3",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-0",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.03",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-1",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 2
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.04",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-2",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 3
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.05",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-3",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 4
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.06",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-4",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 5
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.07",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-5",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 6
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.08",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-6",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 7
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.09",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-7",
+      "kind": "sensor_stale",
+      "start_sim_time_ms": 5000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 8
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc11-stale-telemetry.10",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 9
+    }
+  ]
+}

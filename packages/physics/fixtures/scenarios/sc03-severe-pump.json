@@ -1,0 +1,23 @@
+{
+  "scenario_id": "sc03-severe-pump",
+  "seed": 103,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §9 pump severe: pump-a loses 80% capacity at 10 s. With no action r2-r4 throttle (≥85 °C) and then shut down (≥92 °C), failing job-a and job-b back to their durable checkpoints.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc03-severe-pump.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.8,
+      "parameters": {
+        "capacity_factor": 0.2
+      },
+      "seed_offset": 0
+    }
+  ]
+}

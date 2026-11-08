@@ -1,0 +1,35 @@
+{
+  "scenario_id": "sc20-transient-storage-outage",
+  "seed": 120,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "Transient storage outage: pump-a degrades 60% at 10 s and ckpt-store-1 is down from 20 s to 200 s. Checkpoints are inaccessible in that window and accessible again after; waiting for storage then checkpointing beats acting blind.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc20-transient-storage-outage.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc20-transient-storage-outage.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "ckpt-store-1",
+      "kind": "node_crash",
+      "start_sim_time_ms": 20000,
+      "duration_sim_ms": 180000,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 1
+    }
+  ]
+}

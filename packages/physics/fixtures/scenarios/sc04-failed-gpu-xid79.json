@@ -1,0 +1,21 @@
+{
+  "scenario_id": "sc04-failed-gpu-xid79",
+  "seed": 104,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 300,
+  "description": "ARCH §9 failed GPU: XID 79 (fell off the bus) on gpu-r3-n1-5 at 60 s. The GPU becomes unreachable and job-a fails back to durable_work_units (≈10 sim-min of 16-GPU work lost).",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc04-failed-gpu-xid79.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r3-n1-5",
+      "kind": "gpu_xid_79",
+      "start_sim_time_ms": 60000,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {},
+      "seed_offset": 0
+    }
+  ]
+}

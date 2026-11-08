@@ -1,0 +1,247 @@
+{
+  "scenario_id": "sc09-hot-destination",
+  "seed": 109,
+  "preset_id": "gpu_demo_8",
+  "horizon_s": 600,
+  "description": "ARCH §9 destination hot: pump-a degrades 60% at 10 s while every GPU on the free racks r1 and r5 carries +30 °C of extra heat from t=0 (idle ≈68 °C, would exceed 92 °C under load). Moving onto r1/r5 must be rejected; r7+r8 remain.",
+  "faults": [
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.01",
+      "run_id": "run-demo-1",
+      "target_resource_id": "pump-a",
+      "kind": "cooling_pump_degradation",
+      "start_sim_time_ms": 10000,
+      "duration_sim_ms": null,
+      "severity": 0.6,
+      "parameters": {
+        "capacity_factor": 0.4
+      },
+      "seed_offset": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.02",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-0",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.03",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-1",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 2
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.04",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-2",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 3
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.05",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-3",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 4
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.06",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-4",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 5
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.07",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-5",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 6
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.08",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-6",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 7
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.09",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r1-n1-7",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 8
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.10",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-0",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 9
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.11",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-1",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 10
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.12",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-2",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 11
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.13",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-3",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 12
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.14",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-4",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 13
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.15",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-5",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 14
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.16",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-6",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 15
+    },
+    {
+      "schema_version": "1.1.0",
+      "fault_id": "flt.sc09-hot-destination.17",
+      "run_id": "run-demo-1",
+      "target_resource_id": "gpu-r5-n1-7",
+      "kind": "gpu_thermal_load",
+      "start_sim_time_ms": 0,
+      "duration_sim_ms": null,
+      "severity": 1,
+      "parameters": {
+        "extra_temp_c": 30
+      },
+      "seed_offset": 16
+    }
+  ]
+}
