@@ -19,6 +19,8 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await page.getByRole('button', { name: /Rack 4/ }).click();
   await page.locator('[data-gpu="gpu-r4-n1-2"]').click();
   await expect(page.getByLabel('Simulated GPU')).toHaveValue('gpu-r4-n1-2');
+  // The detailed fault form lives under "Advanced" in the Demo controls bar.
+  await page.locator('#presenter .demo-advanced > summary').click();
   await page.getByLabel('Simulated GPU').selectOption('gpu-r3-n1-0');
   await page.getByRole('button', { name: /Rack 3/ }).click();
   await page.getByRole('button', { name: 'Fail gpu-r3-n1-0 (Xid 79)' }).click();
@@ -59,25 +61,30 @@ test('local physics: pump degradation heats loop A, XID 79 fails a job, and the 
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/?presenter=1');
   await expect(page.locator('#presenter')).toHaveAttribute('open', '');
-  await expect(page.getByRole('heading', { name: 'Inject a fault' })).toBeVisible();
+  await expect(page.locator('#presenter > summary')).toContainText('Demo controls');
   await page.getByRole('button', { name: /Pump B Cools racks/ }).click();
   await expect(page.locator('select[id$="-pump"]')).toHaveValue('pump-b');
   await page.getByRole('button', { name: /Pump A Cools racks/ }).click();
   await expect(page.locator('select[id$="-pump"]')).toHaveValue('pump-a');
   const before = await page.getByRole('button', { name: /Rack 3,/ }).innerText();
-  await page.getByRole('button', { name: 'Degrade pump-a by 60%' }).click();
+  // Step 1: the same pump-a 60% degradation the Advanced form's "Degrade pump-a by 60%" submits.
+  await page.getByRole('button', { name: 'Break cooling pump A' }).click();
   await page.getByRole('button', { name: 'Advance 30 sim-s' }).click();
   await expect(page.getByRole('button', { name: /Rack 3,/ })).not.toHaveText(before);
 
-  await page.getByRole('button', { name: 'Submit safety probe' }).click();
+  // Step 2: the r6 safety probe; the verdict renders inline under the button.
+  await page.getByRole('button', { name: 'Try unsafe move to hot rack 6' }).click();
   const probe = page.locator('.presenter-probe');
   await expect(probe).toContainText('BLOCKED');
   await expect(probe).toContainText('DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT');
   await expect(page.locator('#ledger')).toContainText('BLOCKED');
 
+  // Step 3: with no persisted plan in local physics, the target is the GPU selected in the Advanced form.
   await page.getByRole('button', { name: /Rack 3,/ }).click();
+  await page.locator('#presenter .demo-advanced > summary').click();
   await page.getByLabel('Simulated GPU').selectOption('gpu-r3-n1-0');
-  await page.getByRole('button', { name: 'Fail gpu-r3-n1-0 (Xid 79)' }).click();
+  await expect(page.locator('#presenter .demo-target')).toContainText('gpu-r3-n1-0');
+  await page.getByRole('button', { name: 'Fail a GPU (XID 79)' }).click();
   await page.getByRole('button', { name: 'Advance 30 sim-s' }).click();
   await expect(page.locator('[data-gpu="gpu-r3-n1-0"]')).toHaveAttribute('aria-label', /XID 79/);
   await expect(page.locator('#jobs')).toContainText('failed');

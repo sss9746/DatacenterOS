@@ -1,45 +1,62 @@
-/* Agent activity feed. Overrides styles.css feed rules at equal-or-higher specificity; styles.css is not edited here.
-   Attribution: NEMOTRON = solid mint pill + 2px mint left rule; CODE = grey outline pill; unknown actor = neutral dashed pill.
-   Projector type floor: nothing below 11px; body-ish text 12px+. */
+/* Agent activity feed (the secondary "full log"). Paper-and-ink tokens with fallbacks.
+   Attribution: NEMOTRON = forest solid pill "NVIDIA Nemotron" with the #76B900 dot; CODE = sage outline; no actor = dashed. */
 .feed-badges { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 /* Filter chips */
-.feed-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 20px 14px; }
-.feed-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 11px; border-radius: 6px; border: 1px solid #475667; background: transparent; color: var(--muted); font-size: 12px; font-weight: 550; line-height: 1; transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out; }
-.feed-chip:hover { background: var(--surface-raised); color: var(--foreground); }
-.feed-chip[aria-pressed="true"] { background: var(--surface-raised); border-color: #6a7d91; color: var(--foreground); }
-.feed-chip-nemotron[aria-pressed="true"] { background: #243c33; border-color: #4f8a6d; color: #a3e1bf; }
-.feed-chip-count { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, .07); font-variant-numeric: tabular-nums; }
-.feed-chip[aria-pressed="true"] .feed-chip-count { background: rgba(255, 255, 255, .12); }
-.feed-filter-note { margin-left: auto; font-size: 11px; color: var(--muted); }
+.feed-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 20px 12px; }
+.feed-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 11px; border-radius: var(--r-control, 8px); border: 1px solid var(--sage, #7F886A); background: var(--paper, #FAF6EC); color: var(--ink, #1F2A1E); font-size: 12.5px; font-weight: 600; line-height: 1; cursor: pointer; transition: background-color var(--t-fast, 160ms) var(--ease-out, ease-out), transform var(--t-fast, 160ms) var(--ease-out, ease-out); }
+.feed-chip:hover { background: var(--paper-inset, #EDE4CE); transform: translateY(-1px); }
+.feed-chip:focus-visible { outline: 2px solid var(--focus, #1F2A1E); outline-offset: 2px; }
+.feed-chip[aria-pressed="true"] { background: var(--forest, #3E503C); border-color: var(--forest, #3E503C); color: var(--cream-on-forest, #F3ECDB); }
+.feed-chip-count { font-size: 11.5px; font-weight: 650; padding: 1px 6px; border-radius: var(--r-chip, 4px); background: var(--paper-inset, #EDE4CE); color: var(--ink, #1F2A1E); font-variant-numeric: tabular-nums; }
+.feed-chip[aria-pressed="true"] .feed-chip-count { background: var(--cream, #F3ECDB); color: var(--forest-deep, #2C3A2B); }
+.feed-filter-note { margin-left: auto; font-size: 12.5px; color: var(--ink-muted, #5B6650); }
 
 /* Events */
-.feed-event.actor-nemotron { border-left: 2px solid var(--agent); padding-left: 18px; }
-.feed-event .feed-event-meta { font-size: 12px; color: var(--muted); }
-.feed-event.actor-code .feed-event-meta { color: var(--muted); }
-.feed-event .feed-event-meta time { font-size: 11px; color: var(--muted); }
-.feed-event .feed-event-meta .badge { font-size: 11px; }
-.feed-actor { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; line-height: 1.35; white-space: nowrap; }
-.feed-actor.actor-nemotron { background: var(--agent); color: #14291f; }
-.feed-actor.actor-code { background: transparent; border: 1px solid #5b6d80; color: var(--muted); }
-.feed-actor.actor-unknown { background: transparent; border: 1px dashed #5b6d80; color: var(--muted); text-transform: none; letter-spacing: 0; font-weight: 550; }
-.feed-event > p { font-size: 13px; }
-.feed-event > p.feed-workflow { margin: 8px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.feed-workflow code { font-size: 12px; color: #c3d3df; }
-.feed-event .tool-call { font-size: 12px; border-left: 2px solid transparent; }
-.feed-event .tool-call.actor-nemotron { border-left-color: var(--agent); }
-.feed-event .tool-call summary > span { font-size: 11px; }
-.feed-event .tool-call.actor-nemotron summary > span { color: #a3e1bf; }
-.feed-event .evidence-ids { font-size: 11px; }
+.feed-list { display: flex; flex-direction: column; }
+.feed-event { padding: 14px 20px; border-top: 1px solid color-mix(in srgb, var(--sage, #7F886A) 40%, transparent); color: var(--ink, #1F2A1E); }
+.feed-event.actor-nemotron { box-shadow: inset 3px 0 0 var(--forest, #3E503C); }
+.feed-event .feed-event-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; font-size: 12.5px; color: var(--ink-muted, #5B6650); }
+.feed-event .feed-event-meta > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.feed-event .feed-event-meta time { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--ink-muted, #5B6650); }
+.feed-actor { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: var(--r-seat, 999px); font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; line-height: 1.2; white-space: nowrap; }
+.feed-actor.actor-nemotron { background: var(--forest, #3E503C); color: var(--cream-on-forest, #F3ECDB); }
+.feed-actor.actor-nemotron::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--nvidia, #76B900); flex: none; }
+.feed-actor.actor-code { background: transparent; border: 1px solid var(--sage, #7F886A); color: var(--ink-muted, #5B6650); }
+.feed-actor.actor-unknown { background: transparent; border: 1px dashed var(--sage, #7F886A); color: var(--ink-muted, #5B6650); text-transform: none; letter-spacing: 0; font-weight: 550; }
+.feed-event > p { margin: 8px 0 0; font-size: 14px; line-height: 1.5; max-width: none; }
+.feed-event > p.feed-workflow { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-muted, #5B6650); overflow-wrap: anywhere; }
+.feed-workflow code, .feed-event .evidence-ids code { font-family: var(--font-mono, monospace); font-size: 12.5px; color: var(--ink, #1F2A1E); }
+.feed-event .tool-call { margin-top: 8px; font-size: 12.5px; border-left: 2px solid transparent; background: var(--paper-inset, #EDE4CE); border-radius: var(--r-chip, 4px); }
+.feed-event .tool-call > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 7px 10px; cursor: pointer; color: var(--ink, #1F2A1E); }
+.feed-event .tool-call > summary:focus-visible { outline: 2px solid var(--focus, #1F2A1E); outline-offset: -2px; }
+.feed-event .tool-call > summary > code { font-family: var(--font-mono, monospace); font-size: 12.5px; }
+.feed-event .tool-call > summary > span { font-size: 12px; color: var(--ink-muted, #5B6650); }
+.feed-event .tool-call.actor-nemotron { border-left-color: var(--forest, #3E503C); }
+.feed-event .tool-call.actor-nemotron > summary > span { color: var(--forest, #3E503C); font-weight: 600; }
+.feed-event .tool-call > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 0 10px 9px; font-size: 12.5px; color: var(--ink, #1F2A1E); }
+.feed-event .tool-call > div > code { font-family: var(--font-mono, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.feed-event .tool-call > div > svg { color: var(--sage, #7F886A); flex: none; }
+.feed-event .tool-call > div > p { margin: 0; max-width: none; overflow-wrap: anywhere; }
+.feed-event .evidence-ids { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--ink-muted, #5B6650); }
 
 /* Footer: count and the cap toggle */
-.feed-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); max-width: none; }
-.feed-more { min-height: 32px; padding: 4px 11px; border-radius: 6px; border: 1px solid #475667; background: transparent; color: var(--foreground); font-size: 12px; font-weight: 550; transition: background-color 160ms ease-out, border-color 160ms ease-out; }
-.feed-more:hover { background: var(--surface-raised); border-color: #6a7d91; }
+.feed-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid color-mix(in srgb, var(--sage, #7F886A) 40%, transparent); font-size: 12.5px; color: var(--ink-muted, #5B6650); max-width: none; }
+.feed-more { min-height: 34px; padding: 4px 11px; border-radius: var(--r-control, 8px); border: 1px solid var(--forest, #3E503C); background: var(--paper, #FAF6EC); color: var(--ink, #1F2A1E); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background-color var(--t-fast, 160ms) var(--ease-out, ease-out), transform var(--t-fast, 160ms) var(--ease-out, ease-out); }
+.feed-more:hover { background: var(--paper-inset, #EDE4CE); transform: translateY(-1px); }
+.feed-more:focus-visible { outline: 2px solid var(--focus, #1F2A1E); outline-offset: 2px; }
 
 @media (max-width: 680px) {
   .feed-filter { padding: 0 16px 12px; }
-  .feed-event.actor-nemotron { padding-left: 14px; }
+  .feed-event { padding: 14px 16px; }
   .feed-foot { padding: 12px 16px; }
   .feed-filter-note { margin-left: 0; flex-basis: 100%; }
 }
+@media (prefers-reduced-motion: reduce) { .feed-chip, .feed-more { transition: none; } .feed-chip:hover, .feed-more:hover { transform: none; } }
+
+/* Panel surface: same values as the shared Panel under the paper theme; keeps this panel readable if the shell lags. */
+#activity { background: var(--paper, #FAF6EC); color: var(--ink, #1F2A1E); }
+#activity .panel-heading h2 { color: var(--ink, #1F2A1E); }
+#activity .feed-event > p, #activity .tool-call, #activity .tool-call > div, #activity .empty strong { color: var(--ink, #1F2A1E); }
+#activity .feed-event-meta, #activity .feed-workflow, #activity .evidence-ids, #activity .feed-foot, #activity .empty p, #activity .feed-filter-note { color: var(--ink-muted, #5B6650); }
+#activity .example-note { color: var(--orange-ink, #A8380F); background: var(--orange-soft, #FFD9CB); }

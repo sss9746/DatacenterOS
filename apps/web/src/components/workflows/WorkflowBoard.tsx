@@ -222,7 +222,14 @@ function HandoffCard({ view, example }: { view: WorkflowView; example: boolean }
   const evidence = v?.asOf ? (v.asOf.from !== null ? `${duration(v.asOf.from)}–${duration(v.asOf.to)} sim` : `as of ${duration(v.asOf.to)} sim`) : 'time not recorded';
   const unresolved = v?.unresolved ?? [];
   const outcome = v?.outcome ? v.outcome.replaceAll('_', ' ') : null;
+  const needsHuman = v?.verified === false || unresolved.length > 0;
   return <div className={`wf-handoff-card wf-handoff-${tone}`}>
+    {/* result stripe: the verifier's persisted result, and whether a person is still needed (unresolved infrastructure or no verification) */}
+    <p className="wf-handoff-stripe">
+      <span className={`wf-stripe wf-stripe-${tone}`}>{v?.verified === true ? <CheckCircle2 size={14} aria-hidden="true"/> : <CircleDashed size={14} aria-hidden="true"/>}{title}</span>
+      {needsHuman && <span className="wf-stripe wf-stripe-human"><UserRound size={14} aria-hidden="true"/>Needs a human{unresolved.length ? ` · ${unresolved.length} unresolved` : ''}</span>}
+      {example && <span className="wf-stripe wf-stripe-example">Example</span>}
+    </p>
     <section className="wf-handoff-col wf-handoff-left" aria-label={title}>
       <h4 className="wf-handoff-title">{v?.verified === true ? <CheckCircle2 size={15} aria-hidden="true"/> : <CircleDashed size={15} aria-hidden="true"/>}{title}{outcome && outcome.toLowerCase() !== title.toLowerCase() ? <span className="wf-handoff-outcome">{outcome}</span> : null}</h4>
       {verified.length

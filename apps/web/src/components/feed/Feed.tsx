@@ -40,7 +40,9 @@ export function Feed({ events, example }: { events: AgentEventInput[]; example: 
 }
 
 function ActorPill({ actor, example }: { actor: AgentActor | undefined; example: boolean }) {
-  return <strong className={`feed-actor ${actorClass(actor)}`}>{actor === 'nemotron' ? <Sparkles size={12} aria-hidden="true"/> : actor === 'code' ? <Code2 size={12} aria-hidden="true"/> : null}{actorLabel(actor, example)}</strong>;
+  // The NEMOTRON pill names the vendor model; the dot is CSS. CODE and unattributed keep the shared label text.
+  const label = actor === 'nemotron' ? `NVIDIA Nemotron${example ? ' (scripted)' : ''}` : actorLabel(actor, example);
+  return <strong className={`feed-actor ${actorClass(actor)}`}>{actor === 'nemotron' ? <Sparkles size={12} aria-hidden="true"/> : actor === 'code' ? <Code2 size={12} aria-hidden="true"/> : null}{label}</strong>;
 }
 
 function FeedEvent({ event, example }: { event: AgentEventInput; example: boolean }) {
