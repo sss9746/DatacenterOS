@@ -16,3 +16,4 @@ export {
 export { simulatePlan, simulatePlanWithReference, estimateWorld, type PlanMetrics } from './simulate.js';
 export { loadScenarios, scenarioWorld, scenarioRunId, dueFaults, scenarioTickInput, type Scenario, type ScenarioInitialOverrides } from './scenarios.js';
 export { reactivePolicy, thresholdPolicy, THRESHOLD_TEMP_C, type Policy } from './policies.js';
+export { runScenario, runAllScenarios, summarizeResults } from './run.js';
