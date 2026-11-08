@@ -35,6 +35,9 @@ export interface TimelineEntry {
 export interface AgentGenerationRecord {
   generation: number;
   pid: number;
+  /** AGENT_NAME / AGENT_ZONE of the child (null: default identity, any zone). */
+  name: string | null;
+  zone: string | null;
   started_unix_ms: number;
   ended_unix_ms: number | null;
   how_ended: 'SIGKILL' | 'taskkill' | 'exited' | 'stopped_by_harness' | 'running' | 'already_exited';
@@ -59,12 +62,23 @@ export interface CaseArtifact {
   checkpoint_count: { job_id: string; complete_before: number; complete_after: number } | null;
   verification: Record<string, unknown> | null;
   agent_generations: AgentGenerationRecord[];
+  /** L7/L8: agent-to-agent messages read back from the agent_event rows (from/to/topic/text), oldest first. */
+  messages: MessageRecord[];
   timeline: TimelineEntry[];
   /** Last snapshot summary when the case failed (bounded; redacted). */
   last_snapshot_summary: Record<string, unknown> | null;
   /** Ledger rows (status + command, no secrets) at the end of the case. */
   ledger: Array<Record<string, unknown>>;
   error: string | null;
+}
+
+export interface MessageRecord {
+  sim_time_ms: number;
+  from: string;
+  to: string;
+  topic: string;
+  workflow_id: string | null;
+  text: string;
 }
 
 export interface RunArtifact {
@@ -120,7 +134,15 @@ export function renderMarkdown(run: RunArtifact): string {
     lines.push('```');
     if (c.agent_generations.length) {
       lines.push('');
-      lines.push('**Agent processes:** ' + c.agent_generations.map((g) => `gen${g.generation} pid ${g.pid} (${g.how_ended}${g.exit_code !== null ? ` code ${g.exit_code}` : ''})`).join('; '));
+      lines.push('**Agent processes:** ' + c.agent_generations.map((g) => `gen${g.generation}${g.name ? ` ${g.name}` : ''}${g.zone ? `@${g.zone}` : ''} pid ${g.pid} (${g.how_ended}${g.exit_code !== null ? ` code ${g.exit_code}` : ''})`).join('; '));
+    }
+    if (c.messages.length) {
+      lines.push('');
+      lines.push('**Agent messages:**');
+      lines.push('');
+      lines.push('```');
+      for (const m of c.messages) lines.push(`sim=${m.sim_time_ms} ${m.from} -> ${m.to} [${m.topic}]${m.workflow_id ? ` ${m.workflow_id}` : ''}: ${m.text}`);
+      lines.push('```');
     }
     if (c.timeline.length) {
       lines.push('');

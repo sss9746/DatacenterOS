@@ -64,5 +64,7 @@ export async function createDbPort(cfg: DbConnectConfig, importer: Importer = de
   }
   const port = {} as Record<string, unknown>;
   for (const name of DB_PORT_METHODS) port[name] = (client![name] as (...a: unknown[]) => unknown).bind(client);
+  // Optional subscription (agent-to-agent messages): bound when the client has it, absent otherwise.
+  if (typeof client!.onAgentEvents === 'function') port.onAgentEvents = (client!.onAgentEvents as (...a: unknown[]) => unknown).bind(client);
   return port as unknown as DbPort;
 }

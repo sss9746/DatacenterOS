@@ -1,4 +1,6 @@
-// The six R5 cases (TASKS R5 table, SCOPE §6 steps 2-6) over a REAL database and a REAL agent child.
+// The R5 cases (TASKS R5 table, SCOPE §6 steps 2-6) over a REAL database and REAL agent children. L1-L6 use one
+// agent; L7/L8 run TWO named agents (AGENT_NAME agent-alpha@loop-a, agent-beta@loop-b) that coordinate only through
+// SpacetimeDB: separate per-incident workflows, one lease owner each, failover to the survivor without a restart.
 // Each case: controlled reset (agent stopped) -> spawn agent -> inject via admin -> wait on observed DB
 // state (bounded) -> crash/probe -> assert from public ledger/snapshot data -> artifact.
 // The agent never receives private fault truth; the harness only reads public plan/ledger rows.
@@ -28,10 +30,26 @@ import {
   type Check,
 } from './asserts.js';
 import { deriveCheckpointDue, describeDue } from './due.js';
-import { COOLING_RESOURCE_IDS, dueTickTooLate, nodeOfGpu, pumpDegradation, xid79 } from './faults.js';
+import { COOLING_RESOURCE_IDS, dueTickTooLate, LOOP_A_RACKS, nodeOfGpu, pumpDegradation, xid79 } from './faults.js';
+import {
+  agentForOwner,
+  bothActive,
+  checkMessagesWellFormed,
+  checkMoveAcknowledged,
+  checkNoDuplicateIntents,
+  checkOwnedByDifferentAgents,
+  checkTakeoverAnnounced,
+  checkWorkDistribution,
+  checkZoneAffinity,
+  messageTranscript,
+  pickIsolatedGpu,
+  racksOf,
+  workflowOwners,
+  type AgentIdentity,
+} from './multi.js';
 import { byKey, completeCheckpoints, createObserver, jobState, ledgerRow, openAction, snapshotSummary, type LiveState, type Observer } from './observe.js';
 import type { Redactor } from './redact.js';
-import type { AgentGenerationRecord, CaseArtifact, RunMeta, TimelineEntry } from './report.js';
+import type { AgentGenerationRecord, CaseArtifact, MessageRecord, RunMeta, TimelineEntry } from './report.js';
 import { controlledReset } from './reset.js';
 import { Budget, WaitTimeoutError } from './wait.js';
 
@@ -50,7 +68,12 @@ export const CASE_TITLES: Record<CaseId, string> = {
   L4: 'Stale fencing token cannot mutate after takeover',
   L5: 'Source Xid 79 on the checkpoint due tick: no new durable checkpoint',
   L6: 'Model unreachable: hard safety holds, fallback attributed to code',
+  L7: 'Two agents coordinate via SpacetimeDB: parallel incidents, then the pump owner is killed and the survivor reclaims',
+  L8: 'Three incidents, two agents: the third incident is claimed when an agent frees up',
 };
+
+export const AGENT_ALPHA = { name: 'agent-alpha', zone: 'loop-a' } as const;
+export const AGENT_BETA = { name: 'agent-beta', zone: 'loop-b' } as const;
 
 export interface CaseEnv {
   args: HarnessArgs;
@@ -76,8 +99,12 @@ class CaseRun {
   simStart: number | null = null;
   verification: Record<string, unknown> | null = null;
   checkpointCount: CaseArtifact['checkpoint_count'] = null;
+  messages: MessageRecord[] = [];
   private gen = 0;
-  private agent: AgentHandle | null = null;
+  /** Live children (L1-L6: at most one; L7/L8: two). */
+  private agents: AgentHandle[] = [];
+  /** Every child ever spawned in this case (for mapping lease owners back to agents after a kill). */
+  private readonly everSpawned: AgentHandle[] = [];
   readonly budget: Budget;
 
   constructor(readonly id: CaseId, readonly env: CaseEnv, readonly obs: Observer) {
@@ -98,14 +125,28 @@ class CaseRun {
   }
 
   // ---- agent lifecycle
-  startAgent(opts: { noLlm: boolean; llmOverride?: { baseUrl: string; timeoutMs: number; retries: number } }): AgentHandle {
+  startAgent(opts: { noLlm: boolean; llmOverride?: { baseUrl: string; timeoutMs: number; retries: number }; name?: string; zone?: string }): AgentHandle {
     this.gen += 1;
-    const env = buildAgentEnv({ base: this.env.env, uri: this.env.uri, db: this.env.args.db, agentToken: this.env.agentToken, noLlm: opts.noLlm, llmOverride: opts.llmOverride });
-    const h = spawnAgent({ env, redact: this.env.redact, generation: this.gen, onLine: (l) => this.env.log(`  agent#${this.gen} ${l}`) });
-    this.agent = h;
-    this.generations.push({ generation: this.gen, pid: h.pid, started_unix_ms: h.startedUnixMs, ended_unix_ms: null, how_ended: 'running', exit_code: null, stderr_tail: [] });
-    this.log(`agent generation ${this.gen} spawned`, { pid: h.pid, no_llm: opts.noLlm, nim_override: opts.llmOverride ? 'unreachable' : null });
+    const gen = this.gen;
+    const tag = opts.name ? `${opts.name}#${gen}` : `agent#${gen}`;
+    const env = buildAgentEnv({ base: this.env.env, uri: this.env.uri, db: this.env.args.db, agentToken: this.env.agentToken, noLlm: opts.noLlm, llmOverride: opts.llmOverride, name: opts.name, zone: opts.zone ?? null });
+    const h = spawnAgent({ env, redact: this.env.redact, generation: gen, name: opts.name, zone: opts.zone ?? null, onLine: (l) => this.env.log(`  ${tag} ${l}`) });
+    this.agents.push(h);
+    this.everSpawned.push(h);
+    this.generations.push({ generation: gen, pid: h.pid, name: h.name, zone: h.zone, started_unix_ms: h.startedUnixMs, ended_unix_ms: null, how_ended: 'running', exit_code: null, stderr_tail: [] });
+    this.log(`agent generation ${gen} spawned`, { pid: h.pid, name: h.name, zone: h.zone, worker_id: h.workerId, no_llm: opts.noLlm, nim_override: opts.llmOverride ? 'unreachable' : null });
     return h;
+  }
+  /** Identities of every child spawned in this case (lease owner `<name>-<pid>` -> agent), named children only. */
+  identities(): AgentIdentity[] {
+    return this.everSpawned.filter((h) => h.name !== null).map((h) => ({ name: h.name!, pid: h.pid, zone: h.zone }));
+  }
+  liveAgents(): AgentHandle[] {
+    return this.agents.filter((h) => h.isAlive());
+  }
+  agentByOwner(owner: string | null): AgentHandle | null {
+    const id = agentForOwner(owner, this.identities());
+    return id ? (this.everSpawned.find((h) => h.name === id.name && h.pid === id.pid) ?? null) : null;
   }
   private record(h: AgentHandle, how: AgentGenerationRecord['how_ended']) {
     const g = this.generations.find((x) => x.generation === h.generation);
@@ -115,32 +156,34 @@ class CaseRun {
     g.exit_code = h.exitCode();
     g.stderr_tail = h.tail().slice(-60);
   }
-  async killAgent(): Promise<void> {
-    const h = this.agent;
+  /** SIGKILL one child (default: the most recently spawned live one). */
+  async killAgent(which?: AgentHandle): Promise<void> {
+    const h = which ?? this.agents[this.agents.length - 1];
     if (!h) throw new Error('no agent to kill');
     const simAtKill = this.obs.simNow();
     const r = await h.kill();
     this.record(h, r.how);
-    this.agent = null;
-    this.log(`agent generation ${h.generation} killed`, { pid: h.pid, how: r.how, waited_ms: r.waitedMs, sim_at_kill: simAtKill });
+    this.agents = this.agents.filter((x) => x !== h);
+    this.log(`agent generation ${h.generation} killed`, { pid: h.pid, name: h.name, worker_id: h.workerId, how: r.how, waited_ms: r.waitedMs, sim_at_kill: simAtKill });
   }
+  /** Stop every live child (end of case). */
   async stopAgent(): Promise<void> {
-    const h = this.agent;
-    if (!h) return;
-    const r = await h.kill();
-    this.record(h, h.exitCode() !== null && r.how === 'already_exited' ? 'exited' : 'stopped_by_harness');
-    this.agent = null;
-    this.log(`agent generation ${h.generation} stopped by harness`, { pid: h.pid });
+    for (const h of this.agents.splice(0)) {
+      const r = await h.kill();
+      this.record(h, h.exitCode() !== null && r.how === 'already_exited' ? 'exited' : 'stopped_by_harness');
+      this.log(`agent generation ${h.generation} stopped by harness`, { pid: h.pid, name: h.name });
+    }
   }
-  /** Abort rule for waits that need a LIVE agent: fail fast if the child died. */
+  /** Abort rule for waits that need LIVE agents: fail fast if any tracked child died. */
   agentMustBeAlive = (): string | null => {
-    const h = this.agent;
-    if (!h) return 'no agent process is running';
-    if (!h.isAlive()) return `agent generation ${h.generation} exited (code ${h.exitCode()}); tail: ${h.tail().slice(-5).join(' | ')}`;
+    if (this.agents.length === 0) return 'no agent process is running';
+    for (const h of this.agents) {
+      if (!h.isAlive()) return `agent generation ${h.generation}${h.name ? ` (${h.name})` : ''} exited (code ${h.exitCode()}); tail: ${h.tail().slice(-5).join(' | ')}`;
+    }
     return null;
   };
   agentAlive(): boolean {
-    return this.agent?.isAlive() ?? false;
+    return this.agents.some((h) => h.isAlive());
   }
 
   until<R>(what: string, wantMs: number, pred: (s: LiveState) => R, needAgent = true) {
@@ -167,6 +210,7 @@ class CaseRun {
       checkpoint_count: this.checkpointCount,
       verification: this.verification,
       agent_generations: this.generations,
+      messages: this.messages,
       timeline: this.timeline,
       last_snapshot_summary: last ? snapshotSummary(last) : null,
       ledger: last ? last.details.map(ledgerRow) : [],
@@ -576,7 +620,118 @@ async function caseL6(run: CaseRun): Promise<LiveState> {
   return all.state;
 }
 
-const RUNNERS: Record<CaseId, (run: CaseRun) => Promise<LiveState>> = { L1: caseL1, L2: caseL2, L3: caseL3, L4: caseL4, L5: caseL5, L6: caseL6 };
+// --------------------------------------------------------------------------------------- multi-agent (L7/L8)
+
+const SECOND_WORKFLOW_WAIT_MS = 120_000;
+
+/** Both named agents up; the pump fault in; the pump workflow executing (owner + planned destination observable). */
+async function startPairAndPump(run: CaseRun) {
+  run.startAgent({ noLlm: run.env.args.noLlm, name: AGENT_ALPHA.name, zone: AGENT_ALPHA.zone });
+  run.startAgent({ noLlm: run.env.args.noLlm, name: AGENT_BETA.name, zone: AGENT_BETA.zone });
+  await injectPump(run);
+  const { detail: ck, state: s1 } = await waitCheckpointRunning(run);
+  const wfPump = ck.command.workflow_id;
+  const pumpOwner = wfOf(s1, wfPump)?.lease_owner ?? null;
+  run.log('pump workflow owner', { workflow_id: wfPump, owner: pumpOwner, agent: run.agentByOwner(pumpOwner)?.name ?? null });
+  const dest = await waitPlannedDestination(run);
+  return { ck, wfPump, pumpOwner, dest };
+}
+
+/** Xid 79 on an isolated GPU chosen from OBSERVED state: ready, idle, outside loop-a and outside the planned destination racks. */
+async function injectIsolatedXid(run: CaseRun, excludeGpus: string[], excludeRacks: string[]): Promise<string> {
+  const s = await run.obs.read();
+  const gpu = pickIsolatedGpu(s.snapshot, { excludeGpus, excludeRacks: [...LOOP_A_RACKS, ...excludeRacks] });
+  if (!gpu) throw new Error(`no isolated ready GPU outside ${[...LOOP_A_RACKS, ...excludeRacks].join(',')} in the observed snapshot`);
+  await injectXid(run, gpu);
+  return gpu;
+}
+
+/** Wait for a workflow other than `known` to appear with a lease owner. */
+async function waitAnotherWorkflow(run: CaseRun, known: readonly string[], what: string): Promise<{ wf: WorkflowRecord; state: LiveState }> {
+  const r = await run.until(what, SECOND_WORKFLOW_WAIT_MS, (s) => s.workflows.find((w) => !known.includes(w.workflow_id) && w.lease_owner) ?? null);
+  run.obs.trackWorkflow(r.value.workflow_id);
+  run.log('workflow claimed', { workflow_id: r.value.workflow_id, owner: r.value.lease_owner, agent: run.agentByOwner(r.value.lease_owner)?.name ?? null, waited_ms: r.waitedMs });
+  return { wf: r.value, state: r.state };
+}
+
+function recordMessages(run: CaseRun, s: LiveState): void {
+  run.messages = messageTranscript(s.events).map((m) => ({ sim_time_ms: m.sim_time_ms, from: m.from, to: m.to, topic: m.topic, workflow_id: m.workflow_id, text: m.text }));
+}
+
+async function caseL7(run: CaseRun): Promise<LiveState> {
+  const { wfPump, dest } = await startPairAndPump(run);
+  const xidGpu = await injectIsolatedXid(run, dest.gpus, racksOf(dest.gpus));
+  run.key('xid_gpu', xidGpu);
+  const { wf: wfXidRec, state: s2 } = await waitAnotherWorkflow(run, [wfPump], 'the XID incident to open a second workflow with an owner');
+  const wfXid = wfXidRec.workflow_id;
+  const owners = workflowOwners(s2.workflows);
+  const ids = run.identities();
+  run.add(checkOwnedByDifferentAgents(owners, wfPump, wfXid, ids));
+  run.add(check('overlapping active intervals (both workflows non-terminal at the same time)', bothActive(s2.workflows, wfPump, wfXid), s2.workflows.map((w) => `${w.workflow_id}@${w.stage}`).join(', '), { sim_time_ms: s2.snapshot.clock.sim_time_ms }));
+  run.add(checkWorkDistribution(owners, ids));
+  run.add(checkZoneAffinity(s2.workflows.filter((w) => w.workflow_id === wfPump || w.workflow_id === wfXid), await run.obs.links(), s2.snapshot, ids));
+
+  // Kill whichever agent owns the pump workflow; the OTHER live agent must reclaim it without any restart.
+  const before = await run.obs.read();
+  const wfBefore = wfOf(before, wfPump);
+  if (!wfBefore || wfBefore.stage === 'done' || wfBefore.stage === 'escalated') throw new Error(`pump workflow ${wfPump} already settled (${wfBefore?.stage ?? 'missing'}) before the kill`);
+  const victim = run.agentByOwner(wfBefore.lease_owner);
+  if (!victim) throw new Error(`pump workflow owner ${wfBefore.lease_owner} is not one of the spawned agents`);
+  await run.killAgent(victim);
+  const survivor = run.liveAgents()[0];
+  if (!survivor) throw new Error('no surviving agent after the kill');
+  run.log('survivor', { name: survivor.name, worker_id: survivor.workerId });
+
+  const wfAfter = await waitReclaim(run, wfPump, wfBefore.lease_owner);
+  run.add(checkWorkflowReclaimed(wfBefore, wfAfter));
+  const newOwner = run.agentByOwner(wfAfter.lease_owner);
+  run.add(check('reclaimed by the surviving agent without a restart', newOwner?.pid === survivor.pid && run.generations.length === 2 && survivor.isAlive(), `owner ${wfAfter.lease_owner} -> ${newOwner?.name ?? 'unknown'} pid ${newOwner?.pid ?? '-'}; ${run.generations.length} agent processes spawned in total`, {
+    owner_after: wfAfter.lease_owner,
+    survivor: survivor.workerId,
+    generations: run.generations.length,
+  }));
+
+  const { wf, state } = await waitWorkflowSettled(run, wfPump, 60_000);
+  const resumed = (wf.state as { resumed?: { by_worker?: string; previous_owner?: string | null } }).resumed;
+  run.add(check('handoff recorded: resume marker names survivor and dead owner', resumed?.by_worker === survivor.workerId && resumed?.previous_owner === wfBefore.lease_owner, JSON.stringify(resumed ?? null), { resumed: resumed ?? null }));
+  run.add(checkKeysReconciled(before.details, state.details, { allowReplan: true }));
+  finalChecks(run, state, wf, false);
+
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  assertHandoffs(run, all.workflows);
+  run.add(checkSeparateIncidents(all.state.incidents, await run.obs.links(), COOLING_RESOURCE_IDS, [xidGpu, nodeOfGpu(xidGpu) ?? xidGpu]));
+  run.add(checkNoDuplicateIntents(all.state.details));
+  recordMessages(run, all.state);
+  run.add(checkMessagesWellFormed(all.state.events));
+  run.add(checkMoveAcknowledged(messageTranscript(all.state.events)));
+  run.add(checkTakeoverAnnounced(messageTranscript(all.state.events), wfPump, wfBefore.lease_owner, survivor.name ?? ''));
+  return all.state;
+}
+
+async function caseL8(run: CaseRun): Promise<LiveState> {
+  const { wfPump, dest } = await startPairAndPump(run);
+  const xid1 = await injectIsolatedXid(run, dest.gpus, racksOf(dest.gpus));
+  run.key('xid_gpu_1', xid1);
+  const { wf: wf2, state: s2 } = await waitAnotherWorkflow(run, [wfPump], 'the first XID incident to open a second workflow with an owner');
+  const ids = run.identities();
+  run.add(checkOwnedByDifferentAgents(workflowOwners(s2.workflows), wfPump, wf2.workflow_id, ids));
+  // Third incident while both agents are (or were just) busy: another isolated rack.
+  const xid2 = await injectIsolatedXid(run, [...dest.gpus, xid1], [...racksOf(dest.gpus), ...racksOf([xid1])]);
+  run.key('xid_gpu_2', xid2);
+  const { wf: wf3, state: s3 } = await waitAnotherWorkflow(run, [wfPump, wf2.workflow_id], 'the second XID incident to be claimed once an agent frees up');
+  run.add(check('third incident claimed by a live agent', run.agentByOwner(wf3.lease_owner) !== null && run.liveAgents().length === 2, `${wf3.workflow_id} -> ${run.agentByOwner(wf3.lease_owner)?.name ?? wf3.lease_owner}`, { owner: wf3.lease_owner }));
+  run.add(checkWorkDistribution(workflowOwners(s3.workflows), ids));
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run) + 120_000);
+  run.add(check('three workflows settled', all.workflows.length >= 3 && all.workflows.every((w) => w.stage === 'done' || w.stage === 'escalated'), all.workflows.map((w) => `${w.workflow_id}@${w.stage}`).join(', ')));
+  assertHandoffs(run, all.workflows);
+  run.add(checkAllocationUniqueness(all.state.snapshot.allocations, all.state.jobs));
+  run.add(checkNoDuplicateIntents(all.state.details));
+  recordMessages(run, all.state);
+  run.add(checkMessagesWellFormed(all.state.events));
+  return all.state;
+}
+
+const RUNNERS: Record<CaseId, (run: CaseRun) => Promise<LiveState>> = { L1: caseL1, L2: caseL2, L3: caseL3, L4: caseL4, L5: caseL5, L6: caseL6, L7: caseL7, L8: caseL8 };
 
 // --------------------------------------------------------------------------------------- entry
 

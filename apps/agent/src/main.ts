@@ -6,7 +6,7 @@ import { createAgentLoop, LLM_UNAVAILABLE_NOTICE } from './agent-loop.js';
 import { isAdapterNotReady } from './adapters/errors.js';
 import { createDbPort, loadDbClient } from './adapters/db.js';
 import { createPhysicsPort } from './adapters/physics.js';
-import { ConfigError, loadConfig, redact, redactString, requireConfig, type AgentConfig } from './config.js';
+import { agentNameFor, ConfigError, loadConfig, redact, redactString, requireConfig, workerIdFor, type AgentConfig } from './config.js';
 import { createEventPublisher } from './events.js';
 import { createLoggingLlm, createNimLlm } from './llm.js';
 import type { DbPort, LlmPort, PhysicsPort } from './ports.js';
@@ -73,13 +73,14 @@ async function main(): Promise<number> {
   const db = await createDbPort({ uri: stdb.STDB_URI, db: stdb.STDB_DB, token: stdb.STDB_AGENT_TOKEN });
   const snap = await db.getObservedSnapshot();
   const runId = snap.run_id;
-  const workerId = `agent-${hostname()}-${process.pid}`;
+  const workerId = workerIdFor(cfg, hostname(), process.pid);
+  const agentName = agentNameFor(cfg, workerId);
   const sim = trackSimClock(db, snap.clock.sim_time_ms);
   // No event read-back on DbPort: a wall-clock start seq keeps ids unique across restarts.
   const events = createEventPublisher({ db, runId, clock: sim.clock, redact: (s) => redactString(s, cfg), startSeq: Date.now() });
-  const loop = createAgentLoop({ db, physics: adapters.physics, llm: buildLlm(cfg), events, workerId, runId, clock: sim.clock, log });
+  const loop = createAgentLoop({ db, physics: adapters.physics, llm: buildLlm(cfg), events, workerId, agentName, zone: cfg.AGENT_ZONE ?? null, runId, clock: sim.clock, log });
 
-  log(`worker ${workerId} on run ${runId} (sim t=${(snap.clock.sim_time_ms / 1000).toFixed(1)} s)`);
+  log(`worker ${workerId} (agent ${agentName}, zone ${cfg.AGENT_ZONE ?? 'any'}) on run ${runId} (sim t=${(snap.clock.sim_time_ms / 1000).toFixed(1)} s)`);
   await new Promise<void>((resolve) => {
     let stopping = false;
     const shutdown = (sig: string) => {

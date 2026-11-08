@@ -26,7 +26,8 @@ function sample(): RunArtifact {
     allocation_uniqueness: { ok: true, doubled: {} },
     checkpoint_count: { job_id: 'job-a', complete_before: 1, complete_after: 2 },
     verification: { handoff: 'workload recovered' },
-    agent_generations: [{ generation: 1, pid: 123, started_unix_ms: 1, ended_unix_ms: 2, how_ended: 'SIGKILL', exit_code: null, stderr_tail: [`[err] connect failed with token ${TOKEN}`] }],
+    agent_generations: [{ generation: 1, pid: 123, name: 'agent-alpha', zone: 'loop-a', started_unix_ms: 1, ended_unix_ms: 2, how_ended: 'SIGKILL', exit_code: null, stderr_tail: [`[err] connect failed with token ${TOKEN}`] }],
+    messages: [{ sim_time_ms: 605_000, from: 'agent-alpha', to: 'all', topic: 'cross_zone_move', workflow_id: 'wf-inc-1', text: 'move job=job-a dest_racks=rack-r7,rack-r8 gpus=16 checkpoint=planned' }],
     timeline: [{ wall_unix_ms: 1_700_000_000_500, sim_time_ms: 601_000, event: 'agent generation 1 spawned', detail: { pid: 123 } }],
     last_snapshot_summary: { note: `uses ${TOKEN}` },
     ledger: [],
@@ -57,7 +58,9 @@ describe('live harness report', () => {
     expect(md).toContain('checkpoint=`wf-inc-1:checkpoint:job-a:1`');
     expect(md).toContain('complete 1 → 2');
     expect(md).toContain('FAIL  checkpoint completed exactly once');
-    expect(md).toContain('gen1 pid 123 (SIGKILL)');
+    expect(md).toContain('gen1 agent-alpha@loop-a pid 123 (SIGKILL)');
+    expect(md).toContain('**Agent messages:**');
+    expect(md).toContain('sim=605000 agent-alpha -> all [cross_zone_move] wf-inc-1: move job=job-a dest_racks=rack-r7,rack-r8 gpus=16 checkpoint=planned');
   });
 
   it('labels a deterministic rehearsal as not a Nemotron claim', () => {

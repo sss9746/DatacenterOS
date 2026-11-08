@@ -1,9 +1,16 @@
 // P3 main loop: triage -> diagnose -> plan -> execute (with replan watcher) -> verify, plus resume-on-boot.
 //
-// Workflow granularity (documented choice): ONE workflow per triage batch. Every new, unhandled incident
-// found in one tick goes into a single workflow `wf-<first incident id>` and is planned together, so the
-// planner's cross-job conflict resolution covers all of them. Incidents that arrive while a plan executes
-// and touch it are folded in by replan (runReplan links the new incident to the same workflow).
+// Workflow granularity: ONE workflow per INCIDENT, `wf-<incident id>` (stable, so any agent derives the same id).
+// Independent incidents found in one tick become separate workflows, driven concurrently in this process or
+// leased by other agent processes; cross-workflow conflicts are caught by the ledger + evaluateSafety and the
+// re-stamp/replan path. Correlated symptoms of one incident stay one workflow (triage groups them). Incidents
+// that arrive while a plan executes and touch it are folded in by replan (runReplan links them to that workflow).
+//
+// Multi-agent (SCOPE §5): several agent processes coordinate ONLY through the DB. A fresh incident is claimed by
+// whoever gets the workflow lease first; a loser stands by and retries through resume once that lease expires.
+// Claiming preference: the agent's AGENT_ZONE (cooling loop) first; other zones, and every incident after the
+// first in a tick, only after `claimGraceMs` if nobody else took them. Expired leases of OTHER workers are adopted
+// on every tick (global failover). Agents also exchange short state-driven messages over agent_event rows.
 //
 // An incident is "handled" when it is listed by an open workflow or its state is no longer `open`
 // (investigating -> monitoring | escalated). Recovery never marks an incident `resolved`: a degraded pump
@@ -14,7 +21,8 @@
 // nothing new could appear, so a steady-state cluster does not burn Nemotron calls. A circuit breaker
 // stops calling the LLM for a while after LlmUnavailableError; every module then runs deterministically.
 
-import type { Incident, PlanCandidate } from '@dcos/contracts';
+import type { Incident, IncidentLink, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
+import { agentNameOfWorker, BROADCAST, createMessenger, formatMove, parseMove, respondToMove, type AgentMessage, type Messenger, type OwnFacts } from './agent-messages.js';
 import { createCoordinator, DEFAULT_LEASE_MS, type Coordinator, type ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
 import { LlmUnavailableError } from './llm.js';
@@ -32,6 +40,7 @@ import {
 } from './resume.js';
 import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, runTriage, SYMPTOM_BUCKET_MS } from './triage.js';
 import { buildOperatorHandoff, verifyRecovery, type VerificationReport } from './verify.js';
+import { claimsImmediately, incidentZone, orderByZone, racksOfGpus, zonesOfRacks, type Zone } from './zones.js';
 
 // ---------------------------------------------------------------------------------------------- types
 
@@ -42,6 +51,10 @@ export interface AgentLoopDeps {
   llm: LlmPort | null;
   events: EventPublisher;
   workerId: string;
+  /** Name used in agent-to-agent messages (AGENT_NAME; default: the worker id). */
+  agentName?: string;
+  /** Cooling loop whose incidents this agent claims first (AGENT_ZONE); null/undefined = any. */
+  zone?: Zone | null;
   runId: string;
   clock: { unixMs(): number; simTimeMs(): number };
   /** Wall sleep between action polls (tests/demo tick the fake DB here). Default: real setTimeout. */
@@ -64,10 +77,15 @@ export interface AgentLoopDeps {
   maxWorkflowRetries?: number;
   /** First retry delay after such a throw; doubles per retry (default 2000 wall ms). */
   retryBackoffMs?: number;
+  /** Wait this long before claiming an out-of-zone incident, or any incident after the first in a tick (default 15 000 wall ms). */
+  claimGraceMs?: number;
+  /** Agent-to-agent message rate limit per topic per workflow (default 5000 wall ms). */
+  messageRateMs?: number;
   log?: (msg: string) => void;
 }
 
-export type TickStatus = 'idle' | 'handled' | 'busy' | 'error' | 'stopped' | 'lost_ownership';
+/** `standby`: another live worker owns the workflow this tick wanted; it is retried through resume after that lease. */
+export type TickStatus = 'idle' | 'handled' | 'busy' | 'error' | 'stopped' | 'lost_ownership' | 'standby';
 
 export interface LoopTickReport {
   status: TickStatus;
@@ -75,7 +93,9 @@ export interface LoopTickReport {
   incidents: Incident[];
   /** Incidents this tick started handling (triage batch + any folded in by replan). */
   new_incident_ids: string[];
+  /** First workflow this tick drove (kept for single-incident callers); `workflow_ids` lists every one. */
   workflow_id: string | null;
+  workflow_ids: string[];
   plans: PlanResult[];
   replans: ReplanOutcome[];
   executions: ExecutionResult[];
@@ -90,6 +110,8 @@ export interface AgentLoop {
   runOnce(): Promise<LoopTickReport>;
   /** Report of the resume pass run by start() (null before start). */
   lastResume(): ResumeReport | null;
+  /** Agent-to-agent messages sent and received by this loop, oldest first. */
+  messages(): AgentMessage[];
 }
 
 // ---------------------------------------------------------------------------------------------- constants
@@ -107,6 +129,7 @@ export const DEFAULT_MAX_REPLANS = 3;
 export const DEFAULT_LLM_COOLDOWN_MS = 60_000;
 export const DEFAULT_MAX_WORKFLOW_RETRIES = 3;
 export const DEFAULT_RETRY_BACKOFF_MS = 2_000;
+export const DEFAULT_CLAIM_GRACE_MS = 15_000;
 /** Retry a lease-held workflow this long after its lease expiry (clock skew margin). */
 const LEASE_EXPIRY_MARGIN_MS = 1_000;
 const STOP_WAIT_MS = 5_000;
@@ -126,6 +149,7 @@ const emptyReport = (status: TickStatus): LoopTickReport => ({
   incidents: [],
   new_incident_ids: [],
   workflow_id: null,
+  workflow_ids: [],
   plans: [],
   replans: [],
   executions: [],
@@ -134,6 +158,9 @@ const emptyReport = (status: TickStatus): LoopTickReport => ({
 });
 
 const errMsg = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+/** Another worker claimed the workflow between our read and our claim (resume's `acquire` treats both the same). */
+const isLeaseRace = (e: unknown): boolean => isDbError(e, 'LEASE_HELD') || isDbError(e, 'VERSION_CONFLICT');
+const isClosed = (wf: WorkflowRecord | null): boolean => !wf || wf.stage === 'done' || wf.stage === 'escalated';
 
 // ---------------------------------------------------------------------------------------------- LLM guard
 
@@ -244,6 +271,14 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   const now = () => clock.unixMs();
   const maxWorkflowRetries = deps.maxWorkflowRetries ?? DEFAULT_MAX_WORKFLOW_RETRIES;
   const retryBackoffMs = deps.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+  const claimGraceMs = deps.claimGraceMs ?? DEFAULT_CLAIM_GRACE_MS;
+  const agentName = deps.agentName ?? workerId;
+  const zone: Zone | null = deps.zone ?? null;
+  const messenger: Messenger = createMessenger({ db, events, runId, agentName, now: () => clock.unixMs(), log, ...(deps.messageRateMs !== undefined ? { rateLimitMs: deps.messageRateMs } : {}) });
+  /** Workflows this process is driving right now (for message replies and to skip double adoption). */
+  const active = new Map<string, { incident_ids: string[]; plan: PlanResult | null; coord: Coordinator }>();
+  /** Takeovers already announced to the other agents. */
+  const announced = new Set<string>();
 
   let inflight: Promise<LoopTickReport> | null = null;
   let started = false;
@@ -377,6 +412,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     await safeEmit(stage, { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: `escalated to operator: ${reason}` });
     await setIncidentState(ids, 'escalated');
     report.escalated = true;
+    await incidentUpdate(wfId, ids[0], stage, `escalated: ${reason}; needs a human`);
   }
 
   /**
@@ -389,6 +425,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     await coord.updateStage('done', { verification });
     await safeEmit('verify', { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: verification.handoff });
     await setIncidentState(ids, 'monitoring');
+    await incidentUpdate(wfId, ids[0], 'verify', 'closed without action: incident stays under monitoring');
   }
 
   /** Jobs the tick's plans looked at (for the handoff's affected-jobs list). */
@@ -416,14 +453,18 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       createCoordinator({ db, physics, events, workerId, clock, sleep, leaseMs, pollMs: actionPollMs, onLostOwnership: (why) => log(`lost ownership of ${wfId}: ${why}`) });
     if (!start.coord) await coord.ensureWorkflow(wfId, ids);
     coord.startHeartbeat();
-    report.workflow_id = wfId;
+    report.workflow_id ??= wfId;
+    if (!report.workflow_ids.includes(wfId)) report.workflow_ids.push(wfId);
+    active.set(wfId, { incident_ids: [...new Set([...(coord.lease()?.workflow.incident_ids ?? []), ...ids])], plan: start.plan ?? null, coord });
     let watcher: ReplanWatcher | null = null;
     try {
       await setIncidentState(ids, 'investigating');
       let attempt = start.attempt;
       stageRef.stage = 'plan';
       let current = start.plan ?? (await plan(wfId, incidents, attempt, coord));
+      active.get(wfId)!.plan = current;
       report.plans.push(current);
+      if (!start.plan) await announceCrossZoneMove(wfId, current);
       if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
       if (deps.requireApproval && current.job_plans.some((p) => p.needs_approval)) {
         return escalate(wfId, coord, workflowIncidents(coord, current), 'plan', 'planner flagged needs_approval', report);
@@ -482,10 +523,12 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         report.new_incident_ids = [...new Set([...report.new_incident_ids, ...out.new_incident_ids])];
         await setIncidentState(out.new_plan.plan.incident_ids, 'investigating');
         current = out.new_plan;
+        active.get(wfId)!.plan = current;
         report.plans.push(current);
         // R3b: the new plan's candidates replace this workflow's older entries for the same jobs.
         await coord.updateStage('replan', { candidates: mergeCandidates(coord.state().candidates, current.candidates ?? []) });
         await publishPlan(wfId, current, out);
+        await announceCrossZoneMove(wfId, current);
         if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
         w.reset(current);
       }
@@ -499,9 +542,104 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       report.escalated = report.escalated || v.escalate;
       await safeEmit('verify', { workflowId: wfId, incidentId: current.plan.incident_ids[0], actor: 'code', summary: `handoff: ${v.handoff}` });
       await setIncidentState(workflowIncidents(coord, current), v.escalate ? 'escalated' : 'monitoring');
+      await incidentUpdate(wfId, current.plan.incident_ids[0], 'verify', v.escalate ? `escalated: ${v.handoff}` : `recovered: ${v.handoff}`);
     } finally {
+      active.delete(wfId);
       watcher?.dispose();
       coord.stopHeartbeat();
+    }
+  }
+
+  // ------------------------------------------------------------------ agent-to-agent messages
+
+  /** `cross_zone_move`: this plan moves a job onto racks of another zone (or any racks, when this agent has no zone). */
+  async function announceCrossZoneMove(wfId: string, r: PlanResult): Promise<void> {
+    const moves = r.commands.filter((c) => c.operation === 'migrate_restart');
+    if (moves.length === 0) return;
+    const snap = await db.getObservedSnapshot().catch(() => null);
+    if (!snap) return;
+    for (const mv of moves) {
+      const dest = Array.isArray(mv.arguments.destination_gpu_ids) ? (mv.arguments.destination_gpu_ids as string[]) : [];
+      const racks = racksOfGpus(snap, dest);
+      const zones = zonesOfRacks(snap, racks);
+      if (zone !== null && !zones.some((z) => z !== zone)) continue; // inside our own zone: nobody else to tell
+      const ck = r.commands.find((c) => c.operation === 'checkpoint' && c.job_id === mv.job_id);
+      const ckStatus = ck ? ((await db.getActionStatus(ck.command_key).catch(() => null))?.status ?? 'planned') : 'none';
+      await messenger.send({
+        topic: 'cross_zone_move',
+        to: BROADCAST,
+        stage: 'plan',
+        workflowId: wfId,
+        incidentId: r.plan.incident_ids[0],
+        text: formatMove({ job_id: mv.job_id ?? mv.target_resource_id, dest_racks: racks, gpu_count: dest.length, checkpoint: ckStatus }),
+      });
+    }
+  }
+
+  /** `incident_update`: a workflow this agent owned closed (done / escalated). */
+  async function incidentUpdate(wfId: string, incidentId: string | undefined, stage: AgentStage, text: string): Promise<void> {
+    await messenger.send({ topic: 'incident_update', to: BROADCAST, stage, workflowId: wfId, incidentId: incidentId ?? null, text: `${wfId} ${text}` });
+  }
+
+  /** `takeover`: this agent reclaimed another worker's expired lease (once per workflow). */
+  async function announceTakeover(wfId: string, state: Record<string, unknown>, token: bigint | undefined, incidentId?: string): Promise<void> {
+    if (announced.has(wfId)) return;
+    const resumed = state.resumed as { previous_owner?: string | null; by_worker?: string } | undefined;
+    const previous = resumed?.previous_owner;
+    if (!previous || resumed?.by_worker !== workerId) return;
+    announced.add(wfId);
+    await messenger.send({
+      topic: 'takeover',
+      to: BROADCAST,
+      stage: 'execute',
+      workflowId: wfId,
+      incidentId: incidentId ?? null,
+      text: `${previous} lease expired on ${wfId}; ${agentName} taking over (token ${token?.toString() ?? '?'})`,
+    });
+  }
+
+  /** `stand_by`: posted from the fencing-rejection side when a live worker owns the workflow this agent wanted. */
+  async function standByMessage(wfId: string, stage: AgentStage): Promise<void> {
+    const wf = await db.getWorkflow(wfId).catch(() => null);
+    if (!wf || !wf.lease_owner || wf.lease_owner === workerId) return;
+    await messenger.send({
+      topic: 'stand_by',
+      to: agentNameOfWorker(wf.lease_owner),
+      stage,
+      workflowId: wfId,
+      incidentId: wf.incident_ids[0] ?? null,
+      text: `${wf.lease_owner} owns ${wfId} now (token ${wf.fencing_token.toString()}); ${agentName} standing by`,
+    });
+  }
+
+  /** This agent's real state, for replying to another agent's announcement. */
+  async function ownFacts(): Promise<OwnFacts> {
+    const ids = [...active.values()].flatMap((a) => a.incident_ids);
+    const [snap, evidence] = await Promise.all([db.getObservedSnapshot(), ids.length ? db.getEvidence(ids, DEFAULT_TRIAGE_WINDOW_MS).catch(() => null) : Promise.resolve(null)]);
+    const workflows: OwnFacts['workflows'] = [];
+    for (const [wfId, a] of active) {
+      const linked = (evidence?.links ?? []).filter((l) => l.link_kind === 'resource' && a.incident_ids.includes(l.incident_id)).map((l) => l.linked_id);
+      const gpus = linked.flatMap((id) => (snap.gpus.some((g) => g.resource_id === id) ? [id] : snap.gpus.filter((g) => g.node_id === id || snap.nodes.find((n) => n.resource_id === g.node_id)?.rack_id === id).map((g) => g.resource_id)));
+      const dest = (a.plan?.commands ?? []).flatMap((c) => (Array.isArray(c.arguments.destination_gpu_ids) ? (c.arguments.destination_gpu_ids as string[]) : []));
+      const st = a.coord.state() as { current_command_key?: string | null; current_status?: string | null };
+      const inFlight = st.current_command_key && st.current_status && st.current_status !== 'succeeded' ? [st.current_command_key] : [];
+      workflows.push({ workflow_id: wfId, incident_ids: a.incident_ids, incident_racks: racksOfGpus(snap, gpus), planned_dest_racks: racksOfGpus(snap, dest), in_flight: inFlight });
+    }
+    return { agentName, zone, workflows };
+  }
+
+  async function onMessage(m: AgentMessage): Promise<void> {
+    log(`message from ${m.from} [${m.topic}]${m.workflow_id ? ` ${m.workflow_id}` : ''}: ${m.text}`);
+    if (m.topic === 'cross_zone_move') {
+      const move = parseMove(m.text);
+      if (!move) return;
+      const reply = respondToMove(move, await ownFacts());
+      await messenger.send({ topic: reply.topic, to: m.from, stage: 'plan', workflowId: m.workflow_id, incidentId: m.incident_id, text: reply.text });
+      return;
+    }
+    if (m.topic === 'conflict' && m.workflow_id && active.has(m.workflow_id)) {
+      // Advisory only: the ledger and evaluateSafety decide; the replan watcher keeps its own materiality rules.
+      await safeEmit('safety', { workflowId: m.workflow_id, actor: 'code', summary: `conflict reported by ${m.from}: ${m.text}; ledger/safety decide` });
     }
   }
 
@@ -532,6 +670,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     }
     const why = takeovers.get(wfId)?.reason ?? (failures.has(wfId) ? 'after an agent error' : 'after agent restart');
     await safeEmit('execute', { workflowId: wfId, incidentId: wf.incident_ids[0], actor: 'code', summary: `continuing ${wfId} from stage ${wf.stage} ${why}` });
+    await announceTakeover(wfId, wf.state, wf.fencing_token, wf.incident_ids[0]);
     await driveWorkflow(wfId, incidents, persisted ? { attempt, plan: persisted } : { attempt }, report, stageRef);
   }
 
@@ -543,11 +682,16 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     log(`resume retry: ${wfId} ${item.action}${item.note ? ` (${item.note})` : ''}`);
     if (item.note === LEASE_HELD_BY_LIVE_WORKER) {
       await requeueAfterLease(wfId);
+      await standByMessage(wfId, 'execute');
+      if (report.status === 'idle') report.status = 'standby';
       return;
     }
-    report.workflow_id = wfId;
+    report.workflow_id ??= wfId;
+    if (!report.workflow_ids.includes(wfId)) report.workflow_ids.push(wfId);
     if (report.status === 'idle') report.status = 'handled';
     await settleResumed({ worker_id: workerId, items: [item], duplicates_detected: 0 });
+    const after = await db.getWorkflow(wfId).catch(() => null);
+    if (after) await announceTakeover(wfId, after.state, after.fencing_token, after.incident_ids[0]);
   }
 
   /** Try `wfId` again (through resume) shortly after its current lease expires. */
@@ -603,31 +747,49 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     }
   }
 
-  /** Run every due takeover, each isolated: one failing workflow never drops the others. */
-  async function runTakeovers(report: LoopTickReport, stageRef: { stage: AgentStage }): Promise<void> {
+  /** One due takeover, isolated: a failing workflow never drops the others. */
+  async function runTakeover(wfId: string, p: { mode: 'continue' | 'resume' | 'escalate'; reason?: string }, report: LoopTickReport): Promise<void> {
+    const stageRef: { stage: AgentStage } = { stage: 'plan' };
+    try {
+      if (p.mode === 'escalate') return await escalateStuck(wfId, p.reason ?? 'agent error');
+      if (p.mode === 'resume') {
+        takeovers.delete(wfId);
+        return await resumeTakeover(wfId, report);
+      }
+      await continueTakeover(wfId, report, stageRef);
+      takeovers.delete(wfId);
+      failures.delete(wfId);
+    } catch (e) {
+      takeovers.delete(wfId);
+      if (isLeaseRace(e)) {
+        log(`${wfId} is owned by another worker (${errMsg(e)}): standing by`);
+        await requeueAfterLease(wfId).catch(() => undefined);
+        return;
+      }
+      log(`takeover of ${wfId} failed during ${stageRef.stage}: ${errMsg(e)}`);
+      await onWorkflowError(wfId, stageRef.stage, e);
+    }
+  }
+
+  /** Run every due takeover concurrently (a lone survivor takes on every stranded workflow at once). */
+  async function runTakeovers(report: LoopTickReport): Promise<void> {
     const t = now();
     const due = [...takeovers].filter(([, p]) => p.dueUnixMs <= t);
-    for (const [wfId, p] of due) {
-      if (stopping) return;
-      try {
-        if (p.mode === 'escalate') {
-          await escalateStuck(wfId, p.reason ?? 'agent error');
-          continue;
-        }
-        if (p.mode === 'resume') {
-          takeovers.delete(wfId);
-          await resumeTakeover(wfId, report);
-          continue;
-        }
-        stageRef.stage = 'plan';
-        await continueTakeover(wfId, report, stageRef);
-        takeovers.delete(wfId);
-        failures.delete(wfId);
-      } catch (e) {
-        takeovers.delete(wfId);
-        log(`takeover of ${wfId} failed during ${stageRef.stage}: ${errMsg(e)}`);
-        await onWorkflowError(wfId, stageRef.stage, e);
-      }
+    if (due.length === 0 || stopping) return;
+    await Promise.all(due.map(([wfId, p]) => runTakeover(wfId, p, report)));
+  }
+
+  /**
+   * Global failover: an open workflow whose OTHER worker's lease has expired (no heartbeat) is queued for resume,
+   * even if this agent never tried to claim it. Live leases, our own workflows and queued ones are left alone.
+   */
+  async function adoptOrphans(): Promise<void> {
+    const t = now();
+    for (const wf of await db.listOpenWorkflows()) {
+      if (isClosed(wf) || wf.lease_owner === workerId || takeovers.has(wf.workflow_id) || active.has(wf.workflow_id)) continue;
+      if (wf.lease_owner !== null && wf.lease_expires_unix_ms + LEASE_EXPIRY_MARGIN_MS > t) continue;
+      log(`${wf.workflow_id}: lease of ${wf.lease_owner ?? 'nobody'} expired; queuing takeover`);
+      takeovers.set(wf.workflow_id, { mode: 'resume', dueUnixMs: t, reason: `${wf.lease_owner ?? 'nobody'} lease expired` });
     }
   }
 
@@ -657,6 +819,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const incidents = (await db.listIncidents()).filter((i) => ids.has(i.incident_id) && i.state !== 'resolved');
     const attempt = attemptOf(h.coordinator.state(), h.plan.commands.map((c) => c.command_key));
     const current: PlanResult = { plan: h.plan.plan, commands: h.plan.commands, job_plans: [], tool_calls: [], used_llm: false };
+    await announceTakeover(wfId, h.coordinator.state(), h.coordinator.lease()?.fencing_token, h.workflow.incident_ids[0]);
     let pendingReplan: DriveStart['pendingReplan'];
     if (h.invalidReason) {
       log(`resume: ${wfId} persisted plan invalid (${h.invalidReason}); replanning as attempt ${attempt + 1}`);
@@ -690,6 +853,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       }
       if (item.note === LEASE_HELD_BY_LIVE_WORKER) {
         await requeueAfterLease(item.workflow_id);
+        await standByMessage(item.workflow_id, 'execute');
         continue;
       }
       if (item.action !== 'resumed_execute' && item.action !== 'resumed_verify' && item.action !== 'escalated') continue;
@@ -701,7 +865,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   // ------------------------------------------------------------------ tick
 
   /** Cheap deterministic gate: could triage produce an incident nobody handles? Returns a fingerprint or null. */
-  async function precheck(): Promise<{ needed: boolean; fingerprint: string; openWorkflows: WorkflowRecord[] }> {
+  async function precheck(): Promise<{ needed: boolean; fingerprint: string; openWorkflows: WorkflowRecord[]; snapshot: ObservedSnapshot; links: IncidentLink[] }> {
     const [obs, evidence, incidents, openWorkflows] = await Promise.all([
       db.getObservedSnapshot(),
       db.getEvidence([], DEFAULT_TRIAGE_WINDOW_MS),
@@ -714,15 +878,72 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const fingerprint = candidates.map((c) => c.candidate_id).sort().join('|');
     const unhandledOpen = incidents.some((i) => i.state === 'open' && !handled.has(i.incident_id));
     const needed = unhandledOpen || (candidates.some((c) => !handled.has(c.candidate_id)) && fingerprint !== lastSkippedFingerprint);
-    return { needed, fingerprint, openWorkflows };
+    return { needed, fingerprint, openWorkflows, snapshot: obs, links: evidence.links };
+  }
+
+  /** Lease held by a live worker other than us (visible without trying to claim). */
+  const heldByOther = (wf: WorkflowRecord | null): boolean => !!wf && wf.lease_owner !== null && wf.lease_owner !== workerId && wf.lease_expires_unix_ms > now();
+
+  /**
+   * Open `wf-<incident>` for one fresh incident and drive it. A lease race (another agent got it first) is not an
+   * error: the workflow is retried through resume after that lease expires, and the tick reports `standby`.
+   */
+  async function driveFresh(inc: Incident, report: LoopTickReport): Promise<void> {
+    const wfId = `wf-${inc.incident_id}`;
+    const stageRef: { stage: AgentStage } = { stage: 'plan' };
+    try {
+      const existing = await db.getWorkflow(wfId);
+      if (existing && (existing.stage === 'done' || existing.stage === 'escalated')) {
+        // Crash between closing the workflow and marking its incident: just settle it.
+        await setIncidentState([inc.incident_id], existing.stage === 'escalated' ? 'escalated' : 'monitoring');
+        return;
+      }
+      if (heldByOther(existing)) {
+        log(`${wfId} is owned by ${existing!.lease_owner}: standing by`);
+        await requeueAfterLease(wfId);
+        if (report.status === 'idle') report.status = 'standby';
+        return;
+      }
+      report.status = 'handled';
+      await driveWorkflow(wfId, [inc], { attempt: 1 }, report, stageRef);
+      failures.delete(wfId);
+    } catch (e) {
+      const msg = errMsg(e);
+      if (isLeaseRace(e)) {
+        log(`${wfId} was claimed by another worker (${msg}): standing by`);
+        await requeueAfterLease(wfId).catch((err: unknown) => log(`requeue of ${wfId} failed: ${errMsg(err)}`));
+        if (report.status === 'idle' || (report.status === 'handled' && report.workflow_ids.length === 0)) report.status = 'standby';
+        return;
+      }
+      log(`error during ${stageRef.stage}: ${msg}`);
+      await onWorkflowError(wfId, stageRef.stage, e); // retry with backoff, escalate after the cap
+      report.status = 'error';
+      report.error = msg;
+    }
+  }
+
+  /**
+   * Incidents this agent does not claim right away (another zone, or not the first of the tick): give the other
+   * agents `claimGraceMs` to take them, then drive whatever is still unclaimed (no agent may leave work stranded).
+   */
+  async function driveDeferred(incidents: Incident[], report: LoopTickReport): Promise<void> {
+    if (incidents.length === 0) return;
+    log(`deferring ${incidents.map((i) => i.incident_id).join(', ')} for ${Math.round(claimGraceMs / 1000)} s (other agents claim first)`);
+    await sleep(claimGraceMs);
+    if (stopping) return;
+    const handled = handledIds(await db.listOpenWorkflows(), await db.listIncidents());
+    const still = incidents.filter((i) => !handled.has(i.incident_id));
+    const taken = incidents.filter((i) => handled.has(i.incident_id)).map((i) => i.incident_id);
+    if (taken.length) log(`${taken.join(', ')} claimed elsewhere during the grace period`);
+    await Promise.all(still.map((i) => driveFresh(i, report)));
   }
 
   async function tick(): Promise<LoopTickReport> {
     const report = emptyReport('idle');
     const stageRef: { stage: AgentStage } = { stage: 'triage' };
-    let activeWf: string | null = null;
     try {
-      await runTakeovers(report, stageRef);
+      await adoptOrphans().catch((e: unknown) => log(`orphan scan failed: ${errMsg(e)}`));
+      await runTakeovers(report);
       if (report.workflow_id) report.status = report.status === 'idle' ? 'handled' : report.status;
       if (stopping) return report;
       stageRef.stage = 'triage';
@@ -746,34 +967,31 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         return report;
       }
       lastSkippedFingerprint = null;
-      const batch = [...fresh].sort((a, b) => a.incident_id.localeCompare(b.incident_id));
-      const wfId = `wf-${batch[0]!.incident_id}`;
+      // One workflow per incident; this agent's zone first, then unknown zones, then other zones.
+      const links = [...gate.links, ...(await db.getEvidence(fresh.map((i) => i.incident_id), DEFAULT_TRIAGE_WINDOW_MS).catch(() => ({ links: [] as IncidentLink[] }))).links];
+      const zoneOf = (id: string) => incidentZone(id, links, gate.snapshot);
+      const batch = orderByZone(fresh, zone, zoneOf);
       report.new_incident_ids = batch.map((i) => i.incident_id);
       stageRef.stage = 'diagnose';
       const diag = diagnoseEvent(triage);
       await safeEmit('diagnose', {
         ...diag,
         toolCalls: withoutRepeats(diag.toolCalls, triageCalls),
-        workflowId: wfId,
+        workflowId: `wf-${batch[0]!.incident_id}`,
         incidentId: batch[0]!.incident_id,
         evidenceIds: batch.flatMap((i) => triage.evidenceIdsByIncident[i.incident_id] ?? []),
       });
-      const existing = await db.getWorkflow(wfId);
-      if (existing && (existing.stage === 'done' || existing.stage === 'escalated')) {
-        // Crash between closing the workflow and marking its incidents: just settle them.
-        await setIncidentState(report.new_incident_ids, existing.stage === 'escalated' ? 'escalated' : 'monitoring');
-        return report;
-      }
-      report.status = 'handled';
-      activeWf = wfId;
-      await driveWorkflow(wfId, batch, { attempt: 1 }, report, stageRef);
-      failures.delete(wfId);
+      const first = batch[0]!;
+      const immediate = claimsImmediately(zone, zoneOf(first.incident_id));
+      const drives: Promise<void>[] = [];
+      if (immediate) drives.push(driveFresh(first, report));
+      drives.push(driveDeferred(immediate ? batch.slice(1) : batch, report));
+      await Promise.all(drives);
       return report;
     } catch (e) {
       const msg = errMsg(e);
       log(`error during ${stageRef.stage}: ${msg}`);
-      if (activeWf) await onWorkflowError(activeWf, stageRef.stage, e); // retry with backoff, escalate after the cap
-      else await safeEmit(stageRef.stage, { workflowId: report.workflow_id, actor: 'code', summary: `agent error during ${stageRef.stage}: ${msg}` });
+      await safeEmit(stageRef.stage, { workflowId: report.workflow_id, actor: 'code', summary: `agent error during ${stageRef.stage}: ${msg}` });
       return { ...report, status: 'error', error: msg };
     }
   }
@@ -838,8 +1056,12 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     unsubscribe?.();
     unsubscribe = null;
     if (inflight) await Promise.race([inflight.then(() => undefined), realSleep(STOP_WAIT_MS)]);
+    messenger.dispose();
     started = false;
   }
 
-  return { start, stop, runOnce, lastResume: () => resumeReport };
+  // Messages are received from creation on (a runOnce-driven loop answers too); stop() disposes the subscription.
+  messenger.subscribe(onMessage);
+
+  return { start, stop, runOnce, lastResume: () => resumeReport, messages: () => messenger.transcript() };
 }

@@ -3,7 +3,8 @@
 //   --db <name>            REQUIRED. The SpacetimeDB database to test against (e.g. dcos-dev).
 //                          `dcos` is production: refused unless --i-know-this-is-prod, and a reset is
 //                          refused on prod no matter what (SCOPE §6: never default a destructive test to prod).
-//   --case L1|..|L6|all    which case(s) to run (default all)
+//   --case L1|..|L8|all    which case(s) to run (default all). L7/L8 spawn TWO named agents (AGENT_NAME
+//                          agent-alpha/agent-beta, AGENT_ZONE loop-a/loop-b) that coordinate only through the DB.
 //   --seed 42  --speed 2  --timeout-s 240  --out <dir>  --run-id run-demo-1
 //   --no-llm               spawn the agent without NIM credentials: a DETERMINISTIC rehearsal, labeled as such
 //   --skip-reset           run against whatever run is live (only way to run on prod; cases may fail)
@@ -11,7 +12,7 @@
 //                          default 0) before the next case's reset / before exit, so a presenter or screen
 //                          recorder can see the Verified + handoff state on the dashboard. Pacing only.
 
-export const CASE_IDS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const;
+export const CASE_IDS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8'] as const;
 export type CaseId = (typeof CASE_IDS)[number];
 
 export const PROD_DB = 'dcos';
@@ -47,7 +48,7 @@ export class ArgsError extends Error {
   }
 }
 
-export const USAGE = `usage: live-recovery-test --db <name> [--case L1|L2|L3|L4|L5|L6|all] [--seed 42] [--speed 2]
+export const USAGE = `usage: live-recovery-test --db <name> [--case L1|L2|L3|L4|L5|L6|L7|L8|all] [--seed 42] [--speed 2]
                           [--timeout-s 240] [--out <dir>] [--run-id run-demo-1] [--no-llm] [--skip-reset]
                           [--hold-s 0] [--i-know-this-is-prod]
   --db is required and must name a disposable dev/local database. '${PROD_DB}' (prod) is refused unless

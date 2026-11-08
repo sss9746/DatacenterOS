@@ -4,6 +4,9 @@
 //   pnpm --filter agent live-recovery --db dcos-dev --case all --speed 2  all six
 //   pnpm --filter agent live-recovery --db dcos-dev --case L3 --no-llm    DETERMINISTIC rehearsal (labeled)
 //   pnpm --filter agent live-recovery --db dcos-dev --case L2 --hold-s 45 hold the Verified state 45 s for recording
+//   pnpm --filter agent live-recovery --db dcos-dev --case L7            TWO agents (agent-alpha@loop-a, agent-beta@loop-b)
+//                                                                       coordinate via the DB; the pump owner is killed
+//   pnpm --filter agent live-recovery --db dcos-dev --case L8            3 incidents, 2 agents: third claimed when one frees up
 //
 // What it does, per case: controlled reset with the agent stopped (never on prod) -> spawn the REAL agent as
 // a child process (same entry as `pnpm --filter agent start`) -> inject faults through the admin reducer ->

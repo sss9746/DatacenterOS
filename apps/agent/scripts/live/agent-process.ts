@@ -15,6 +15,7 @@ const EXIT_WAIT_MS = 5_000;
 
 /** Env var names the agent reads (config.ts) plus the ones this harness sets. Everything else passes through untouched. */
 export const AGENT_ENV_KEYS = [
+  'AGENT_NAME', 'AGENT_ZONE',
   'STDB_URI', 'STDB_DB', 'STDB_AGENT_TOKEN',
   'NIM_BASE_URL', 'NIM_API_KEY', 'NIM_MODEL', 'NIM_FALLBACK_BASE_URL', 'NIM_FALLBACK_MODEL',
   'LLM_MAX_TOKENS', 'LLM_MAX_TOOL_STEPS', 'LLM_TIMEOUT_MS', 'LLM_RETRIES', 'NIM_ENABLE_THINKING',
@@ -30,6 +31,10 @@ export interface AgentEnvInput {
   noLlm: boolean;
   /** L6: point NIM (and its fallback) at an unreachable endpoint with a short timeout. */
   llmOverride?: { baseUrl: string; timeoutMs: number; retries: number };
+  /** L7/L8: AGENT_NAME of the child (worker id becomes `<name>-<pid>`); unset = the default `agent-<host>-<pid>`. */
+  name?: string;
+  /** L7/L8: AGENT_ZONE (`loop-a` | `loop-b`) the child claims first; unset = any. */
+  zone?: string | null;
 }
 
 /**
@@ -43,6 +48,11 @@ export function buildAgentEnv(input: AgentEnvInput): Record<string, string> {
   env.STDB_URI = input.uri;
   env.STDB_DB = input.db;
   env.STDB_AGENT_TOKEN = input.agentToken;
+  // Never inherit a stray AGENT_NAME/AGENT_ZONE from the harness environment: each child is named explicitly or not at all.
+  delete env.AGENT_NAME;
+  delete env.AGENT_ZONE;
+  if (input.name) env.AGENT_NAME = input.name;
+  if (input.zone) env.AGENT_ZONE = input.zone;
   if (input.noLlm) {
     env.NIM_API_KEY = '';
     env.NIM_MODEL = '';
@@ -76,6 +86,11 @@ export interface AgentHandle {
   readonly pid: number;
   readonly startedUnixMs: number;
   readonly generation: number;
+  /** AGENT_NAME the child runs with (null: default worker id). */
+  readonly name: string | null;
+  readonly zone: string | null;
+  /** The lease owner id this child writes (`<name>-<pid>`), or null when it runs with the default `agent-<host>-<pid>`. */
+  readonly workerId: string | null;
   isAlive(): boolean;
   exitCode(): number | null;
   exitSignal(): NodeJS.Signals | null;
@@ -91,6 +106,8 @@ export interface SpawnAgentOptions {
   env: Record<string, string>;
   redact: (s: string) => string;
   generation: number;
+  name?: string;
+  zone?: string | null;
   onLine?: (line: string) => void;
   spec?: SpawnSpec;
 }
@@ -142,10 +159,14 @@ export function spawnAgent(opts: SpawnAgentOptions): AgentHandle {
     return r;
   };
 
+  const name = opts.name ?? null;
   return {
     pid: child.pid ?? -1,
     startedUnixMs: started,
     generation: opts.generation,
+    name,
+    zone: opts.zone ?? null,
+    workerId: name && child.pid ? `${name}-${child.pid}` : null,
     isAlive: () => !exited,
     exitCode: () => code,
     exitSignal: () => signal,

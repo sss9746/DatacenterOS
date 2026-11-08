@@ -114,6 +114,7 @@ export class FakeDb implements DbPort {
   private readonly actions = new Map<string, ActionRecord>();
   private readonly workflows = new Map<string, WorkflowRecord>();
   private readonly listeners = new Set<(c: DbChange) => void>();
+  private readonly eventListeners = new Set<(events: AgentEventInput[]) => void>();
   private readonly physics: PhysicsPort | undefined;
   private readonly defaultOpDurationMs: number;
   private readonly claimLeaseMs: number;
@@ -720,6 +721,18 @@ export class FakeDb implements DbPort {
   async publishAgentEvent(ev: AgentEventInput): Promise<void> {
     this.record('publishAgentEvent', ev);
     this.agentEvents.push(clone(ev));
+    if (this.eventListeners.size > 0) {
+      const all = this.agentEvents.map(clone);
+      for (const cb of this.eventListeners) cb(all);
+    }
+  }
+
+  /** Like @dcos/db-client `onAgentEvents`: the full event list on every publish (agent-to-agent messages). */
+  onAgentEvents(cb: (events: AgentEventInput[]) => void): () => void {
+    this.eventListeners.add(cb);
+    return () => {
+      this.eventListeners.delete(cb);
+    };
   }
 
   onChange(cb: (change: DbChange) => void): () => void {

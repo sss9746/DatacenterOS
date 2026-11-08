@@ -193,6 +193,10 @@ function degradedLoopUnder(ix: SnapshotIndex, gpuId: string): boolean {
 export function findAffectedJobs(ix: SnapshotIndex, incidents: Incident[], evidence: Evidence | null): AffectedJob[] {
   const linked = linkedResourcesByIncident(incidents, evidence);
   const allIds = incidents.map((i) => i.incident_id) as [string, ...string[]];
+  // The degraded-loop fallback below is for COOLING incidents (pump/loop/rack links): one workflow per incident
+  // means an unrelated GPU incident must not also plan the hot jobs that another agent's cooling workflow owns.
+  const linkedAll = [...linked.values()].flatMap((s) => [...s]);
+  const coolingIncident = evidence === null || linkedAll.length === 0 || linkedAll.some((r) => ix.cooling.has(r) || ix.loopOfRack.has(r));
   const out: AffectedJob[] = [];
   for (const state of ix.snap.job_states) {
     if (state.status === 'failed') {
@@ -205,7 +209,7 @@ export function findAffectedJobs(ix: SnapshotIndex, incidents: Incident[], evide
     const reach = new Set<string>([state.job_id]);
     for (const g of state.allocated_gpu_ids) for (const p of providerClosure(ix, g)) reach.add(p);
     const hits = [...linked].filter(([, res]) => [...res].some((r) => reach.has(r))).map(([id]) => id);
-    const degraded = state.allocated_gpu_ids.some((g) => degradedLoopUnder(ix, g));
+    const degraded = coolingIncident && state.allocated_gpu_ids.some((g) => degradedLoopUnder(ix, g));
     if (hits.length === 0 && !degraded) continue;
     out.push({
       job_id: state.job_id,

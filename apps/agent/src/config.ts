@@ -17,6 +17,18 @@ const optionalString = z
 
 const optionalUrl = optionalString.pipe(z.url().optional());
 
+/** AGENT_NAME: Identifier-safe, short; the worker id becomes `<name>-<pid>` (multi-agent harness, SCOPE §5). */
+export const AGENT_NAME_RE = /^[a-z0-9-]{1,24}$/;
+const optionalAgentName = optionalString.refine((v) => v === undefined || AGENT_NAME_RE.test(v), {
+  message: 'must match [a-z0-9-]{1,24}',
+});
+/** AGENT_ZONE: the cooling loop whose incidents this agent claims first (a preference, never exclusive). */
+export const AGENT_ZONES = ['loop-a', 'loop-b'] as const;
+export type AgentZone = (typeof AGENT_ZONES)[number];
+const optionalZone = optionalString.refine((v) => v === undefined || (AGENT_ZONES as readonly string[]).includes(v), {
+  message: `must be one of ${AGENT_ZONES.join(', ')}`,
+});
+
 const intWithDefault = (def: number, min: number, max: number) =>
   z
     .string()
@@ -33,6 +45,8 @@ const intWithDefault = (def: number, min: number, max: number) =>
     });
 
 const envSchema = z.object({
+  AGENT_NAME: optionalAgentName,
+  AGENT_ZONE: optionalZone,
   STDB_URI: optionalUrl,
   STDB_DB: optionalString,
   STDB_AGENT_TOKEN: optionalString,
@@ -60,6 +74,8 @@ const envSchema = z.object({
 
 /** Every env var the agent reads. Secrets: NIM_API_KEY, STDB_AGENT_TOKEN. */
 export type AgentConfig = {
+  readonly AGENT_NAME: string | undefined;
+  readonly AGENT_ZONE: AgentZone | undefined;
   readonly STDB_URI: string | undefined;
   readonly STDB_DB: string | undefined;
   readonly STDB_AGENT_TOKEN: string | undefined;
@@ -135,6 +151,8 @@ export function loadConfig(
   }
   const c = parsed.data;
   const cfg: AgentConfig = {
+    AGENT_NAME: c.AGENT_NAME,
+    AGENT_ZONE: c.AGENT_ZONE as AgentZone | undefined,
     STDB_URI: c.STDB_URI,
     STDB_DB: c.STDB_DB,
     STDB_AGENT_TOKEN: c.STDB_AGENT_TOKEN,
@@ -151,6 +169,14 @@ export function loadConfig(
   };
   return Object.freeze(cfg);
 }
+
+/** Worker id for the DB lease owner: `<AGENT_NAME>-<pid>` when AGENT_NAME is set, else `agent-<host>-<pid>`. */
+export function workerIdFor(cfg: Pick<AgentConfig, 'AGENT_NAME'>, host: string, pid: number): string {
+  return cfg.AGENT_NAME ? `${cfg.AGENT_NAME}-${pid}` : `agent-${host}-${pid}`;
+}
+
+/** Message sender name: AGENT_NAME when set, else the full worker id. */
+export const agentNameFor = (cfg: Pick<AgentConfig, 'AGENT_NAME'>, workerId: string): string => cfg.AGENT_NAME ?? workerId;
 
 /** Throw a ConfigError naming any of `keys` that are unset (e.g. before connecting to NIM or STDB). */
 export function requireConfig<K extends AgentConfigKey>(

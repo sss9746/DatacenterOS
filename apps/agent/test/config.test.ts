@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AGENT_NAME_RE,
+  agentNameFor,
   ConfigError,
   DEFAULT_NIM_FALLBACK_BASE_URL,
   loadConfig,
@@ -7,6 +9,7 @@ import {
   redact,
   redactString,
   requireConfig,
+  workerIdFor,
 } from '../src/config.js';
 
 describe('loadConfig', () => {
@@ -50,6 +53,30 @@ describe('loadConfig', () => {
     }
     expect(msg).toMatch(/LLM_MAX_TOKENS/);
     expect(msg).not.toContain('nvapi-SECRET');
+  });
+
+  it('AGENT_NAME: optional, Identifier-safe [a-z0-9-]{1,24}; drives the worker id and the message name', () => {
+    expect(loadConfig({}, {}).AGENT_NAME).toBeUndefined();
+    expect(loadConfig({ AGENT_NAME: 'agent-alpha' }, {}).AGENT_NAME).toBe('agent-alpha');
+    expect(loadConfig({ AGENT_NAME: '' }, { AGENT_NAME: 'from-file' }).AGENT_NAME).toBeUndefined(); // empty env beats the file
+    expect(loadConfig({}, { AGENT_NAME: 'from-file' }).AGENT_NAME).toBe('from-file');
+    for (const bad of ['Agent', 'agent_alpha', 'agent alpha', 'a'.repeat(25), 'ag.ent']) {
+      expect(() => loadConfig({ AGENT_NAME: bad }, {}), bad).toThrow(/AGENT_NAME.*\[a-z0-9-\]\{1,24\}/);
+      expect(AGENT_NAME_RE.test(bad)).toBe(false);
+    }
+    const named = loadConfig({ AGENT_NAME: 'agent-alpha' }, {});
+    expect(workerIdFor(named, 'host', 4242)).toBe('agent-alpha-4242');
+    expect(workerIdFor(loadConfig({}, {}), 'host', 4242)).toBe('agent-host-4242');
+    expect(agentNameFor(named, 'agent-alpha-4242')).toBe('agent-alpha');
+    expect(agentNameFor(loadConfig({}, {}), 'agent-host-4242')).toBe('agent-host-4242');
+    expect(redact(named).AGENT_NAME).toBe('agent-alpha'); // not a secret: visible in the startup config line
+  });
+
+  it('AGENT_ZONE: optional loop-a | loop-b', () => {
+    expect(loadConfig({}, {}).AGENT_ZONE).toBeUndefined();
+    expect(loadConfig({ AGENT_ZONE: 'loop-b' }, {}).AGENT_ZONE).toBe('loop-b');
+    expect(() => loadConfig({ AGENT_ZONE: 'loop-c' }, {})).toThrow(/AGENT_ZONE.*loop-a, loop-b/);
+    expect(redact(loadConfig({ AGENT_ZONE: 'loop-a' }, {})).AGENT_ZONE).toBe('loop-a');
   });
 
   it('requireConfig names missing keys', () => {

@@ -381,6 +381,12 @@ export interface DbPort {
 
   /** Subscribe to epoch / resource-version / signal / action-status changes. Returns unsubscribe. */
   onChange(cb: (change: DbChange) => void): () => void;
+
+  /**
+   * Optional: the run's `agent_event` rows (the full current list on every change, as @dcos/db-client's
+   * `onAgentEvents` delivers it). Agent-to-agent messages ride on these rows; without it an agent only sends.
+   */
+  onAgentEvents?(cb: (events: AgentEventInput[]) => void): () => void;
 }
 
 // ---------------------------------------------------------------------------
