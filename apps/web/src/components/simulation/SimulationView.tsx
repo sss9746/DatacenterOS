@@ -164,7 +164,7 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
     <header className="sim-view-header">
       <div className="sim-view-title"><span className="sim-eyebrow">Simulated cluster</span><h2 id="sim-view-title" className="sr-only">Simulated cluster</h2>
         <span className="sim-hero-stat"><strong>{ready}<small>/{simGpus.length || 64}</small></strong><span>GPUs ready</span></span></div>
-      <p className={`sim-status ${statusTone}`} aria-live="polite">{statusLine}</p>
+      {/* The page subhead already tells this story in words; keep the panel's line for screen readers only. */}<p className={`sim-status sr-only ${statusTone}`} aria-live="polite">{statusLine}</p>
     </header>
     <div className="sim-explore">
       <div className="sim-cooling" role="group" aria-label="Choose a cooling pump">{pumpIds.map((id) => {
