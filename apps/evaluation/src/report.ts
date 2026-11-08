@@ -19,6 +19,17 @@ export function requireResult(value: unknown): EvaluationResult {
   if (metrics.some((metric) => !Number.isFinite(row[metric]) || row[metric] < 0)) throw new Error('Evaluation metrics must be finite and non-negative.');
   return row;
 }
+export type Provenance = NonNullable<EvaluationResult['provenance']>;
+/** Label for rows that predate CONTRACTS §0.14: unknown, never a fabricated default. */
+export const LEGACY_MODE = 'provenance unavailable';
+/** Visible label derived from provenance, never from the policy name alone (CONTRACTS §0.14). */
+export function modeLabel(p: Provenance): string {
+  if (!p.model_enabled) return p.fallback_decisions > 0 ? 'deterministic-only' : 'rules';
+  if (p.fallback_decisions > 0) return 'mixed-fallback';
+  if (p.model_requests === 0) return 'model-enabled, no model call needed';
+  return p.live_model_responses === 0 && p.cache_hits > 0 ? 'model-assisted (cached replay)' : p.cache_hits > 0 ? 'model-assisted (live+cached)' : 'model-assisted (live)';
+}
+export const rowMode = (row: EvaluationResult): string => (row.provenance ? modeLabel(row.provenance) : LEGACY_MODE);
 const comparisonKey = (row: EvaluationResult) => JSON.stringify([row.run_id, row.scenario_id, row.seed]);
 export function summarizeResults(input: readonly unknown[]) {
   let invalid = 0;
@@ -38,8 +49,23 @@ export function summarizeResults(input: readonly unknown[]) {
     }
     group.set(row.policy, row); groups.set(key, group);
   }
-  const matched = [...groups.entries()].filter(([key, group]) => group.size === 3 && !conflicts.has(key)).map(([, group]) => group);
+  const complete = [...groups.entries()].filter(([key, group]) => group.size === 3 && !conflicts.has(key)).map(([, group]) => group);
+  // CONTRACTS §0.14: the DB upserts (scenario, policy, seed), so a partial publication can leave rows from two batches,
+  // revisions or horizons side by side. Those are never compared; the scoreboard shows the reasons instead.
+  const provenanceProblems = provenanceConflicts(complete.flatMap((group) => [...group.values()]));
+  const matched = provenanceProblems.length ? [] : complete;
   const summaries = policies.map((policy) => ({ policy, count: matched.length, metrics: Object.fromEntries(metrics.map((metric) => [metric, distribution(matched.map((group) => group.get(policy)![metric]))])) as Record<Metric, Distribution | null> }));
+  // Visible mode labels per policy (deterministic-only, mixed-fallback, model-assisted, legacy), never inferred from the name.
+  const modes = Object.fromEntries(policies.map((policy) => {
+    const counts = new Map<string, number>();
+    for (const group of matched) { const label = rowMode(group.get(policy)!); counts.set(label, (counts.get(label) ?? 0) + 1); }
+    return [policy, Object.fromEntries([...counts.entries()].sort(([a], [b]) => a.localeCompare(b)))];
+  })) as Record<EvaluationResult['policy'], Record<string, number>>;
+  // Unfinished jobs at horizon, summed only when every row carries provenance; a missing value is unknown, not zero.
+  const unfinishedJobs = Object.fromEntries(policies.map((policy) => {
+    const rows = matched.map((group) => group.get(policy)!);
+    return [policy, rows.length && rows.every((row) => row.provenance) ? rows.reduce((total, row) => total + row.provenance!.unfinished_job_ids.length, 0) : null];
+  })) as Record<EvaluationResult['policy'], number | null>;
   const losses = matched.flatMap((group) => {
     const nemotron = group.get('nemotron')!;
     return (['reactive', 'threshold'] as const).flatMap((baseline) => {
@@ -48,7 +74,11 @@ export function summarizeResults(input: readonly unknown[]) {
       return worse.length ? [{ run_id: nemotron.run_id, scenario_id: nemotron.scenario_id, seed: nemotron.seed, baseline, worse, nemotron, other }] : [];
     });
   });
-  return { summaries, losses, matchedCount: matched.length, incompleteCount: groups.size - matched.length, invalidCount: invalid, duplicateCount: duplicates, conflictingCount: conflicts.size };
+  return {
+    summaries, losses, modes, unfinishedJobs, provenanceProblems,
+    matchedCount: matched.length, incompleteCount: groups.size - complete.length, provenanceRefusedCount: complete.length - matched.length,
+    invalidCount: invalid, duplicateCount: duplicates, conflictingCount: conflicts.size,
+  };
 }
 
 /**
