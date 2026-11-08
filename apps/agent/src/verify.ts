@@ -488,23 +488,40 @@ function runCheck(cmd: ActionCommand, s1: ObservedSnapshot, s2: ObservedSnapshot
 
 // ----------------------------------------------------------------------------------------------------- handoff
 
+interface InfraState {
+  /** Pumps not in `normal` state (loop rows mirror pumps and are not listed twice). */
+  pumps: string[];
+  /** GPUs with a latched failure / unreachable / cordoned: hardware service, never repaired by workload actions. */
+  hardwareGpus: string[];
+  /** GPUs merely in thermal slowdown (degraded, no XID): the cooling fault's symptom, not a hardware ticket. */
+  throttledGpus: string[];
+  lines: string[];
+}
+
 /** Pumps / GPUs that still need a human after the workload actions. Never phrased as repaired. */
-export function unresolvedInfrastructure(snap: ObservedSnapshot): string[] {
+function infraState(snap: ObservedSnapshot): InfraState {
   const kind = new Map(snap.resources.map((r) => [r.resource_id, r.kind]));
-  const out: string[] = [];
+  const lines: string[] = [];
+  const pumps: string[] = [];
   for (const c of snap.cooling) {
     if (c.operating_state === 'normal') continue;
     const k = kind.get(c.resource_id);
-    if (k === 'cooling_loop' || (k === undefined && c.resource_id.startsWith('loop-'))) continue; // loop rows mirror pumps
+    if (k === 'cooling_loop' || (k === undefined && c.resource_id.startsWith('loop-'))) continue;
     const cap = c.observed_capacity_estimate_w !== null ? ` (est. ${Math.round(c.observed_capacity_estimate_w)}/${Math.round(c.nominal_capacity_w)} W)` : '';
-    out.push(`${c.resource_id} ${c.operating_state}${cap}: needs human service`);
+    pumps.push(c.resource_id);
+    lines.push(`${c.resource_id} ${c.operating_state}${cap}: needs human service`);
   }
-  const gpus = snap.gpus
-    .filter((g) => g.availability !== 'ready')
-    .map((g) => `${g.resource_id} ${g.availability}${g.last_xid_code !== null ? ` (XID ${g.last_xid_code})` : ''}: needs hardware service`);
-  out.push(...capList(gpus));
-  return out;
+  const hardware = snap.gpus.filter((g) => g.availability !== 'ready' && (g.last_xid_code !== null || g.availability !== 'degraded'));
+  const throttled = snap.gpus.filter((g) => g.availability === 'degraded' && g.last_xid_code === null);
+  for (const g of capList(hardware.map((g) => `${g.resource_id} ${g.availability}${g.last_xid_code !== null ? ` (XID ${g.last_xid_code})` : ''}: needs hardware service`))) lines.push(g);
+  if (throttled.length) {
+    const racks = racksOf(snap, throttled.map((g) => g.resource_id));
+    lines.push(`${throttled.length} GPU(s) in thermal slowdown on ${racks.join(',')} (cooling symptom, clears with the pump)`);
+  }
+  return { pumps, hardwareGpus: hardware.map((g) => g.resource_id), throttledGpus: throttled.map((g) => g.resource_id), lines };
 }
+
+export const unresolvedInfrastructure = (snap: ObservedSnapshot): string[] => infraState(snap).lines;
 
 /** GPUs the plan touched that are cordoned and not already covered by a cordon check. */
 function cordonedNotes(plan: ExecutablePlan, snap: ObservedSnapshot, already: Set<string>): string[] {
@@ -540,16 +557,14 @@ function remainingRisk(snap: ObservedSnapshot, jobIds: readonly string[], checks
   return parts.join('; ');
 }
 
-function nextHumanAction(outcome: HandoffOutcome, unresolved: readonly string[], checks: readonly CommandCheck[], notOk: readonly CommandOutcome[], reason?: string): string {
+function nextHumanAction(outcome: HandoffOutcome, infra: InfraState, checks: readonly CommandCheck[], notOk: readonly CommandOutcome[], reason?: string): string {
   const parts: string[] = [];
   if (outcome !== 'recovered') {
     const items = [...checks.filter((c) => !c.ok).map((c) => c.command_key), ...notOk.map((o) => o.command_key)];
     parts.push(items.length ? `review ${items.length} unverified/blocked action(s): ${capList(items).join(', ')}` : (reason ?? 'review the escalation'));
   }
-  const pumps = unresolved.filter((u) => u.includes('needs human service')).map((u) => u.split(' ')[0]!);
-  const gpus = unresolved.filter((u) => u.includes('needs hardware service')).map((u) => u.split(' ')[0]!);
-  if (pumps.length) parts.push(`service ${pumps.join(', ')}`);
-  if (gpus.length) parts.push(`inspect/replace ${gpus.join(', ')}`);
+  if (infra.pumps.length) parts.push(`service ${infra.pumps.join(', ')}`);
+  if (infra.hardwareGpus.length) parts.push(`inspect/replace ${capList(infra.hardwareGpus).join(', ')}`);
   if (parts.length === 0) parts.push('none pending from the agent; keep monitoring');
   return parts.join('; ');
 }
@@ -582,7 +597,8 @@ const HEADLINES: Record<HandoffOutcome, string> = {
 export function buildOperatorHandoff(input: HandoffBuildInput): OperatorHandoff {
   const { snapshot: snap, checks, outcomes, outcome } = input;
   const notOk = outcomes.filter((o) => o.status !== 'succeeded');
-  const unresolved = unresolvedInfrastructure(snap);
+  const infra = infraState(snap);
+  const unresolved = infra.lines;
   const verified = outcome === 'recovered';
   const escalate = !verified;
 
@@ -592,7 +608,7 @@ export function buildOperatorHandoff(input: HandoffBuildInput): OperatorHandoff 
   if (input.aborted && notOk.length === 0) parts.push('execution aborted before completion');
   if (checks.length === 0 && input.reason) parts.push(input.reason);
   parts.push(...(input.extra ?? []));
-  const next = nextHumanAction(outcome, unresolved, checks, notOk, input.reason);
+  const next = nextHumanAction(outcome, infra, checks, notOk, input.reason);
   const head = input.headline ?? HEADLINES[outcome];
   const hasCordon = checks.some((c) => c.operation === 'cordon_gpu') || (input.extra?.length ?? 0) > 0;
   const tail = `${hasCordon ? ' Cordoned GPUs still need hardware service.' : ''}${unresolved.length ? ` Still open: ${capList(unresolved).slice(0, 3).join('; ')}.` : ''} Next: ${next}.`;

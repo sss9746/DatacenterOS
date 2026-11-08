@@ -574,7 +574,9 @@ export class FakeDb implements DbPort {
     if (rec.status.status !== 'succeeded') {
       throw new DbError('INVALID_TRANSITION', `cannot verify ${commandKey} in ${rec.status.status}`);
     }
-    return this.transition(rec, 'succeeded', { result: { ...rec.status.result, verified: true, verification: clone(evidence) } });
+    // Like the real verify_action reducer (apps/db actions.ts): the evidence is attached under `result.verification`;
+    // whether the action is actually verified is the verifier's `evidence.verified`, never implied by the call itself.
+    return this.transition(rec, 'succeeded', { result: { ...rec.status.result, verification: clone(evidence) } });
   }
 
   async claimWorkflow(workflowId: string, workerId: string, expectedVersion: number, leaseMs: number): Promise<WorkflowLease> {
