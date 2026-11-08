@@ -62,6 +62,8 @@ export interface PlanResult {
   summary?: string;
   /** F-NV1: `nemotron` only when at least one final job decision came from the LLM. */
   actor?: AgentActor;
+  /** R3b: the options the planner evaluated per job, in the persisted `state.candidates` shape (chosen first). */
+  candidates?: PersistedCandidate[];
   /** Set when a job's mitigation was deferred (rule (b)): the caller must re-plan within this many sim seconds. */
   recheck_after_s?: number;
 }
@@ -876,6 +878,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
     job_plans: jobPlans,
     tool_calls: toolCalls,
     used_llm: llmUp,
+    candidates: buildCandidates(jobPlans, ix.snap.clock.decision_epoch, ix.snap.clock.sim_time_ms),
     ...planNarrative(jobPlans, llmUp),
     ...(recheckAfterS !== undefined ? { recheck_after_s: recheckAfterS } : {}),
   };
@@ -952,4 +955,132 @@ export function planNarrative(jobPlans: JobPlan[], usedLlm: boolean): { summary:
   if (nem.length > 0) return { summary: clip(nem.map((p) => p.explanation).join(' | '), 200), actor: 'nemotron' };
   const text = jobPlans.length > 0 ? jobPlans.map((p) => `${p.job_id}: ${p.chosen.label}`).join('; ') : 'no running job affected, keep running';
   return { summary: clip(`deterministic: ${text}`, 200), actor: 'code' };
+}
+
+// ---------------------------------------------------------------------------------------------- persisted candidates (R3b)
+
+export type CandidateOption =
+  | 'keep_running'
+  | 'power_cap'
+  | 'checkpoint'
+  | 'checkpoint_then_migrate'
+  | 'migrate_restart'
+  | 'pause_job'
+  | 'escalate'
+  | (string & {});
+
+/** One option the planner evaluated for a job, as persisted in `workflow.state.candidates` for the dashboard. */
+export interface PersistedCandidate {
+  job_id: string;
+  option: CandidateOption;
+  commands_summary: string;
+  /** From simulatePlan; null when the planner did not compute it (never 0 as a stand-in). */
+  predicted_lost_work_units: number | null;
+  /** The planner's simulatePlan has no work-deficit metric: always null today. */
+  predicted_work_deficit_units: number | null;
+  predicted_gpu_busy_waste_s: number | null;
+  /** Aggregate of the option's evaluateSafety results; 'not_checked' when it has no command (keep_running). */
+  safety: 'allow' | 'needs_approval' | 'deny' | 'not_checked';
+  violations: string[];
+  chosen: boolean;
+  /** <= CANDIDATE_REASON_MAX chars: why chosen / rejected. */
+  reason: string;
+  decided_by: 'nemotron' | 'code';
+  snapshot_epoch: number;
+  as_of_sim_time_ms: number;
+}
+
+export const CANDIDATE_LIMITS = { per_job: 6, total: 24 } as const;
+export const CANDIDATE_REASON_MAX = 160;
+const CANDIDATE_SUMMARY_MAX = 120;
+const CANDIDATE_VIOLATIONS_MAX = 6;
+const CANDIDATE_VIOLATION_CHARS = 60;
+
+const finiteOrNull = (n: unknown): number | null => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 1000) / 1000 : null);
+
+function optionKind(o: RankedOption): CandidateOption {
+  const ops = o.commands.map((c) => c.operation);
+  if (ops.length === 0) return 'keep_running';
+  if (ops.includes('migrate_restart')) return ops.includes('checkpoint') ? 'checkpoint_then_migrate' : 'migrate_restart';
+  if (ops.includes('pause_job')) return 'pause_job';
+  if (ops.length === 1) return ops[0]!;
+  return ops.join('+');
+}
+
+function candidateSafety(o: RankedOption): PersistedCandidate['safety'] {
+  if (o.safety.length === 0) return 'not_checked';
+  if (o.safety.some((s) => s.decision === 'deny')) return 'deny';
+  if (o.safety.some((s) => s.decision === 'needs_approval')) return 'needs_approval';
+  return o.safety.every((s) => s.decision === 'allow') ? 'allow' : 'not_checked';
+}
+
+const candidateViolations = (o: RankedOption): string[] =>
+  [...new Set([...o.safety.flatMap((s) => s.violations), ...(o.excluded_reason ? o.excluded_reason.split(',') : [])].filter(Boolean))]
+    .slice(0, CANDIDATE_VIOLATIONS_MAX)
+    .map((v) => clip(v, CANDIDATE_VIOLATION_CHARS));
+
+function candidateReason(o: RankedOption, chosen: RankedOption, isChosen: boolean, explanation: string): string {
+  if (isChosen) return clip(explanation, CANDIDATE_REASON_MAX);
+  if (o.excluded_reason) return clip(`rejected by deterministic safety: ${o.excluded_reason}`, CANDIDATE_REASON_MAX);
+  const lost = finiteOrNull(o.metrics.expected_lost_work_units);
+  const chosenLost = finiteOrNull(chosen.metrics.expected_lost_work_units);
+  const cmp = lost !== null && chosenLost !== null ? `lost work ${lost} vs ${chosenLost} wu for ${chosen.option_id}` : `ranked below ${chosen.option_id}`;
+  return clip(`safe but not chosen (rank ${o.rank}): ${cmp}`, CANDIDATE_REASON_MAX);
+}
+
+/** Sort chosen-first, then least predicted lost work (null last), then a stable tie-break. */
+const byChosenThenLoss = (a: PersistedCandidate, b: PersistedCandidate): number =>
+  Number(b.chosen) - Number(a.chosen) ||
+  (a.predicted_lost_work_units ?? Infinity) - (b.predicted_lost_work_units ?? Infinity) ||
+  a.job_id.localeCompare(b.job_id) ||
+  a.option.localeCompare(b.option) ||
+  a.commands_summary.localeCompare(b.commands_summary);
+
+/** Enforce CANDIDATE_LIMITS: <= per_job per job (the chosen one always survives), <= total overall. Pure. */
+export function capCandidates(list: readonly PersistedCandidate[]): PersistedCandidate[] {
+  const sorted = [...list].sort(byChosenThenLoss);
+  const perJob = new Map<string, number>();
+  const kept = sorted.filter((c) => {
+    const n = perJob.get(c.job_id) ?? 0;
+    perJob.set(c.job_id, n + 1);
+    return n < CANDIDATE_LIMITS.per_job;
+  });
+  return kept.slice(0, CANDIDATE_LIMITS.total);
+}
+
+/**
+ * Candidates from what the planner actually enumerated and scored: each job's chosen option plus its alternatives.
+ * Nothing is invented; a metric the planner did not produce is null.
+ */
+export function buildCandidates(jobPlans: readonly JobPlan[], snapshotEpoch: number, asOfSimTimeMs: number): PersistedCandidate[] {
+  const out: PersistedCandidate[] = [];
+  for (const jp of jobPlans) {
+    const decidedBy = jp.decided_by === 'nemotron' ? 'nemotron' : 'code';
+    for (const o of [jp.chosen, ...jp.alternatives]) {
+      const isChosen = o === jp.chosen;
+      out.push({
+        job_id: jp.job_id,
+        option: optionKind(o),
+        commands_summary: clip(o.label, CANDIDATE_SUMMARY_MAX),
+        predicted_lost_work_units: finiteOrNull(o.metrics?.expected_lost_work_units),
+        predicted_work_deficit_units: null,
+        predicted_gpu_busy_waste_s: finiteOrNull(o.metrics?.expected_gpu_busy_waste_s),
+        safety: candidateSafety(o),
+        violations: candidateViolations(o),
+        chosen: isChosen,
+        reason: candidateReason(o, jp.chosen, isChosen, jp.explanation),
+        decided_by: decidedBy,
+        snapshot_epoch: snapshotEpoch,
+        as_of_sim_time_ms: asOfSimTimeMs,
+      });
+    }
+  }
+  return capCandidates(out);
+}
+
+/** A newer plan's candidates replace the older entries of the SAME jobs; other jobs' entries are kept. Capped. */
+export function mergeCandidates(previous: unknown, next: readonly PersistedCandidate[]): PersistedCandidate[] {
+  const prev = Array.isArray(previous) ? (previous as PersistedCandidate[]) : [];
+  const replaced = new Set(next.map((c) => c.job_id));
+  return capCandidates([...prev.filter((c) => !replaced.has(c.job_id)), ...next]);
 }

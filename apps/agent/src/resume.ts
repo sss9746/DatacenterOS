@@ -326,6 +326,29 @@ async function verifyAndClose(ctx: Ctx, coord: Coordinator, wfId: string, plan: 
   );
 }
 
+/** What the dashboard reads from `workflow.state.resumed` (+ `resume_count`): the latest reclaim wins. */
+export interface ResumedMarker {
+  by_worker: string;
+  at_sim_time_ms: number;
+  action: 'resumed_execute' | 'resumed_verify' | 'took_over' | 'escalated' | 'nothing_to_do';
+  previous_owner: string | null;
+}
+
+const MAX_OWNER_CHARS = 80;
+const clipId = (v: string): string => (v.length <= MAX_OWNER_CHARS ? v : v.slice(0, MAX_OWNER_CHARS));
+
+export const resumeCountOf = (state: Record<string, unknown>): number =>
+  typeof state.resume_count === 'number' && Number.isFinite(state.resume_count) && state.resume_count >= 0 ? Math.floor(state.resume_count) : 0;
+
+/** The lease owner this resume replaced (null when there was none, or it was this same worker id). */
+const previousOwnerOf = (wf: WorkflowRecord, workerId: string): string | null =>
+  wf.lease_owner && wf.lease_owner !== workerId ? clipId(wf.lease_owner) : null;
+
+const resumedPatch = (workerId: string, atSimMs: number, action: ResumedMarker['action'], previous: string | null, count: number) => {
+  const resumed: ResumedMarker = { by_worker: clipId(workerId), at_sim_time_ms: atSimMs, action, previous_owner: previous };
+  return { resumed, resume_count: count };
+};
+
 async function resumeOne(ctx: Ctx, wf: WorkflowRecord): Promise<ResumeItem> {
   const base = { workflow_id: wf.workflow_id, stage: wf.stage, reconciled: [] as Reconciled[] };
   if (wf.stage === 'escalated' || wf.stage === 'done') {
@@ -337,6 +360,28 @@ async function resumeOne(ctx: Ctx, wf: WorkflowRecord): Promise<ResumeItem> {
   const coord = createCoordinator({ db: ctx.db, physics: ctx.physics, events: ctx.events, workerId: ctx.workerId, clock: ctx.clock, sleep: ctx.sleep, leaseMs: ctx.leaseMs });
   if (!(await acquire(ctx, coord, wf))) return { ...base, action: 'nothing_to_do', note: LEASE_HELD_BY_LIVE_WORKER };
 
+  // R3b: stamp `state.resumed` right after the reclaim (a crash mid-resume still leaves the marker), then correct the
+  // action once the outcome is known. Ownership loss makes both writes no-ops.
+  const previous = previousOwnerOf(wf, ctx.workerId);
+  const count = resumeCountOf(coord.state()) + 1;
+  const stamp = async (action: ResumeItem['action']): Promise<void> => {
+    await coord
+      .updateStage(coord.lease()?.workflow.stage ?? wf.stage, resumedPatch(ctx.workerId, ctx.clock.simTimeMs(), action, previous, count))
+      .catch(() => undefined);
+  };
+  const provisional: ResumeItem['action'] = wf.stage === 'verify' ? 'resumed_verify' : wf.stage === 'execute' ? 'resumed_execute' : 'took_over';
+  await stamp(provisional);
+  const item = await resumeAcquired(ctx, wf, coord, base);
+  if (item.action !== provisional) await stamp(item.action);
+  return item;
+}
+
+async function resumeAcquired(
+  ctx: Ctx,
+  wf: WorkflowRecord,
+  coord: Coordinator,
+  base: { workflow_id: string; stage: string; reconciled: Reconciled[] },
+): Promise<ResumeItem> {
   const stage = coord.lease()?.workflow.stage ?? wf.stage;
   const state = coord.state();
   if ((stage !== 'execute' && stage !== 'verify') || !isExecuteState(state)) {

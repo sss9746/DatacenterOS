@@ -18,7 +18,7 @@ import type { Incident, PlanCandidate } from '@dcos/contracts';
 import { createCoordinator, DEFAULT_LEASE_MS, type Coordinator, type ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
 import { LlmUnavailableError } from './llm.js';
-import { planIncidents, type PlanResult } from './planner.js';
+import { mergeCandidates, planIncidents, type PlanResult } from './planner.js';
 import { isDbError, type AgentStage, type DbPort, type Evidence, type LlmPort, type PhysicsPort, type ToolCallSummary, type WorkflowRecord } from './ports.js';
 import { createReplanWatcher, runReplan, type ReplanOutcome, type ReplanWatcher } from './replan.js';
 import {
@@ -338,7 +338,13 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
 
   async function plan(wfId: string, incidents: Incident[], attempt: number, coord: Coordinator): Promise<PlanResult> {
     const r = await planIncidents({ db, physics, llm: llm ?? NO_LLM, workflowId: wfId, runId, attempt }, { incidents });
-    await coord.updateStage('plan', { plan_id: r.plan.plan_id, attempt, incident_ids: [...r.plan.incident_ids] });
+    // R3b: candidates ride along in the persisted state; updateStage merges, so they survive execute/verify/done.
+    await coord.updateStage('plan', {
+      plan_id: r.plan.plan_id,
+      attempt,
+      incident_ids: [...r.plan.incident_ids],
+      candidates: mergeCandidates(coord.state().candidates, r.candidates ?? []),
+    });
     await publishPlan(wfId, r);
     return r;
   }
@@ -473,6 +479,8 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         await setIncidentState(out.new_plan.plan.incident_ids, 'investigating');
         current = out.new_plan;
         report.plans.push(current);
+        // R3b: the new plan's candidates replace this workflow's older entries for the same jobs.
+        await coord.updateStage('replan', { candidates: mergeCandidates(coord.state().candidates, current.candidates ?? []) });
         await publishPlan(wfId, current, out);
         if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
         w.reset(current);
