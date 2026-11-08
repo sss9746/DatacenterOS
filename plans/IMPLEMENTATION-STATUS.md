@@ -58,7 +58,7 @@ Integration follow-ups done here: `@dcos/physics` now exports `runScenarioDetail
 | P3 agent | Actual NIM integration, triage, planner, coordinator, replan, resume, verifier, events, pure evaluation policy | `origin/main:apps/agent/src/`; P2-8 reports real pump recovery on dev/prod |
 | P4 dashboard | Heat map, cooling/jobs, incidents/feed, ledger, fault panel, mock/live adapter, empty-until-measured scoreboard | `origin/main:apps/web/`; historical browser proof is mock; live gate unconfirmed |
 | Evaluation | P1 detailed runner/baselines; P3 side-by-side script; P4 adapter/reporting/CLI boundary | No checked-in production adapter for P4 and no complete provenance-preserving matrix proof |
-| Hardware | Reserved resources and UI no-data/stale states | No live ingestion reducer; optional |
+| Hardware | `ingest_observations`, `hardware/nvidia-smi-collector`, real GPU tile with replay label | Live on `dcos-dev` with a real NVIDIA L40S (2026-11-08 04:58–05:00 CST); prod `dcos` pending K7; observation only |
 
 ## Concrete remaining gaps
 
@@ -84,7 +84,7 @@ Additional limits: normal link-down has no modeled workload effect; sensor freez
 | 2 — durable manual actions | P2-7/8 report retries/fencing/checkpoint-after-SIGKILL on dev/prod/local | Fix R1/R2 gaps; show actual manual BLOCKED result and lifecycle in live UI |
 | 3 — overlap + real agent restart | Pump-only real NIM recovery reported; fake-backed crash tests and live caller-kill test exist | R3/R5 complete real combined recovery with two incidents and verified handoff |
 | 4 — measured comparison | Baseline fixtures and evaluator scaffolds exist | R0/R6: model provenance, matched matrix, published/read-back results and scoreboard |
-| 5 — hardware | Placeholders only | Optional ingestion/collector proof after gates 1–4 |
+| 5 — hardware | Real L40S readings reach the DB and tile on `dcos-dev`; 119 s recording saved ([P2 status](status/P2.md)) | Prod publish and gateway role at K7; recheck the tile after the redesign merge. Supervised kill-and-resume not started |
 
 Do not describe Gate 3 as complete merely because a pump-only recovery worked. Do not invalidate the useful existing evidence either: P2 durability and real NIM integration have already been demonstrated separately.
 
