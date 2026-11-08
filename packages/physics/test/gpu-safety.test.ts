@@ -87,6 +87,35 @@ describe('evaluateSafety: demo headline checks', () => {
     expect(loops).toEqual([expect.objectContaining({ loop_id: 'loop-b', rise_c: 0 })]);
   });
 
+  it('loop rows in cooling_current (§0.11 #9) are never double-counted: r6 deny / r7+r8 allow numbers unchanged', () => {
+    const noLoops = clone(DEMO);
+    noLoops.cooling = noLoops.cooling.filter((c) => !c.resource_id.startsWith('loop-'));
+    expect(DEMO.cooling.map((c) => c.resource_id)).toEqual(['pump-a', 'pump-b', 'loop-a', 'loop-b']);
+    const r6 = { destination_node_ids: ['node-r6-n1'] };
+    const r78 = { destination_gpu_ids: R7_R8 };
+    for (const args of [r6, r78]) {
+      const c = move('job-a', args);
+      expect(check(DEMO, c)).toEqual(check(noLoops, c)); // the loop rows change nothing
+    }
+    // the headline numbers, pinned (they were the same before loop rows existed)
+    const deny = check(DEMO, move('job-a', r6));
+    expect(deny.decision).toBe('deny');
+    expect(deny.evidence.available_headroom_c).toBe(2.9);
+    expect(deny.evidence.cooling_loops).toEqual([expect.objectContaining({ loop_id: 'loop-b', heat_after_move_w: 7840, capacity_w: 40_000 })]);
+    const ok = check(DEMO, move('job-a', r78));
+    expect(ok.decision).toBe('allow');
+    expect(ok.evidence.available_headroom_c).toBe(14.7);
+    expect(ok.evidence.cooling_loops).toEqual([expect.objectContaining({ loop_id: 'loop-b', heat_after_move_w: 17_920, capacity_w: 40_000 })]);
+    // capacity comes from the pump row alone: a failed pump-b with a stale 'normal' loop-b row still gives 0 W
+    const failed = clone(DEMO);
+    for (const g of failed.gpus) if (/^gpu-r[15678]-/.test(g.resource_id)) g.temp_c += 5;
+    Object.assign(failed.cooling.find((c) => c.resource_id === 'pump-b')!, { operating_state: 'failed', pump_power_w: 0, observed_capacity_estimate_w: 0 });
+    expect(failed.cooling.find((c) => c.resource_id === 'loop-b')!.operating_state).toBe('normal');
+    const d = check(failed, move('job-a', r78));
+    expect(d.violations).toEqual(['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT']);
+    expect((d.evidence.cooling_loops as { capacity_w: number }[])[0]!.capacity_w).toBe(0);
+  });
+
   it('works on toObserved(buildPreset(...)) the same way as on the fixture', () => {
     const obs = toObserved(demoWorld());
     expect(check(obs, move('job-a', { destination_gpu_ids: R7_R8 }, {}, obs)).decision).toBe('allow');
@@ -157,9 +186,10 @@ describe('evaluateSafety: one test per §0.7 reason code', () => {
     expect(d.evidence.free_gpus_on_destination_nodes).toBe(8);
   });
 
-  it('DEST_GPU_COUNT_INSUFFICIENT: an explicit set of the wrong size, or no destination at all', () => {
+  it('DEST_GPU_COUNT_INSUFFICIENT: an explicit set of the wrong size or an empty node list (no destination at all is INVALID_ARGUMENT)', () => {
     fires(check(DEMO, move('job-a', { destination_gpu_ids: gpusOn(7) })), 'DEST_GPU_COUNT_INSUFFICIENT');
-    fires(check(DEMO, move('job-a', {})), 'DEST_GPU_COUNT_INSUFFICIENT');
+    fires(check(DEMO, move('job-a', { destination_node_ids: [] })), 'DEST_GPU_COUNT_INSUFFICIENT');
+    expect(check(DEMO, move('job-a', {}))).toMatchObject({ decision: 'deny', violations: ['INVALID_ARGUMENT'] });
   });
 
   it('DEST_NOT_COMPATIBLE: a same_node job split across two nodes', () => {
@@ -246,18 +276,80 @@ describe('evaluateSafety: one test per §0.7 reason code', () => {
     expect(d.evidence.stale_evidence_ids).toEqual(gpusOn(8));
   });
 
-  it('UNSUPPORTED_OPERATION: an operation outside the contract enum, or a checkpoint of a completed job', () => {
+  it('UNSUPPORTED_OPERATION: an operation outside the contract enum', () => {
     const bogus = { ...cmd('keep_running', 'node-r3-n1'), operation: 'reboot_node' } as unknown as ActionCommand;
     expect(check(DEMO, bogus)).toMatchObject({ decision: 'deny', violations: ['UNSUPPORTED_OPERATION'] });
-    const obs = clone(DEMO);
-    obs.job_states.find((j) => j.job_id === 'job-b')!.status = 'completed';
-    expect(check(obs, cmd('checkpoint', 'job-b', { job_id: 'job-b' })).violations).toEqual(['UNSUPPORTED_OPERATION']);
+    expect(check(DEMO, bogus).evidence.unknown_operation).toBe(true);
   });
 
-  it('UNSUPPORTED_OPERATION: unknown job, cordon of a non-GPU, invalid power limit', () => {
-    expect(check(DEMO, cmd('pause_job', 'job-zzz', { job_id: 'job-zzz' })).violations).toEqual(['UNSUPPORTED_OPERATION']);
-    expect(check(DEMO, cmd('cordon_gpu', 'pump-a')).violations).toEqual(['UNSUPPORTED_OPERATION']);
-    expect(check(DEMO, cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: 900 } })).violations).toEqual(['UNSUPPORTED_OPERATION']);
+  // ---- the physics codes §0.12 #4 adds to §0.7 (they replace UNSUPPORTED_OPERATION where one fits) ----
+
+  it('JOB_NOT_FOUND: an unknown job (pause, checkpoint, migrate, keep_running, power_cap by job_id)', () => {
+    for (const c of [
+      cmd('pause_job', 'job-zzz', { job_id: 'job-zzz' }),
+      cmd('checkpoint', 'job-zzz', { job_id: 'job-zzz' }),
+      move('job-zzz', { destination_gpu_ids: R7_R8 }),
+      cmd('keep_running', 'job-zzz', { job_id: 'job-zzz' }),
+      cmd('power_cap', 'job-zzz', { job_id: 'job-zzz', arguments: { power_limit_w: 500 } }),
+    ]) {
+      const d = check(DEMO, c);
+      expect(d, c.operation).toMatchObject({ decision: 'deny', violations: ['JOB_NOT_FOUND'] });
+      expect(d.evidence.unknown_job_id).toBe('job-zzz');
+    }
+  });
+
+  it('JOB_STATE_INVALID: checkpoint of a completed job, pause of a paused job, move of a completed job, cap of a failed job', () => {
+    const obs = clone(DEMO);
+    obs.job_states.find((j) => j.job_id === 'job-b')!.status = 'completed';
+    expect(check(obs, cmd('checkpoint', 'job-b', { job_id: 'job-b' })).violations).toEqual(['JOB_STATE_INVALID']);
+    expect(check(obs, move('job-b', { destination_gpu_ids: gpusOn(7) })).violations).toContain('JOB_STATE_INVALID');
+    const paused = clone(DEMO);
+    paused.job_states.find((j) => j.job_id === 'job-b')!.status = 'paused';
+    expect(check(paused, cmd('pause_job', 'job-b', { job_id: 'job-b' })).violations).toEqual(['JOB_STATE_INVALID']);
+    const failed = clone(DEMO);
+    Object.assign(failed.job_states.find((j) => j.job_id === 'job-b')!, { status: 'failed', allocated_gpu_ids: [] });
+    failed.allocations = failed.allocations.filter((a) => a.job_id !== 'job-b');
+    const d = check(failed, cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: 500 } }));
+    expect(d).toMatchObject({ decision: 'deny', violations: ['JOB_STATE_INVALID'] });
+    expect(d.evidence.job_status).toBe('failed');
+  });
+
+  it('TARGET_NOT_FOUND: cordon of a non-GPU or an unknown id, power_cap of an unknown target', () => {
+    expect(check(DEMO, cmd('cordon_gpu', 'pump-a')).violations).toEqual(['TARGET_NOT_FOUND']);
+    expect(check(DEMO, cmd('uncordon_gpu', 'gpu-r9-n1-0')).violations).toEqual(['TARGET_NOT_FOUND']);
+    expect(check(DEMO, cmd('power_cap', 'rack-zz', { arguments: { power_limit_w: 500 } })).violations).toEqual(['TARGET_NOT_FOUND']);
+  });
+
+  it('INVALID_ARGUMENT: arguments by operation are exactly §0.11 #1 (args.ts, shared with physics)', () => {
+    const bad: [string, ActionCommand][] = [
+      ['power limit out of range', cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: 900 } })],
+      ['power limit not a number', cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: '500' } })],
+      ['unknown key on power_cap', cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: 500, watts: 500 } })],
+      ['checkpoint takes {}', cmd('checkpoint', 'job-a', { job_id: 'job-a', arguments: { reason: 'x' } })],
+      ['cordon takes {}', cmd('cordon_gpu', 'gpu-r3-n1-0', { arguments: { xid_code: 79 } })],
+      ['both destination forms', move('job-a', { destination_gpu_ids: R7_R8, destination_node_ids: ['node-r7-n1', 'node-r8-n1'] })],
+      ['destination ids not strings', move('job-a', { destination_gpu_ids: [1, 2] })],
+      ['extra key on migrate', move('job-a', { destination_gpu_ids: R7_R8, from_checkpoint_id: 'ckpt-job-a-1' })],
+      ['escalate without reason', cmd('escalate', 'job-a', { job_id: 'job-a' })],
+      ['escalate reason not a string', cmd('escalate', 'job-a', { job_id: 'job-a', arguments: { reason: 7 } })],
+    ];
+    for (const [name, c] of bad) {
+      const d = check(DEMO, c);
+      expect(d.decision, name).toBe('deny');
+      expect(d.violations, name).toContain('INVALID_ARGUMENT');
+      expect((d.evidence.invalid_arguments as string[]).length, name).toBeGreaterThan(0);
+    }
+    // the accepted forms
+    expect(check(DEMO, move('job-a', { destination_gpu_ids: R7_R8 })).decision).toBe('allow');
+    expect(check(DEMO, move('job-a', { destination_node_ids: ['node-r7-n1', 'node-r8-n1'] })).decision).toBe('allow');
+    expect(check(DEMO, cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: 500 } })).decision).toBe('allow');
+    expect(check(DEMO, cmd('escalate', 'job-a', { job_id: 'job-a', arguments: { reason: 'operator review' } })).decision).toBe('allow');
+  });
+
+  it('JOB_FAILED_DURING_OPERATION is a §0.7 code (physics-only: a job failing while its command runs; see gpu-actions)', () => {
+    expect(SAFETY_REASON_CODES).toContain('JOB_FAILED_DURING_OPERATION');
+    // safety runs before execution, so it never emits it
+    expect(check(DEMO, cmd('checkpoint', 'job-a', { job_id: 'job-a' })).violations).not.toContain('JOB_FAILED_DURING_OPERATION');
   });
 
   it('CORDON_IS_NOT_REPAIR: uncordoning a GPU that reported XID 48 does not repair it', () => {
@@ -273,9 +365,23 @@ describe('evaluateSafety: one test per §0.7 reason code', () => {
     expect(check(DEMO, cmd('cordon_gpu', 'gpu-real-0')).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
   });
 
-  it('covers every frozen code exactly once in SAFETY_REASON_CODES', () => {
-    expect(SAFETY_REASON_CODES).toHaveLength(18);
-    expect(new Set(SAFETY_REASON_CODES).size).toBe(18);
+  it('REAL_GPU_NOT_ALLOCATABLE: node-real-0 (§0.11 #4) as a destination node or a power_cap target', () => {
+    const d = check(DEMO, move('job-b', { destination_node_ids: ['node-real-0'] }));
+    expect(d.decision).toBe('deny');
+    fires(d, 'REAL_GPU_NOT_ALLOCATABLE');
+    expect(d.violations).not.toContain('DEST_NOT_COMPATIBLE');
+    // even when the other node alone has enough free GPUs
+    expect(check(DEMO, move('job-b', { destination_node_ids: ['node-r7-n1', 'node-real-0'] })).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
+    expect(check(DEMO, cmd('power_cap', 'node-real-0')).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
+    expect(check(DEMO, cmd('power_cap', 'gpu-real-0')).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
+  });
+
+  it('covers every frozen code exactly once in SAFETY_REASON_CODES (18 safety + 5 physics codes, §0.12 #4)', () => {
+    expect(SAFETY_REASON_CODES).toHaveLength(23);
+    expect(new Set(SAFETY_REASON_CODES).size).toBe(23);
+    expect(SAFETY_REASON_CODES.slice(18)).toEqual([
+      'JOB_NOT_FOUND', 'JOB_STATE_INVALID', 'TARGET_NOT_FOUND', 'INVALID_ARGUMENT', 'JOB_FAILED_DURING_OPERATION',
+    ]);
   });
 });
 
@@ -289,7 +395,7 @@ describe('evaluateSafety: allow, needs_approval and precedence rules', () => {
       cmd('cordon_gpu', 'gpu-r3-n1-0'),
       cmd('uncordon_gpu', 'gpu-r5-n1-0'),
       cmd('pause_job', 'job-b', { job_id: 'job-b' }),
-      cmd('escalate', 'job-a', { job_id: 'job-a' }),
+      cmd('escalate', 'job-a', { job_id: 'job-a', arguments: { reason: 'operator review' } }),
     ]) {
       expect(check(DEMO, c), c.operation).toMatchObject({ decision: 'allow', violations: [] });
     }
@@ -349,8 +455,12 @@ describe('evaluateSafety: allow, needs_approval and precedence rules', () => {
     expect(d).toMatchObject({ decision: 'retry_new_snapshot', violations: ['STALE_DECISION_EPOCH', 'EVIDENCE_STALE'] });
   });
 
-  it('escalate is always allowed, even on a stale epoch', () => {
-    expect(check(DEMO, cmd('escalate', 'job-a', { expected_decision_epoch: 9 }), { decision_epoch: 9 })).toMatchObject({ decision: 'allow', violations: [] });
+  it('a well-formed escalate is always allowed, even on a stale epoch', () => {
+    const esc = cmd('escalate', 'job-a', { expected_decision_epoch: 9, arguments: { reason: 'no safe destination' } });
+    expect(check(DEMO, esc, { decision_epoch: 9 })).toMatchObject({ decision: 'allow', violations: [] });
+    // §0.11 #1: escalate { reason: string } is required; a malformed one is denied (but never for staleness)
+    const noReason = cmd('escalate', 'job-a', { expected_decision_epoch: 9 });
+    expect(check(DEMO, noReason, { decision_epoch: 9 })).toMatchObject({ decision: 'deny', violations: ['INVALID_ARGUMENT'] });
   });
 
   it('is pure and deterministic: frozen input, identical output', () => {

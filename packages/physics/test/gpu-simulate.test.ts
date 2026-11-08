@@ -11,7 +11,7 @@ import {
   toObserved,
   type PlanMetrics,
 } from '../src/index.js';
-import { PUMP_A_FAULT, deepFreeze, demoWorld, fault, gpusOn, readFixture, runUntil, tickInput } from './gpu-helpers.js';
+import { PUMP_A_FAULT, T0, deepFreeze, demoWorld, fault, gpusOn, readFixture, runUntil, tickInput } from './gpu-helpers.js';
 
 const degraded = readFixture<ObservedSnapshot>('observed_snapshot_pump_degraded.json');
 
@@ -25,7 +25,7 @@ function cmd(
     schema_version: '1.1.0', run_id: 'run-demo-1', action_id: `act-sim-${seq}`, command_key: `ck-sim-${operation}-${job}-${seq}`,
     workflow_id: 'wf-1', plan_id: 'plan-1', incident_ids: ['inc-1'], operation, target_resource_id: job, job_id: job,
     arguments: args, depends_on_command_keys: deps, expected_decision_epoch: 1, expected_resource_versions: {},
-    requested_sim_time_ms: 120_000, ...opts,
+    requested_sim_time_ms: T0 + 120_000, ...opts,
   };
   expect(validatePayload('ActionCommand', c)).toEqual({ ok: true });
   return c;
@@ -60,16 +60,16 @@ function expectNoPrivate(m: PlanMetrics): void {
   expect(text).not.toMatch(/fault-|fault_id|cooling_pump_degradation|severity|capacity_factor/);
 }
 
-/** Truth world with several private faults, observed at 120 s. */
+/** Truth world with several private faults, observed at start + 120 s. */
 function faultyTruth(): PhysicsWorld {
   const faults = [
     PUMP_A_FAULT,
-    fault('gpu_xid_79', 'gpu-r5-n1-0', 60_000, { fault_id: 'fault-xid79-r5-0' }),
-    fault('gpu_thermal_load', 'gpu-r1-n1-3', 30_000, { fault_id: 'fault-thermal-r1-3', severity: 0.5 }),
+    fault('gpu_xid_79', 'gpu-r5-n1-0', T0 + 60_000, { fault_id: 'fault-xid79-r5-0' }),
+    fault('gpu_thermal_load', 'gpu-r1-n1-3', T0 + 30_000, { fault_id: 'fault-thermal-r1-3', severity: 0.5 }),
     // a future fault that the planner must not see
-    fault('gpu_xid_79', 'gpu-r7-n1-0', 300_000, { fault_id: 'fault-future-r7-0' }),
+    fault('gpu_xid_79', 'gpu-r7-n1-0', T0 + 300_000, { fault_id: 'fault-future-r7-0' }),
   ];
-  return runUntil(demoWorld(), 120_000, { faults }).world;
+  return runUntil(demoWorld(), T0 + 120_000, { faults }).world;
 }
 
 describe('estimateWorld', () => {
@@ -98,7 +98,7 @@ describe('estimateWorld', () => {
     expect(h.loop_temp_c['loop-b']).toBeGreaterThanOrEqual(35);
     expect(h.loop_temp_c['loop-b']).toBeLessThan(35.3);
     // one tick with no faults: the estimate's temps match the truth's next tick within rounding (0.1 °C)
-    const truthNext = step(tickInput(runUntil(demoWorld(), 120_000, { faults: [PUMP_A_FAULT] }).world, [PUMP_A_FAULT])).world_after;
+    const truthNext = step(tickInput(runUntil(demoWorld(), T0 + 120_000, { faults: [PUMP_A_FAULT] }).world, [PUMP_A_FAULT])).world_after;
     const estNext = step(tickInput(est)).world_after;
     for (const g of estNext.observable.gpus) {
       const t = truthNext.observable.gpus.find((x) => x.resource_id === g.resource_id)!;
@@ -115,7 +115,7 @@ describe('estimateWorld', () => {
       }
       return null;
     };
-    const truth = runUntil(demoWorld(), 120_000, { faults: [PUMP_A_FAULT] }).world;
+    const truth = runUntil(demoWorld(), T0 + 120_000, { faults: [PUMP_A_FAULT] }).world;
     const real = failTick(truth, [PUMP_A_FAULT]);
     const est = failTick(estimateWorld(toObserved(truth)), []);
     expect(real).not.toBeNull();
@@ -124,14 +124,14 @@ describe('estimateWorld', () => {
 
   it('rebuilds an in-flight checkpoint from the observed rows', () => {
     const ck = cmd('checkpoint', 'job-b');
-    const truth = runUntil(enqueueCommands(demoWorld(), [ck]), 110_000, { requestAt: { 100_000: [ck.action_id] } }).world;
+    const truth = runUntil(enqueueCommands(demoWorld(), [ck]), T0 + 110_000, { requestAt: { [T0 + 100_000]: [ck.action_id] } }).world;
     const obs = toObserved(truth);
     expect(obs.job_states.find((j) => j.job_id === 'job-b')!.status).toBe('checkpointing');
     let w = estimateWorld(obs);
-    for (let i = 0; i < 20; i++) w = step(tickInput(w)).world_after; // → 130 s
+    for (let i = 0; i < 20; i++) w = step(tickInput(w)).world_after; // → start + 130 s
     const jb = w.observable.job_states.find((j) => j.job_id === 'job-b')!;
     expect(jb).toMatchObject({ status: 'running', latest_checkpoint_id: 'ckpt-job-b-2' });
-    expect(w.observable.checkpoints.find((c) => c.checkpoint_id === 'ckpt-job-b-2')).toMatchObject({ status: 'complete', complete_sim_time_ms: 130_000 });
+    expect(w.observable.checkpoints.find((c) => c.checkpoint_id === 'ckpt-job-b-2')).toMatchObject({ status: 'complete', complete_sim_time_ms: T0 + 130_000 });
     // a plan step may depend on that real in-flight command
     const mv = cmd('migrate_restart', 'job-b', { destination_node_ids: ['node-r1-n1'] }, [ck.command_key]);
     expect(simulatePlan(obs, { commands: [mv] }).violations).toEqual([]);
@@ -226,6 +226,24 @@ describe('simulatePlan', () => {
     const noDep = { ...mv, command_key: 'ck-nodep', action_id: 'act-nodep', depends_on_command_keys: [] };
     expect(simulatePlan(degraded, { commands: [ck, mv] }).violations).toEqual([]);
     expect(simulatePlan(degraded, { commands: [ck, noDep] }).violations).toEqual(['JOB_STATE_INVALID']);
+  });
+
+  it('loop rows (§0.11 #9) are not double-counted, and a gpu-real-0 row from nvidia-smi is passed through untouched', () => {
+    const noLoops: ObservedSnapshot = JSON.parse(JSON.stringify(degraded));
+    noLoops.cooling = noLoops.cooling.filter((c) => !c.resource_id.startsWith('loop-'));
+    expect(degraded.cooling.find((c) => c.resource_id === 'loop-a')!.observed_capacity_estimate_w).toBe(9600);
+    for (const commands of [[], jobAMove()]) {
+      expect(simulatePlan(degraded, { commands })).toEqual(simulatePlan(noLoops, { commands }));
+    }
+    expect(estimateWorld(degraded).observable.resources.find((r) => r.resource_id === 'pump-a')!.config.nominal_capacity_w).toBe(9600);
+    // the DB snapshot may carry the real GPU's ingested row: it never gets simulated heat, telemetry or a placement
+    const withReal: ObservedSnapshot = JSON.parse(JSON.stringify(degraded));
+    const real = { ...withReal.gpus[0]!, resource_id: 'gpu-real-0', node_id: 'node-real-0', temp_c: 41.5, power_w: 120, last_seen_sim_ms: withReal.clock.sim_time_ms };
+    withReal.gpus.push(real);
+    const r = step(tickInput(estimateWorld(withReal)));
+    expect(r.world_after.observable.gpus.find((g) => g.resource_id === 'gpu-real-0')).toEqual(real);
+    expect(r.telemetry.some((e) => e.resource_id === 'gpu-real-0')).toBe(false);
+    expect(simulatePlan(withReal, { commands: jobAMove() })).toEqual(simulatePlan(degraded, { commands: jobAMove() }));
   });
 
   it('honours horizon_s and reports unfinished commands', () => {

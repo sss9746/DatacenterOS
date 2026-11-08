@@ -3,6 +3,7 @@
 // Pure and deterministic. Only `import type` from @dcos/contracts.
 import type {
   ActionCommand,
+  ActionStatus,
   CoolingCurrent,
   FaultInjection,
   GpuCurrent,
@@ -13,7 +14,7 @@ import type {
   ResourceSpec,
 } from '@dcos/contracts';
 import {
-  CLOCKS_EVENT_HW_THERMAL,
+  CLOCKS_EVENT_SW_THERMAL,
   CLOCKS_EVENT_SW_POWER_CAP,
   GPU_MODEL_VERSION,
   GPU_TEMP_RISE_C_PER_LOAD,
@@ -22,6 +23,7 @@ import {
   POWER_CAP_CLOCK_FACTOR,
   POWER_LIMIT_W,
   RACK_THERMAL_MASS_KJ_PER_C,
+  REAL_PROFILE,
   SHUTDOWN_C,
   SLOWDOWN_C,
   SM_CLOCK_NOMINAL_MHZ,
@@ -35,10 +37,24 @@ import {
 /** Latched hardware failure of a GPU (truth; survives the fault's duration: hardware does not self-heal). */
 export type GpuFailure = 'xid_79' | 'xid_48' | 'xid_74' | 'thermal_shutdown' | 'node_crash';
 
-/** How a command ended. reason_code uses CONTRACTS §0.7 codes where one fits, else a physics-specific code. */
+/**
+ * commandOutcome(world, command_key) result (CONTRACTS §0.12 #4, frozen). status uses ActionStatus['status'] values:
+ *   'running'    started in physics and not finished yet (in flight; see inFlightCommands for its due time)
+ *   'succeeded'  completed; no reason_code
+ *   'failed'     refused at start or failed on completion; reason_code is a §0.7 code (incl. the physics codes
+ *                JOB_NOT_FOUND, JOB_STATE_INVALID, TARGET_NOT_FOUND, INVALID_ARGUMENT, JOB_FAILED_DURING_OPERATION)
+ * A key physics has not started (unknown, or enqueued but not yet requested) gives null.
+ */
 export interface CommandOutcome {
+  status: Extract<ActionStatus['status'], 'running' | 'succeeded' | 'failed'>;
+  reason_code?: string;
+}
+
+/** Hidden record of a finished command (internal; adds the finish time the harnesses need). */
+export interface FinishedCommand {
   ok: boolean;
   reason_code: string | null;
+  /** End time of the tick it finished on. */
   sim_time_ms: number;
 }
 
@@ -71,8 +87,6 @@ export interface HiddenState {
   gpu_failure: Record<string, GpuFailure>;
   /** GPUs cordoned by `cordon_gpu` (cordon never repairs: a failed GPU stays unreachable). */
   gpu_cordoned: string[];
-  /** True sim time of each job's last completed checkpoint; pre-run checkpoints are negative (schema forbids that in Checkpoint rows). */
-  last_checkpoint_sim_ms: Record<string, number>;
   /** Next checkpoint sequence number per job (ckpt-<job>-<n>). */
   checkpoint_counter: Record<string, number>;
   /** Commands handed to physics (see actions.ts) waiting for their action_id to appear in requested_action_ids. */
@@ -82,7 +96,7 @@ export interface HiddenState {
   /** command_keys already completed or failed (idempotency: a key never runs twice). */
   finished_command_keys: string[];
   /** Outcome per finished command_key (PhysicsTickResult has no per-command reason field; see commandOutcome()). */
-  command_outcomes: Record<string, CommandOutcome>;
+  command_outcomes: Record<string, FinishedCommand>;
   /** Last good observed values for resources under a sensor_stale fault: `${resource_id}|${field}` → value. */
   stale_values: Record<string, number>;
 }
@@ -129,7 +143,11 @@ export interface Topology {
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
 
-/** Index the observable resources (rack config: cooling_loop_id, inlet_offset_c; loop config: pump_id, supply_temp_c). */
+/**
+ * Index the observable resources (rack config: cooling_loop_id, inlet_offset_c; loop config: pump_id, supply_temp_c).
+ * Only nodes with a rack (parent_id) are indexed as nodes, so node-real-0 (no rack) and any GPU on it never enter
+ * nodeRack / nodeGpus / gpuRack: see isSimulatedGpu.
+ */
 export function buildTopology(resources: ResourceSpec[], gpus: GpuCurrent[]): Topology {
   const t: Topology = {
     racks: [], rackLoop: new Map(), rackOffsetC: new Map(), rackMassKjPerC: new Map(),
@@ -277,6 +295,20 @@ export function gpuPhysics(
   return { temp_c: temp, power_w: power, throttled, capped, clock_factor };
 }
 
+/**
+ * A GPU the physics models: it sits on a rack. A gpu_current row of the real Brev GPU (gpu-real-0 on node-real-0, no
+ * rack; it can appear in a DB snapshot handed to simulatePlan) is passed through untouched: never heated, never
+ * re-derived, no simulated telemetry.
+ */
+export function isSimulatedGpu(gpuId: string, topo: Topology): boolean {
+  return topo.gpuRack.has(gpuId);
+}
+
+/** The real Brev GPU / node (profile brev_real or config.allocatable false): never a placement, cap or cordon target. */
+export function isRealResource(res: ResourceSpec | undefined): boolean {
+  return !!res && (res.profile === REAL_PROFILE || res.config.allocatable === false);
+}
+
 export function isShutdownTemp(tempC: number): boolean {
   return tempC >= SHUTDOWN_C;
 }
@@ -300,6 +332,7 @@ export function deriveGpus(
 ): { gpus: GpuCurrent[]; physics: Map<string, GpuPhysics> } {
   const physics = new Map<string, GpuPhysics>();
   const out = gpus.map((prev) => {
+    if (!isSimulatedGpu(prev.resource_id, topo)) return prev;
     const availability = gpuAvailability(prev.resource_id, h);
     let next: GpuCurrent;
     if (availability === 'unreachable') {
@@ -313,7 +346,7 @@ export function deriveGpus(
         temp_c: p.temp_c,
         sm_clock_mhz: Math.round(SM_CLOCK_NOMINAL_MHZ * p.clock_factor),
         power_w: p.power_w,
-        clocks_event_reasons: (p.throttled ? CLOCKS_EVENT_HW_THERMAL : 0) | (p.capped ? CLOCKS_EVENT_SW_POWER_CAP : 0),
+        clocks_event_reasons: (p.throttled ? CLOCKS_EVENT_SW_THERMAL : 0) | (p.capped ? CLOCKS_EVENT_SW_POWER_CAP : 0),
         last_seen_sim_ms: simMs,
       };
       if (cond.stale.has(prev.resource_id)) {
@@ -347,8 +380,41 @@ export function deriveNodes(
   });
 }
 
+const STATE_RANK: Record<CoolingCurrent['operating_state'], number> = { normal: 0, degraded: 1, maintenance: 2, failed: 3 };
+
+/**
+ * cooling_current rows (CONTRACTS §0.11 #9: one per pump AND one per loop). Pump rows come from the true pump state;
+ * each loop row is then derived from its driving pump rows only (one pump per loop in gpu_demo_8), so it never adds
+ * capacity of its own:
+ *   operating_state               the driving pump's (worst of them if several)
+ *   nominal_capacity_w            Σ the pumps' nominal capacity
+ *   pump_power_w                  Σ the driving pumps' observed pump_power_w (the power spent moving this loop's coolant)
+ *   observed_capacity_estimate_w  Σ the pumps' estimates (null if any is null)
+ * CONSUMERS MUST NOT SUM BOTH KINDS: capacity sums (safety's loop projection, simulatePlan's estimate) read pump rows
+ * only (resource kind cooling_pump); a loop row is a per-loop view of the same numbers.
+ */
 export function deriveCooling(cooling: CoolingCurrent[], topo: Topology, cond: FaultConditions): CoolingCurrent[] {
+  const pumps = derivePumps(cooling, topo, cond);
+  const byId = new Map(pumps.map((c) => [c.resource_id, c]));
+  return pumps.map((prev) => {
+    if (topo.resources.get(prev.resource_id)?.kind !== 'cooling_loop') return prev;
+    const rows = (topo.loopPumps.get(prev.resource_id) ?? []).map((p) => byId.get(p)).filter((c): c is CoolingCurrent => !!c);
+    if (rows.length === 0) return prev;
+    const estimates = rows.map((c) => c.observed_capacity_estimate_w);
+    return {
+      ...prev,
+      operating_state: rows.reduce((s, c) => (STATE_RANK[c.operating_state] > STATE_RANK[s] ? c.operating_state : s), 'normal' as CoolingCurrent['operating_state']),
+      nominal_capacity_w: rows.reduce((s, c) => s + c.nominal_capacity_w, 0),
+      pump_power_w: rows.reduce((s, c) => s + c.pump_power_w, 0),
+      observed_capacity_estimate_w: estimates.every((x): x is number => x !== null) ? estimates.reduce((s, x) => s + x, 0) : null,
+    };
+  });
+}
+
+/** Pump rows from the true pump state (non-pump rows are returned unchanged). */
+function derivePumps(cooling: CoolingCurrent[], topo: Topology, cond: FaultConditions): CoolingCurrent[] {
   return cooling.map((prev) => {
+    if (topo.resources.get(prev.resource_id)?.kind !== 'cooling_pump') return prev;
     const factor = cond.pumpFactor.get(prev.resource_id) ?? 1;
     const nominalPower = topo.pumpNominalPowerW.get(prev.resource_id) ?? 0;
     const power = factor === 1 ? nominalPower : nominalPower * factor;
@@ -387,7 +453,7 @@ export function loopHeatW(loop: string, gpuIds: string[], physics: Map<string, G
 // public decision_epoch never leaks a hidden fault that has no observable effect yet.
 
 export const gpuMaterialKey = (g: GpuCurrent): string =>
-  `${g.availability}|${g.clocks_event_reasons & CLOCKS_EVENT_HW_THERMAL}|${g.power_limit_w}|${g.last_xid_code}`;
+  `${g.availability}|${g.clocks_event_reasons & CLOCKS_EVENT_SW_THERMAL}|${g.power_limit_w}|${g.last_xid_code}`;
 export const nodeMaterialKey = (n: NodeCurrent): string => n.availability;
 export const coolingMaterialKey = (c: CoolingCurrent): string => c.operating_state;
 export const jobMaterialKey = (j: JobState): string =>

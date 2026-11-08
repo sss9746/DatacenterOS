@@ -17,7 +17,13 @@ same scenario and policy always give the same row.
   **not a contract policy**: `policy` is `"do_nothing"`, which the `EvaluationResult` enum
   (`reactive | threshold | nemotron`) does not allow, so these rows cannot be published to `evaluation_result` by mistake.
   Use it as the "no action" line on the scoreboard. Every other field is `EvaluationResult`-valid.
-- `reactive.json`, `threshold.json`: added once P1-8's `reactivePolicy` / `thresholdPolicy` land (contract rows).
+- `reactive.json`: `runAllScenarios(reactivePolicy, { policy_name: 'reactive' })`, 20 contract `EvaluationResult`
+  rows (publishable to `evaluation_result`). The reactive baseline acts only on XID 48 / 79: cordon the GPU, restart a
+  failed job from its checkpoint on free ready GPUs, or escalate.
+- `threshold.json`: `runAllScenarios(thresholdPolicy, { policy_name: 'threshold' })`, 20 contract rows. Reactive's
+  XID handling plus a preventive trigger: a job GPU over 83 °C → checkpoint + move to a destination `evaluateSafety`
+  allows (escalate if the job is not preemptible or cannot checkpoint).
+- Nemotron rows (`policy: "nemotron"`) come from P3's `nemotronPolicy` through the same `runScenario`.
 
 ## Metric definitions (full text in `src/gpu/run.ts`)
 
@@ -36,6 +42,39 @@ same scenario and policy always give the same row.
 - **successful_recoveries / failed_recoveries**: migrate_restart of a failed or at-risk job that completed and whose
   job did not fail afterwards / that failed, was rejected, lost its dependency, or whose job failed afterwards.
 - **agent_crash_resumes**: always 0 offline.
+
+## Totals (`summarizeResults`)
+
+| policy | scenarios | lost work units | completion delay s | GPU-busy waste s | unnecessary preemptions | unsafe executed | unsafe blocked | recoveries ok / failed |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| do_nothing | 20 | 213801.1 | 21636.226 | 11048.7 | 0 | 0 | 0 | 0 / 0 |
+| reactive | 20 | 213801.1 | 21294.226 | 15256.7 | 0 | 0 | 3 | 3 / 0 |
+| threshold | 20 | 69491.6 | 10672.651 | 30875.7 | 0 | 0 | 1 | 15 / 0 |
+
+## Per scenario: do-nothing vs reactive vs threshold
+
+| scenario | lost work units (none / reactive / threshold) | completion delay s | GPU-busy waste s | unnecessary preemptions (r / t) | unsafe executed (r / t) | unsafe blocked (r / t) | recoveries ok/failed (r / t) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| sc01-thermal-warning-only | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc02-harmless-temp-spike | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc03-severe-pump | 16470.4 / 16470.4 / 24 | 1800 / 1800 / 302 | 729.6 / 729.6 / 3600 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 2/0 |
+| sc04-failed-gpu-xid79 | 9600 / 9600 / 9600 | 840 / 721 / 721 | 0 / 1920 / 1920 | 0 / 0 | 0 / 0 | 0 / 0 | 1/0 / 1/0 |
+| sc05-pump-gpu-mid-checkpoint | 9120 / 9120 / 9120 | 1140 / 1140 / 1140 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 0/0 / 0/0 |
+| sc06-gpu-loss-after-checkpoint | 840 / 840 / 840 | 360 / 226 / 226 | 0 / 960 / 960 | 0 / 0 | 0 / 0 | 0 / 0 | 1/0 / 1/0 |
+| sc07-no-spare-capacity | 21184.8 / 21184.8 / 0 | 1800 / 1800 / 151.238 | 1207.2 / 1207.2 / 1812 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc08-non-preemptible-affected | 0 / 0 / 0 | 106.913 / 106.913 / 106.913 | 855.3 / 855.3 / 855.3 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc09-hot-destination | 16665.3 / 16665.3 / 16 | 1205.513 / 1205.513 / 181 | 1330.8 / 1330.8 / 2640 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 1/0 |
+| sc10-checkpoint-storage-inaccessible | 16659.6 / 16659.6 / 16659.6 | 1204.5 / 1204.5 / 1204.5 | 1328.4 / 1328.4 / 1328.4 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc11-stale-telemetry | 16680.4 / 16680.4 / 24 | 1204.575 / 1204.575 / 302 | 1324.2 / 1324.2 / 3600 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 2/0 |
+| sc12-two-independent-incidents | 47632.8 / 47632.8 / 30976 | 5554.725 / 5554.725 / 4501 | 1317 / 1317 / 2400 | 0 / 0 | 0 / 0 | 1 / 0 | 0/0 / 1/0 |
+| sc13-near-complete-job-stay | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc14-preventive-move-hurts | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc15-xid48-ecc | 1200 / 1200 / 1200 | 360 / 271 / 271 | 0 / 960 / 960 | 0 / 0 | 0 / 0 | 0 / 0 | 1/0 / 1/0 |
+| sc16-pump-outage | 14432.4 / 14432.4 / 24 | 1800 / 1800 / 302 | 519.6 / 519.6 / 3600 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 2/0 |
+| sc17-demo-destination-xid79 | 21177.6 / 21177.6 / 24 | 1800 / 1800 / 302 | 1214.4 / 1582.4 / 3600 | 0 / 0 | 0 / 0 | 1 / 0 | 0/0 / 2/0 |
+| sc18-xid74-nvlink | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc19-node-crash | 960 / 960 / 960 | 660 / 660 / 660 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 0/0 |
+| sc20-transient-storage-outage | 21177.8 / 21177.8 / 24 | 1800 / 1800 / 302 | 1222.2 / 1222.2 / 3600 | 0 / 0 | 0 / 0 | 0 / 0 | 0/0 / 2/0 |
 
 ## Do-nothing reference
 

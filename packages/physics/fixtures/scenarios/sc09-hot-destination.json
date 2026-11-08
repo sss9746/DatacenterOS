@@ -11,7 +11,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "pump-a",
       "kind": "cooling_pump_degradation",
-      "start_sim_time_ms": 10000,
+      "start_sim_time_ms": 610000,
       "duration_sim_ms": null,
       "severity": 0.6,
       "parameters": {
@@ -25,7 +25,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-0",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -39,7 +39,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-1",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -53,7 +53,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-2",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -67,7 +67,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-3",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -81,7 +81,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-4",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -95,7 +95,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-5",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -109,7 +109,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-6",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -123,7 +123,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r1-n1-7",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -137,7 +137,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-0",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -151,7 +151,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-1",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -165,7 +165,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-2",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -179,7 +179,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-3",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -193,7 +193,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-4",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -207,7 +207,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-5",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -221,7 +221,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-6",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {
@@ -235,7 +235,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r5-n1-7",
       "kind": "gpu_thermal_load",
-      "start_sim_time_ms": 0,
+      "start_sim_time_ms": 600000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {

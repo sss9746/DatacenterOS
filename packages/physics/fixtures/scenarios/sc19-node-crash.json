@@ -11,7 +11,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "node-r4-n1",
       "kind": "node_crash",
-      "start_sim_time_ms": 60000,
+      "start_sim_time_ms": 660000,
       "duration_sim_ms": 300000,
       "severity": 1,
       "parameters": {},

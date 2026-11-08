@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { validatePayload, type ActionCommand, type GpuCurrent, type ObservedSnapshot, type PhysicsWorld } from '@dcos/contracts';
 import {
   THRESHOLD_TEMP_C,
+  argumentProblems,
   enqueueCommands,
   evaluateSafety,
   loadScenarios,
@@ -18,7 +19,7 @@ import {
   type Policy,
   type Scenario,
 } from '../src/index.js';
-import { deepFreeze, gpusOn, readFixture } from './gpu-helpers.js';
+import { T0, deepFreeze, gpusOn, readFixture } from './gpu-helpers.js';
 
 const PUMP = readFixture<ObservedSnapshot>('observed_snapshot_pump_degraded.json');
 const DEMO = readFixture<ObservedSnapshot>('observed_snapshot_demo.json');
@@ -36,15 +37,19 @@ const nodeOf = (gpuId: string) => gpuId.replace(/^gpu-(r\d+-n1)-\d+$/, 'node-$1'
 function expectValid(cmds: ActionCommand[]): void {
   for (const c of cmds) {
     expect(validatePayload('ActionCommand', c), c.command_key).toEqual({ ok: true });
+    // §0.11 #1 arguments by operation (migrate_restart always uses destination_gpu_ids; escalate carries a reason)
+    expect(argumentProblems(c), c.command_key).toEqual([]);
+    if (c.operation === 'migrate_restart') expect(Object.keys(c.arguments)).toEqual(['destination_gpu_ids']);
+    if (c.operation === 'escalate') expect(typeof c.arguments.reason).toBe('string');
     expect(c.action_id).toBe(c.command_key);
   }
   expect(new Set(keys(cmds)).size).toBe(cmds.length); // unique within one call
 }
 
-/** Step a scenario with no actions until the clock reaches untilMs (or stop() says so). Returns the world. */
+/** Step a scenario with no actions until the clock reaches run start + untilMs (or stop() says so). Returns the world. */
 function advance(s: Scenario, untilMs: number, stop?: (o: ObservedSnapshot) => boolean): PhysicsWorld {
   let w = scenarioWorld(s);
-  while (w.observable.clock.sim_time_ms < untilMs) {
+  while (w.observable.clock.sim_time_ms < T0 + untilMs) {
     w = step(scenarioTickInput(s, w)).world_after;
     if (stop?.(w.observable)) break;
   }
@@ -68,7 +73,7 @@ interface Drive {
 }
 
 /**
- * A minimal trusted harness: each tick, call the policy on toObserved(world), enqueue keys it has not seen (first
+ * A minimal trusted harness (untilMs is an offset from the run start): each tick, call the policy on toObserved(world), enqueue keys it has not seen (first
  * payload wins), request a command once all its depends_on keys have completed, then step.
  */
 function drive(s: Scenario, policy: (o: ObservedSnapshot) => ActionCommand[], untilMs = s.horizon_s * 1000): Drive {
@@ -77,7 +82,7 @@ function drive(s: Scenario, policy: (o: ObservedSnapshot) => ActionCommand[], un
   const requested = new Set<string>();
   const done = new Set<string>();
   const out: Drive = { perTick: [], emitted: [], completed: [], failed: [], final: toObserved(w) };
-  while (w.observable.clock.sim_time_ms < untilMs) {
+  while (w.observable.clock.sim_time_ms < T0 + untilMs) {
     const obs = toObserved(w);
     const cmds = policy(obs);
     out.perTick.push({ t: obs.clock.sim_time_ms, obs, keys: keys(cmds) });
@@ -226,7 +231,10 @@ describe('reactivePolicy', () => {
       operation: 'migrate_restart', target_resource_id: 'job-a', job_id: 'job-a', incident_ids: ['inc.reactive.gpu-r3-n1-5'],
       workflow_id: 'wf.reactive.gpu-r3-n1-5', plan_id: 'plan.reactive.gpu-r3-n1-5',
     });
-    expect(restart.arguments.from_checkpoint_id).toBe('ckpt-job-a-1');
+    // §0.11 #1: exactly the contract arguments (the restart reads the job's latest checkpoint, ckpt-job-a-1)
+    expect(restart.arguments).toEqual({ destination_gpu_ids: dest(restart) });
+    expect(cordon.arguments).toEqual({});
+    expect(job(obs, 'job-a').latest_checkpoint_id).toBe('ckpt-job-a-1');
     const d = dest(restart);
     expect(d).toHaveLength(16);
     expect(new Set(d).size).toBe(16);
@@ -266,6 +274,23 @@ describe('reactivePolicy', () => {
     expectValid(cmds);
     expect(keys(cmds)).toEqual(['reactive.gpu-r3-n1-5.cordon_gpu.xid79', 'reactive.job-a.escalate.no_destination.v1']);
     expect(cmds[1]).toMatchObject({ operation: 'escalate', job_id: 'job-a', arguments: { reason: 'no_destination' } });
+  });
+
+  it('never places a job on node-real-0 / gpu-real-0 (§0.11 #4), even if a snapshot lists them as ready and compatible', () => {
+    const obs = structuredClone(toObserved(advance(SC04, 60_000)));
+    // adversarial: only r1 + r3 + the real node are compatible; r1 has 8 free GPUs, r3 7, the real node 1 → exactly 16
+    obs.job_specs.find((s) => s.job_id === 'job-a')!.compatible_node_ids = ['node-real-0', 'node-r1-n1', 'node-r3-n1'];
+    obs.gpus.push({ ...obs.gpus.find((g) => g.resource_id === 'gpu-r1-n1-0')!, resource_id: 'gpu-real-0', node_id: 'node-real-0' });
+    obs.nodes.push({ ...obs.nodes.find((n) => n.resource_id === 'node-r1-n1')!, resource_id: 'node-real-0' });
+    for (const p of [reactivePolicy, thresholdPolicy]) {
+      const cmds = p(obs);
+      expectValid(cmds);
+      for (const c of cmds) {
+        expect(dest(c)).not.toContain('gpu-real-0');
+        expect(JSON.stringify(c.arguments)).not.toContain('node-real-0');
+      }
+      expect(cmds.map((c) => c.operation)).toEqual(['cordon_gpu', 'escalate']); // 15 simulated GPUs < 16: no move
+    }
   });
 
   it('an XID on the real GPU escalates instead of cordoning; already-cordoned GPUs are not re-cordoned', () => {
@@ -387,7 +412,7 @@ describe('idempotent and stateless', () => {
     let w = advance(SC03, 0, undefined);
     const seen = new Set<string>();
     let ticksWithKeys = 0;
-    while (w.observable.clock.sim_time_ms < 300_000) {
+    while (w.observable.clock.sim_time_ms < T0 + 300_000) {
       w = step(scenarioTickInput(SC03, w)).world_after;
       const k = keys(thresholdPolicy(toObserved(w))).filter((x) => x.includes('job-a'));
       if (k.length > 0) ticksWithKeys += 1;

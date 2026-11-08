@@ -11,7 +11,17 @@
 //                         (pause_job, or migrate_restart of a job that has not already failed). Approval reasons are
 //                         not §0.7 codes, so they go in evidence.approval_reasons and violations stays empty.
 //   4. allow              nothing above.
-//   `escalate` has no physical effect and is always allowed (never blocked by staleness), so a human is never locked out.
+//   `escalate` has no physical effect and is allowed whenever its payload is well-formed (escalate { reason: string },
+//   CONTRACTS §0.11 #1); it is never blocked by staleness, so a human is never locked out.
+//
+// ARGUMENTS (CONTRACTS §0.11 #1, args.ts, shared with physics): checkpoint / pause_job / cordon_gpu / uncordon_gpu /
+//   keep_running {}; power_cap { power_limit_w? }; escalate { reason }; migrate_restart { destination_gpu_ids } (the
+//   standard form) or { destination_node_ids } (manual use, §0.12 #6), exactly one. Anything else → INVALID_ARGUMENT.
+//
+// PRECISE CODES (CONTRACTS §0.12 #4): an unknown job → JOB_NOT_FOUND; an unknown power_cap / cordon target →
+//   TARGET_NOT_FOUND; a job in the wrong state (checkpoint of a non-running job, pause of a non-running job, a move of
+//   a completed job, a power cap on a job holding no GPUs) → JOB_STATE_INVALID; a malformed argument → INVALID_ARGUMENT.
+//   UNSUPPORTED_OPERATION is left for an operation outside the contract enum.
 //
 // FRESHNESS: STALE_DECISION_EPOCH unless obs.clock.decision_epoch, ctx.decision_epoch (the caller's current
 //   run.decision_epoch) and cmd.expected_decision_epoch are all equal. STALE_RESOURCE_VERSION for every
@@ -43,8 +53,9 @@
 //   - Loop coolant now ≈ max over its racks of (inferred inlet − inlet_offset_c), never below the supply setpoint.
 //   - Heat into the loop AFTER the move = Σ projected GPU power: destination GPUs at full load
 //     (min(700 W, power_limit_w)), the job's old GPUs idle (70 W; 0 W if unreachable), every other GPU at its
-//     observed power_w. Capacity = Σ the loop's pumps' observed_capacity_estimate_w (0 if failed / maintenance;
-//     nominal if the estimate is missing and the pump is normal, else 0).
+//     observed power_w. Capacity = Σ the loop's PUMP rows' observed_capacity_estimate_w (0 if failed / maintenance;
+//     nominal if the estimate is missing and the pump is normal, else 0). The loop's own cooling_current row
+//     (CONTRACTS §0.11 #9) mirrors its pump and is never added, so capacity is not double-counted.
 //   - Same Euler step as step(): loop(+120 s) = max(supply, now + 120 × (heat − capacity) / (1000 × Σ rack mass kJ/°C)).
 //     The model is linear, so the worst point of the window is max(now, +120 s): rise = max(0, loop(+120) − now).
 //   - Projected rack GPU temps: destination GPUs = inlet + rise + 35 × min(700, limit)/700; the job's old GPUs on the
@@ -60,11 +71,15 @@
 // the thermal step mirrors step.ts. buildTopology (world.ts) is imported: it only indexes observable resources.
 import type { ActionCommand, CoolingCurrent, GpuCurrent, JobSpec, JobState, ObservedSnapshot, SafetyDecision } from '@dcos/contracts';
 import { GPU_TEMP_RISE_C_PER_LOAD, IDLE_LOAD, LOOP_SUPPLY_C, POWER_LIMIT_W, SLOWDOWN_C, WIRE_SCHEMA_VERSION, round1 } from './constants.js';
-import { buildTopology, type Topology } from './world.js';
+import { argumentProblems } from './args.js';
+import { buildTopology, isRealResource, type Topology } from './world.js';
 
 // ---- safety constants (all SIMULATED, configurable) -----------------------------------------------
 
-/** CONTRACTS §0.7 reason codes, in their frozen order (violations are always reported in this order). */
+/**
+ * CONTRACTS §0.7 reason codes, in their frozen order (violations are always reported in this order): the 18 safety
+ * codes, then the five physics codes of §0.12 #4.
+ */
 export const SAFETY_REASON_CODES = [
   'DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT',
   'DEST_POWER_HEADROOM_INSUFFICIENT',
@@ -84,6 +99,13 @@ export const SAFETY_REASON_CODES = [
   'UNSUPPORTED_OPERATION',
   'CORDON_IS_NOT_REPAIR',
   'REAL_GPU_NOT_ALLOCATABLE',
+  // physics codes added to §0.7 by CONTRACTS §0.12 #4 (commandOutcome uses them too; safety never emits the last one,
+  // which only happens while a command runs)
+  'JOB_NOT_FOUND',
+  'JOB_STATE_INVALID',
+  'TARGET_NOT_FOUND',
+  'INVALID_ARGUMENT',
+  'JOB_FAILED_DURING_OPERATION',
 ] as const;
 export type SafetyReasonCode = (typeof SAFETY_REASON_CODES)[number];
 
@@ -153,6 +175,12 @@ function pumpCapacityW(c: CoolingCurrent | undefined): number {
   if (!c || c.operating_state === 'failed' || c.operating_state === 'maintenance') return 0;
   if (typeof c.observed_capacity_estimate_w === 'number') return c.observed_capacity_estimate_w;
   return c.operating_state === 'normal' ? c.nominal_capacity_w : 0;
+}
+
+/** The cooling_current row of a pump (resource kind cooling_pump), never a loop row. */
+function pumpRow(e: Eval, pumpId: string): CoolingCurrent | undefined {
+  if (e.topo.resources.get(pumpId)?.kind !== 'cooling_pump') return undefined;
+  return e.obs.cooling.find((c) => c.resource_id === pumpId);
 }
 
 function storeAccessible(e: Eval, storeId: string): boolean {
@@ -235,7 +263,7 @@ function resolveJob(e: Eval): { job: JobState; spec: JobSpec } | null {
   const job = e.obs.job_states.find((j) => j.job_id === id);
   const spec = e.obs.job_specs.find((s) => s.job_id === id);
   if (!job || !spec) {
-    add(e, 'UNSUPPORTED_OPERATION');
+    add(e, 'JOB_NOT_FOUND');
     e.evidence.unknown_job_id = id;
     return null;
   }
@@ -243,10 +271,17 @@ function resolveJob(e: Eval): { job: JobState; spec: JobSpec } | null {
   return { job, spec };
 }
 
-/** Is the target a GPU resource that is not an allocatable simulated GPU (e.g. gpu-real-0)? */
+/**
+ * Is the id the real Brev GPU / node (CONTRACTS §0.11 #4: gpu-real-0 on node-real-0, brev_real, never allocatable), or
+ * any GPU / node resource that is not a simulated, allocatable one (a GPU with no gpu_current row, a node with no
+ * node_current row)?
+ */
 function isRealGpu(e: Eval, id: string): boolean {
   const res = e.topo.resources.get(id);
-  return res?.kind === 'gpu' && (!e.gpu.has(id) || res.config.allocatable === false);
+  if (!res) return false;
+  if (res.kind === 'gpu') return !e.gpu.has(id) || isRealResource(res);
+  if (res.kind === 'node') return isRealResource(res) || !e.obs.nodes.some((n) => n.resource_id === id);
+  return false;
 }
 
 function staleIds(e: Eval, gpus: GpuCurrent[]): string[] {
@@ -271,7 +306,7 @@ function checkCheckpoint(e: Eval): void {
   checkLeases(e, job);
   if (!spec.checkpoint_supported || !spec.checkpoint_storage_id) add(e, 'CHECKPOINT_UNSUPPORTED');
   if (!checkJobBusy(e, job) && job.status !== 'running' && job.status !== 'paused') {
-    add(e, 'UNSUPPORTED_OPERATION');
+    add(e, 'JOB_STATE_INVALID');
     e.evidence.job_status = job.status;
   }
   if (spec.checkpoint_storage_id) {
@@ -287,7 +322,7 @@ function checkPause(e: Eval): void {
   checkLeases(e, job);
   if (!spec.preemptible) add(e, 'JOB_NOT_PREEMPTIBLE');
   if (!checkJobBusy(e, job) && job.status !== 'running') {
-    add(e, 'UNSUPPORTED_OPERATION');
+    add(e, 'JOB_STATE_INVALID');
     e.evidence.job_status = job.status;
   }
   if (spec.priority >= APPROVAL_PRIORITY_THRESHOLD) e.approval.push('HIGH_PRIORITY_JOB_DISRUPTION');
@@ -310,20 +345,18 @@ function powerCapTargets(e: Eval): string[] | null {
   }
   const job = e.obs.job_states.find((j) => j.job_id === t);
   if (job) return job.allocated_gpu_ids;
-  add(e, 'UNSUPPORTED_OPERATION');
+  add(e, 'TARGET_NOT_FOUND');
   return null;
 }
 
 function checkPowerCap(e: Eval): void {
-  const limit = e.cmd.arguments.power_limit_w;
-  if (limit !== undefined && !(typeof limit === 'number' && limit > 0 && limit <= POWER_LIMIT_W)) {
-    add(e, 'UNSUPPORTED_OPERATION');
-    e.evidence.invalid_power_limit_w = typeof limit === 'number' ? limit : String(limit);
-  }
   const gpus = powerCapTargets(e);
   if (gpus) {
     see(e, ...gpus);
-    if (gpus.length === 0) add(e, 'UNSUPPORTED_OPERATION');
+    if (gpus.length === 0) {
+      add(e, 'JOB_STATE_INVALID'); // a job holding no GPUs (failed / completed / queued): nothing to cap
+      e.evidence.job_status = e.obs.job_states.find((j) => j.job_id === (e.cmd.job_id ?? e.cmd.target_resource_id))?.status ?? null;
+    }
     const job = e.cmd.job_id ? e.obs.job_states.find((j) => j.job_id === e.cmd.job_id) ?? null : null;
     checkLeases(e, job);
   }
@@ -335,7 +368,7 @@ function checkCordon(e: Eval, uncordon: boolean): void {
   checkLeases(e, null);
   const g = e.gpu.get(t);
   if (!g) {
-    add(e, isRealGpu(e, t) ? 'REAL_GPU_NOT_ALLOCATABLE' : 'UNSUPPORTED_OPERATION');
+    add(e, isRealGpu(e, t) ? 'REAL_GPU_NOT_ALLOCATABLE' : 'TARGET_NOT_FOUND');
     return;
   }
   see(e, g.node_id);
@@ -368,15 +401,20 @@ function resolveDestinations(e: Eval, job: JobState, need: number): string[] {
     return uniq(explicit);
   }
   const nodes = stringList(e.cmd.arguments.destination_node_ids);
-  if (!nodes || nodes.length === 0) {
+  if (!nodes) {
+    e.evidence.destination_mode = 'none'; // no usable destination argument: INVALID_ARGUMENT (argumentProblems)
+    return [];
+  }
+  if (nodes.length === 0) {
     add(e, 'DEST_GPU_COUNT_INSUFFICIENT');
-    e.evidence.destination_mode = 'none';
+    e.evidence.destination_mode = 'destination_node_ids';
     return [];
   }
   e.evidence.destination_mode = 'destination_node_ids';
   for (const n of uniq(nodes)) {
     see(e, n);
-    if (!e.topo.nodeGpus.has(n)) add(e, 'DEST_NOT_COMPATIBLE');
+    if (isRealGpu(e, n)) add(e, 'REAL_GPU_NOT_ALLOCATABLE'); // node-real-0
+    else if (!e.topo.nodeGpus.has(n)) add(e, 'DEST_NOT_COMPATIBLE');
   }
   const onNodes = uniq(nodes.flatMap((n) => e.topo.nodeGpus.get(n) ?? []));
   const isFree = (g: string) => {
@@ -420,7 +458,8 @@ function projectLoop(e: Eval, loop: string, dest: Set<string>, oldGpus: Set<stri
     .filter((g) => rackSet.has(t.gpuRack.get(g.resource_id) ?? ''))
     .reduce((s, g) => s + projectedPowerW(g, dest, oldGpus), 0);
   const pumps = t.loopPumps.get(loop) ?? [];
-  const capacity = pumps.reduce((s, p) => s + pumpCapacityW(e.obs.cooling.find((c) => c.resource_id === p)), 0);
+  // pump rows only: the loop's own cooling_current row (CONTRACTS §0.11 #9) mirrors its pump and must not be added
+  const capacity = pumps.reduce((s, p) => s + pumpCapacityW(pumpRow(e, p)), 0);
   const massKj = racks.reduce((s, r) => s + (t.rackMassKjPerC.get(r) ?? 0), 0);
   const after = massKj > 0 ? Math.max(supply, now + (SAFETY_LOOKAHEAD_S * (heat - capacity)) / 1000 / massKj) : now;
   see(e, loop, ...pumps);
@@ -532,7 +571,7 @@ function checkMigrate(e: Eval): void {
   const voluntary = job.status !== 'failed';
   checkJobBusy(e, job);
   if (job.status === 'completed') {
-    add(e, 'UNSUPPORTED_OPERATION');
+    add(e, 'JOB_STATE_INVALID');
     e.evidence.job_status = job.status;
   }
   if (voluntary && !spec.preemptible) add(e, 'JOB_NOT_PREEMPTIBLE');
@@ -593,6 +632,11 @@ export function evaluateSafety(obs: ObservedSnapshot, cmd: ActionCommand, ctx: S
   e.evidence.operation = op;
 
   if (op !== 'escalate') checkFreshness(e, ctx);
+  const badArgs = argumentProblems(cmd);
+  if (badArgs.length > 0) {
+    add(e, 'INVALID_ARGUMENT'); // CONTRACTS §0.11 #1 (args.ts), the same rule physics applies
+    e.evidence.invalid_arguments = badArgs;
+  }
   switch (op) {
     case 'migrate_restart': checkMigrate(e); break;
     case 'checkpoint': checkCheckpoint(e); break;

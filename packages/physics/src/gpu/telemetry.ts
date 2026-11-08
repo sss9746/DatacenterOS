@@ -12,7 +12,7 @@ import {
   round1,
 } from './constants.js';
 import type { SignalDraft, TickCtx } from './jobs.js';
-import { rackInletC, type FaultConditions, type HiddenState, type Topology } from './world.js';
+import { isSimulatedGpu, rackInletC, type FaultConditions, type HiddenState, type Topology } from './world.js';
 
 const unixMs = (simMs: number) => RUN_EPOCH_UNIX_MS + simMs;
 const BASE_LABELS = { simulated: 'true', hardware_backed: 'false' } as const;
@@ -36,6 +36,7 @@ export function emitTelemetry(
   };
 
   for (const g of world.observable.gpus) {
+    if (!isSimulatedGpu(g.resource_id, topo)) continue; // gpu-real-0's samples come from nvidia-smi, never the simulator
     const labels = { profile: topo.resources.get(g.resource_id)?.profile ?? 'demo_gpu', node_id: g.node_id };
     if (g.availability === 'unreachable') {
       // the GPU fell off the bus: one 'missing' sample carrying the last value seen (no clock/power/reasons)
@@ -57,7 +58,9 @@ export function emitTelemetry(
     emit(rack, 'rack.inlet_temp_c', stale ? h.stale_values[key]! : live, 'degC', stale ? 'stale' : 'estimated',
       { cooling_loop_id: topo.rackLoop.get(rack) ?? '' });
   }
+  // pump.power_w is a pump metric: loop rows of cooling_current (CONTRACTS §0.11 #9) mirror their pump, no sample
   for (const c of world.observable.cooling) {
+    if (topo.resources.get(c.resource_id)?.kind !== 'cooling_pump') continue;
     emit(c.resource_id, 'pump.power_w', c.pump_power_w, 'W', cond.stale.has(c.resource_id) ? 'stale' : 'estimated');
   }
   if (out.length >= SIGNAL_SEQ_BASE) throw new Error(`physics: ${out.length} telemetry samples overflow the per-tick source_seq block`);

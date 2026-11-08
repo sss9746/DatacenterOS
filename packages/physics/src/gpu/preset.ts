@@ -1,4 +1,5 @@
-// buildPreset('gpu_demo_8', runId, seed): the CONTRACTS §0.3 demo world at t=0.
+// buildPreset('gpu_demo_8', runId, seed): the CONTRACTS §0.3 demo world at the run start (RUN_START_SIM_MS = 600 000,
+// CONTRACTS §0.12 #2; tick_index 0).
 // IDs are frozen (§0.3); numbers come from ./constants.ts (all simulated). The construction order matches the
 // P1-1 fixture generator so toObserved(buildPreset('gpu_demo_8', 'run-demo-1', 1)) equals
 // fixtures/gpu/observed_snapshot_demo.json.
@@ -33,7 +34,11 @@ import {
   R6_INLET_OFFSET_C,
   RACK_NUMBERS,
   RACK_THERMAL_MASS_KJ_PER_C,
+  REAL_GPU_ID,
+  REAL_NODE_ID,
+  REAL_PROFILE,
   RESTART_DURATION_MS,
+  RUN_START_SIM_MS,
   SHUTDOWN_C,
   SLOWDOWN_C,
   SM_CLOCK_NOMINAL_MHZ,
@@ -67,11 +72,11 @@ interface JobDef {
   checkpointed: boolean;
   priority: number;
   total_work_units: number;
-  /** durable work at t=0 (the last checkpoint's progress) */
+  /** durable work at the run start (the last checkpoint's progress) */
   durable_work_units: number;
-  /** "last checkpoint N sim-min ago" at t=0, seconds; null = never checkpointed */
+  /** "last checkpoint N sim-min ago" at the run start, seconds (its completion time = start − age); null = none */
   checkpoint_age_s: number | null;
-  /** progress at t=0 for a job with no checkpoint */
+  /** progress at the run start for a job with no checkpoint */
   progress_at_t0?: number;
 }
 
@@ -129,8 +134,10 @@ function resources(runId: string): ResourceSpec[] {
   out.push(res('fan-sensor-r3', 'fan_sensor', rackId(3), `fd-${rackId(3)}`, 'pico2w_microphone', {
     hardware_sensor_id: 'pico-fan-r3', hardware_backed: true,
   }));
-  // The real Brev GPU (F-NV2): a resource row only; its gpu_current row comes from nvidia-smi ingest. Never allocatable.
-  out.push(res('gpu-real-0', 'gpu', null, 'fd-brev', 'brev_real', { allocatable: false, hardware_backed: true }));
+  // The real Brev GPU (F-NV2, CONTRACTS §0.11 #4): gpu-real-0 on node-real-0, no rack, never allocatable. Resource rows
+  // only: gpu-real-0's gpu_current row comes from nvidia-smi ingest; node-real-0 has no node_current row.
+  out.push(res(REAL_NODE_ID, 'node', null, 'fd-brev', REAL_PROFILE, { allocatable: false, hardware_backed: true, gpu_count: 1 }));
+  out.push(res(REAL_GPU_ID, 'gpu', REAL_NODE_ID, 'fd-brev', REAL_PROFILE, { allocatable: false, hardware_backed: true }));
   return out;
 }
 
@@ -148,6 +155,7 @@ function dependencies(runId: string): DependencyEdge[] {
   }
   out.push(edge('loop-a', 'cooled_by', 'pump-a'), edge('loop-b', 'cooled_by', 'pump-b'));
   out.push(edge(rackId(3), 'monitored_by', 'fan-sensor-r3'));
+  out.push(edge(REAL_GPU_ID, 'hosted_on', REAL_NODE_ID));
   for (const j of DEMO_JOBS) if (j.checkpointed) out.push(edge(j.job_id, 'checkpoint_uses', CHECKPOINT_STORE_ID));
   return out;
 }
@@ -171,13 +179,14 @@ function jobSpecs(runId: string): JobSpec[] {
   }));
 }
 
+/** Progress at the run start: the checkpoint's durable work plus the work done since it completed (nominal rate). */
 function progressAtT0(j: JobDef): number {
   const rate = jobGpus(j).length * WORK_RATE_PER_GPU_PER_SIM_S;
   return j.checkpoint_age_s === null ? (j.progress_at_t0 ?? 0) : j.durable_work_units + rate * j.checkpoint_age_s;
 }
 
 /**
- * Build the §0.3 demo world at t=0. Deterministic in (runId, seed): the seed drives the per-GPU temperature spread
+ * Build the §0.3 demo world at the run start (sim_time_ms = RUN_START_SIM_MS, tick_index 0). Deterministic in (runId, seed): the seed drives the per-GPU temperature spread
  * (mulberry32, 64 draws in rack-major order) and the remaining generator state is PhysicsWorld.rng_state.
  */
 export function buildPreset(presetId: PresetId, runId: string, seed: number): PhysicsWorld {
@@ -190,19 +199,24 @@ export function buildPreset(presetId: PresetId, runId: string, seed: number): Ph
   const jobStates: JobState[] = DEMO_JOBS.map((j) => ({
     schema_version: V, run_id: runId, job_id: j.job_id, status: 'running', allocated_gpu_ids: jobGpus(j),
     progress_work_units: progressAtT0(j), durable_work_units: j.durable_work_units,
-    latest_checkpoint_id: j.checkpointed ? checkpointId(j.job_id, 1) : null, version: 0, last_update_sim_time_ms: 0,
+    latest_checkpoint_id: j.checkpointed ? checkpointId(j.job_id, 1) : null, version: 0, last_update_sim_time_ms: RUN_START_SIM_MS,
   }));
   const allocations: JobGpuAllocation[] = DEMO_JOBS.flatMap((j) =>
     jobGpus(j).map((g) => ({ schema_version: V, run_id: runId, job_id: j.job_id, gpu_id: g, since_sim_time_ms: 0 })),
   );
-  // Pre-run checkpoints: the schema forbids negative sim times, so the rows sit at t=0; the true age is in
-  // hidden.last_checkpoint_sim_ms (e.g. job-a −540 000) and shows publicly as progress − durable.
-  const checkpoints: Checkpoint[] = DEMO_JOBS.filter((j) => j.checkpointed).map((j) => ({
-    schema_version: V, run_id: runId, checkpoint_id: checkpointId(j.job_id, 1), job_id: j.job_id,
-    storage_resource_id: CHECKPOINT_STORE_ID, status: 'complete', progress_work_units: j.durable_work_units,
-    requested_sim_time_ms: 0, complete_sim_time_ms: 0, accessible: true,
-    command_key: `preset.${PRESET_ID}.${checkpointId(j.job_id, 1)}`,
-  }));
+  // Allocations predate the run: the jobs were placed at sim time 0.
+  // Pre-run checkpoints (CONTRACTS §0.12 #2): completed checkpoint_age_s before the run start and requested
+  // CHECKPOINT_DURATION_MS before that, so job-a's completed at 60 000 (9 min old) and job-b's at 540 000 (1 min old).
+  // Age = clock.sim_time_ms − complete_sim_time_ms, always.
+  const checkpoints: Checkpoint[] = DEMO_JOBS.filter((j) => j.checkpointed).map((j) => {
+    const complete = RUN_START_SIM_MS - (j.checkpoint_age_s ?? 0) * 1000;
+    return {
+      schema_version: V, run_id: runId, checkpoint_id: checkpointId(j.job_id, 1), job_id: j.job_id,
+      storage_resource_id: CHECKPOINT_STORE_ID, status: 'complete', progress_work_units: j.durable_work_units,
+      requested_sim_time_ms: complete - CHECKPOINT_DURATION_MS, complete_sim_time_ms: complete, accessible: true,
+      command_key: `preset.${PRESET_ID}.${checkpointId(j.job_id, 1)}`,
+    };
+  });
 
   const gpuSeeds: GpuCurrent[] = RACK_NUMBERS.flatMap((r) => GPU_SLOTS.map((k) => ({
     schema_version: V, run_id: runId, resource_id: gpuId(r, k), node_id: nodeId(r), availability: 'ready' as const,
@@ -213,10 +227,12 @@ export function buildPreset(presetId: PresetId, runId: string, seed: number): Ph
     schema_version: V, run_id: runId, resource_id: nodeId(r), rack_id: rackId(r), availability: 'ready' as const,
     power_headroom_w: 0, thermal_headroom_c: 0, version: 0,
   }));
-  const coolingSeeds: CoolingCurrent[] = (['pump-a', 'pump-b'] as const).map((p) => {
-    const n = racksOnLoop(p === 'pump-a' ? 'loop-a' : 'loop-b').length;
+  // cooling_current: one row per pump AND one per loop (CONTRACTS §0.11 #9); deriveCooling fills the loop rows from
+  // their pump rows
+  const coolingSeeds: CoolingCurrent[] = (['pump-a', 'pump-b', 'loop-a', 'loop-b'] as const).map((id) => {
+    const n = racksOnLoop(id.endsWith('-a') ? 'loop-a' : 'loop-b').length;
     return {
-      schema_version: V, run_id: runId, resource_id: p, operating_state: 'normal' as const,
+      schema_version: V, run_id: runId, resource_id: id, operating_state: 'normal' as const,
       nominal_capacity_w: n * PUMP_CAPACITY_W_PER_RACK, pump_power_w: n * PUMP_POWER_W_PER_RACK,
       observed_capacity_estimate_w: n * PUMP_CAPACITY_W_PER_RACK, version: 0,
     };
@@ -230,9 +246,6 @@ export function buildPreset(presetId: PresetId, runId: string, seed: number): Ph
     gpu_offset_c: gpuOffset,
     gpu_failure: {},
     gpu_cordoned: [],
-    last_checkpoint_sim_ms: Object.fromEntries(
-      DEMO_JOBS.filter((j) => j.checkpoint_age_s !== null).map((j) => [j.job_id, -(j.checkpoint_age_s ?? 0) * 1000]),
-    ),
     checkpoint_counter: Object.fromEntries(DEMO_JOBS.map((j) => [j.job_id, j.checkpointed ? 2 : 1])),
     command_inbox: [],
     in_flight: [],
@@ -245,13 +258,13 @@ export function buildPreset(presetId: PresetId, runId: string, seed: number): Ph
   const topo = buildTopology(res, gpuSeeds);
   const cond = faultConditions([], topo);
   const jobsByGpu = gpuJobMap(jobStates);
-  const gpus = deriveGpus(gpuSeeds, jobsByGpu, hidden, topo, cond, 0).gpus.map((g) => ({ ...g, version: 0 }));
+  const gpus = deriveGpus(gpuSeeds, jobsByGpu, hidden, topo, cond, RUN_START_SIM_MS).gpus.map((g) => ({ ...g, version: 0 }));
   const nodes = deriveNodes(nodeSeeds, gpus, hidden, topo).map((n) => ({ ...n, version: 0 }));
   const cooling = deriveCooling(coolingSeeds, topo, cond).map((c) => ({ ...c, version: 0 }));
 
   const observable: ObservedSnapshot = {
     schema_version: V, run_id: runId,
-    clock: { sim_time_ms: 0, tick_index: 0, step_ms: STEP_MS, wall_tick_ms: WALL_TICK_MS, paused: false, decision_epoch: 0 },
+    clock: { sim_time_ms: RUN_START_SIM_MS, tick_index: 0, step_ms: STEP_MS, wall_tick_ms: WALL_TICK_MS, paused: false, decision_epoch: 0 },
     resources: res,
     dependencies: dependencies(runId),
     gpus,

@@ -11,7 +11,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "pump-a",
       "kind": "cooling_pump_degradation",
-      "start_sim_time_ms": 30000,
+      "start_sim_time_ms": 630000,
       "duration_sim_ms": null,
       "severity": 0.25,
       "parameters": {

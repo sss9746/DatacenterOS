@@ -59,7 +59,8 @@
 // true temperatures); a policy only ever gets toObserved(world).
 import type { ActionCommand, EvaluationResult, JobState, ObservedSnapshot, PhysicsWorld, SafetyDecision } from '@dcos/contracts';
 import { SLOWDOWN_C, STEP_MS, WIRE_SCHEMA_VERSION as V } from './constants.js';
-import { commandOutcome, enqueueCommands } from './actions.js';
+import { enqueueCommands, finishedCommand } from './actions.js';
+import type { Policy } from './policies.js';
 import { ACTIVE_STATUSES } from './jobs.js';
 import { toObserved } from './observe.js';
 import { SAFETY_LOOKAHEAD_S, evaluateSafety } from './safety.js';
@@ -77,8 +78,7 @@ import {
   type Topology,
 } from './world.js';
 
-/** CONTRACTS §0.6 Policy interface (structurally identical to the one policies.ts exports). */
-export type Policy = (obs: ObservedSnapshot, ctx: { sim_time_ms: number }) => Promise<ActionCommand[]> | ActionCommand[];
+export type { Policy } from './policies.js';
 
 export interface RunScenarioOptions {
   /** The EvaluationResult.policy label. */
@@ -112,7 +112,11 @@ export interface CommandRecord {
   disposition: CommandDisposition;
   /** End time of the tick it was requested on (it starts there), or null if never requested. */
   requested_sim_time_ms: number | null;
-  outcome: { ok: boolean; reason_code: string | null; sim_time_ms: number } | null;
+  /**
+   * How physics finished it (commandOutcome's status / reason_code, CONTRACTS §0.12 #4, plus the finish sim time), or
+   * null if it never finished (never requested, or still running at the horizon).
+   */
+  outcome: { status: 'succeeded' | 'failed'; reason_code: string | null; sim_time_ms: number } | null;
   /** DEPENDENCY_FAILED / DEPENDENCY_NOT_FOUND when dependency_dropped. */
   dependency_reason: string | null;
   preemptive: boolean;
@@ -265,7 +269,8 @@ async function runCore(s: Scenario, policy: Policy | null, gate: 'safety' | 'non
   const moves: CoreRun['moves'] = [];
   const watches: MoveWatch[] = [];
 
-  const outcomeOf = (key: string) => commandOutcome(world, key);
+  // the hidden finish record (status + finish time); the harness is a trusted caller like the DB tick
+  const outcomeOf = (key: string) => finishedCommand(world, key);
   const ready = (c: ActionCommand) => depsOf(c).every((k) => outcomeOf(k)?.ok === true);
 
   for (let i = 0; i < ticks; i++) {
@@ -424,7 +429,10 @@ async function runCore(s: Scenario, policy: Policy | null, gate: 'safety' | 'non
   }
 
   // outcomes, delay
-  for (const r of records) r.outcome = r.disposition === 'executed' || r.disposition === 'physics_rejected' ? outcomeOf(r.command_key) : null;
+  for (const r of records) {
+    const o = r.disposition === 'executed' || r.disposition === 'physics_rejected' ? outcomeOf(r.command_key) : null;
+    r.outcome = o ? { status: o.ok ? 'succeeded' : 'failed', reason_code: o.reason_code, sim_time_ms: o.sim_time_ms } : null;
+  }
   let delay = 0;
   for (const j of world.observable.job_states) {
     const st = start.get(j.job_id);
@@ -489,7 +497,7 @@ export async function runScenarioDetailed(s: Scenario, policy: Policy, opts: Run
     const r = m.rec;
     if (r.disposition === 'blocked') continue;
     if (r.disposition === 'waiting' || (r.disposition === 'executed' && r.outcome === null)) r.recovery = 'unresolved';
-    else if (r.disposition !== 'executed' || !r.outcome?.ok) r.recovery = 'failed';
+    else if (r.disposition !== 'executed' || r.outcome?.status !== 'succeeded') r.recovery = 'failed';
     else r.recovery = (core.failures.get(m.job ?? '') ?? []).some((t) => t >= r.outcome!.sim_time_ms) ? 'failed' : 'succeeded';
     if (r.recovery === 'succeeded') ok += 1;
     if (r.recovery === 'failed') bad += 1;

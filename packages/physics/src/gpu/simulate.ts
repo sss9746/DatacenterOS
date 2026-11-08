@@ -147,7 +147,8 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
   const now = observable.clock.sim_time_ms;
   const topo = buildTopology(observable.resources, observable.gpus);
 
-  // pumps: observed capacity estimate becomes the capacity
+  // pumps: observed capacity estimate becomes the capacity (pump rows only; a loop row mirrors its pump and is never
+  // added: CONTRACTS §0.11 #9)
   const coolingById = new Map(observable.cooling.map((c) => [c.resource_id, c]));
   for (const r of observable.resources) {
     if (r.kind !== 'cooling_pump') continue;
@@ -187,7 +188,6 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
 
   // checkpoint bookkeeping
   const checkpoint_counter: Record<string, number> = {};
-  const last_checkpoint_sim_ms: Record<string, number> = {};
   for (const j of observable.job_states) {
     let n = 0;
     for (const c of observable.checkpoints) {
@@ -196,8 +196,6 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
       n = Math.max(n, m ? Number(m[1]) : 0);
     }
     checkpoint_counter[j.job_id] = n + 1;
-    const latest = observable.checkpoints.find((c) => c.checkpoint_id === j.latest_checkpoint_id);
-    if (latest) last_checkpoint_sim_ms[j.job_id] = latest.complete_sim_time_ms ?? 0;
   }
   const ids = new Set(observable.checkpoints.map((c) => c.checkpoint_id));
   for (const j of observable.job_states) while (ids.has(`ckpt-${j.job_id}-${checkpoint_counter[j.job_id]}`)) checkpoint_counter[j.job_id]! += 1;
@@ -240,7 +238,7 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
 
   const hidden: HiddenState = {
     model: GPU_MODEL_VERSION, preset_id: `${ESTIMATED_PREFIX}from_observed`, seed,
-    loop_temp_c, gpu_offset_c, gpu_failure, gpu_cordoned, last_checkpoint_sim_ms, checkpoint_counter,
+    loop_temp_c, gpu_offset_c, gpu_failure, gpu_cordoned, checkpoint_counter,
     command_inbox: [], in_flight, finished_command_keys: [], command_outcomes: {}, stale_values: {},
   };
   return {
@@ -263,7 +261,9 @@ function describeEstimate(obs: ObservedSnapshot, world: PhysicsWorld, horizonS: 
     `Estimated world built from the ObservedSnapshot at sim t=${obs.clock.sim_time_ms} ms; no private fault truth used.`,
     'No new faults during the horizon; observed degradation persists.',
   ];
+  const kindOf = new Map(obs.resources.map((r) => [r.resource_id, r.kind]));
   for (const c of obs.cooling) {
+    if (kindOf.get(c.resource_id) !== 'cooling_pump') continue; // loop rows mirror their pump (CONTRACTS §0.11 #9)
     if (c.observed_capacity_estimate_w !== null && c.observed_capacity_estimate_w !== c.nominal_capacity_w) {
       out.push(`${c.resource_id} stays at its observed capacity estimate ${c.observed_capacity_estimate_w} W (nominal ${c.nominal_capacity_w} W).`);
     }
@@ -327,12 +327,12 @@ function simulate(obs: ObservedSnapshot, commands: ActionCommand[], opts: Simula
       for (const c of pending) {
         const ds = c.depends_on_command_keys;
         const missing = ds.find((k) => !knownKeys.has(k) && outcomeOf(k) === null);
-        const failed = ds.find((k) => deps.failedKeys.has(k) || outcomeOf(k)?.ok === false);
+        const failed = ds.find((k) => deps.failedKeys.has(k) || outcomeOf(k)?.status === 'failed');
         if (missing !== undefined || failed !== undefined) {
           deps.failedKeys.add(c.command_key);
           deps.violations.push(missing !== undefined ? 'DEPENDENCY_NOT_FOUND' : 'DEPENDENCY_FAILED');
           changed = true;
-        } else if (ds.every((k) => outcomeOf(k)?.ok === true)) {
+        } else if (ds.every((k) => outcomeOf(k)?.status === 'succeeded')) {
           requested.push(c.action_id);
         } else {
           next.push(c);
@@ -410,8 +410,8 @@ function simulate(obs: ObservedSnapshot, commands: ActionCommand[], opts: Simula
   for (const c of commands) {
     if (deps.failedKeys.has(c.command_key)) continue;
     const o = commandOutcome(world, c.command_key);
-    if (o === null) unfinished += 1;
-    else if (!o.ok) violations.push(o.reason_code ?? 'FAILED');
+    if (o === null || o.status === 'running') unfinished += 1;
+    else if (o.status === 'failed') violations.push(o.reason_code ?? 'FAILED');
   }
   violations.push(...deps.violations);
   if (unfinished > 0) assumptions.push(`${unfinished} plan command(s) had not finished by the end of the horizon.`);

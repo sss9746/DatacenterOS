@@ -11,7 +11,7 @@
       "run_id": "run-demo-1",
       "target_resource_id": "gpu-r4-n1-6",
       "kind": "gpu_xid_48",
-      "start_sim_time_ms": 90000,
+      "start_sim_time_ms": 690000,
       "duration_sim_ms": null,
       "severity": 1,
       "parameters": {},
