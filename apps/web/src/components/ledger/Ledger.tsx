@@ -61,8 +61,8 @@ function LedgerRow({ row }: { row: ActionView }) {
               ? <>{reason.text} <code className="ledger-inline-code">{reason.code}</code>{reason.more > 0 ? <span className="ledger-blocked-more">+{reason.more} more</span> : null}</>
               : 'Blocked by the safety check; no violation code was recorded on this row.'}
           </span> : null}
-          {d ? <span className="ledger-summary-sub">{d.job ? `Job ${d.job} · target ${d.target}` : `Target ${d.target}`}</span> : <span className="ledger-summary-sub">Details not received yet</span>}
-          <code>{row.commandKey}</code>
+          {/* plain-English subject only; the command key, workflow and plan ids live in the row body and the tooltip */}
+          {d ? <span className="ledger-summary-sub" title={row.commandKey}>{d.job ? `${d.job} · ${d.target}` : d.target}</span> : <span className="ledger-summary-sub" title={row.commandKey}>Details not received yet</span>}
         </span>
         <span className="ledger-summary-status">
           <Badge tone={row.tone}>{row.blocked ? <ShieldAlert size={11} aria-hidden="true"/> : null}{row.label}</Badge>

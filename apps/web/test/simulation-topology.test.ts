@@ -7,6 +7,7 @@ import { createLocalPhysicsClient } from '../src/data/local-physics';
 import { buildFaultInjection, DEFAULT_XID_GPU_ID } from '../src/components/controls/fault-form';
 import { coolingLoops, degradedPumps, formatDeltaC, inletRiseC, loopOfRack, pumpLabel, rackRanges } from '../src/components/simulation/topology';
 import { loopSegments, SimulationView } from '../src/components/simulation/SimulationView';
+import { situation } from '../src/components/simulation/situation';
 
 describe('cooling topology read from the snapshot', () => {
   it('maps pumps to racks from cooling_loop resources in local physics and in the fixture', async () => {
@@ -60,17 +61,21 @@ describe('cooling topology read from the snapshot', () => {
     try {
       const before = await client.getObservedSnapshot();
       expect(degradedPumps(before)).toEqual([]);
-      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-a', kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.6, delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-a', fault: 'pump_degradation', targetId: 'pump-a', severity: 0.6, delayS: 0 }));
       client.advance(60);
       const after = await client.getObservedSnapshot();
       expect(degradedPumps(after).map((row) => row.resource_id)).toEqual(['pump-a']);
       const html = renderToStaticMarkup(createElement(SimulationView, { snapshot: after, selected: DEFAULT_XID_GPU_ID, onSelect: () => {}, onSelectPump: () => {} }));
       expect(html.match(/is-on-degraded-loop/g)).toHaveLength(3);
-      expect(html).toContain('On degraded Pump A');
-      expect(html).toContain('Pump A loop · degraded');
-      expect(html).toContain('Pump A degraded');
-      expect(html).toContain('Cools racks 2–4');
+      expect(html).toContain('on degraded Pump A loop'); // rack accessible name / tooltip
+      expect(html).toContain('Pump A Cools racks 2–4 · failing · degraded · −60 % capacity'); // pump accessible name carries the loss
+      expect(situation(after)).toMatch(/^Pump A is failing — racks 2–4/); // the one page-level sentence
+      expect(html).not.toMatch(/sim-rack-module sim-rack-module-\w+[^>]*>\d/); // rack modules carry LEDs, not numbers
+      expect(html).toContain('data-gpu="gpu-r7-n1-0"'); // the chosen rack's eight interactive tiles
+      expect(html.match(/data-sim-gpu="gpu-r\d-n1-\d"/g)?.length).toBe(64 + 8); // 64 rack modules + 8 accelerator cards
+      expect(html).not.toContain('gpu-real-0'); // the real GPU is never drawn in the simulated grid
       expect(html).not.toContain('since fault'); // no pre-fault reading in a fresh render: no delta is invented
+      expect(html).not.toContain('is-failing'); // first paint never plays the failure flourish
     } finally { client.close(); }
   });
 });
@@ -84,7 +89,7 @@ describe('default Xid target', () => {
       expect(loopOfRack(coolingLoops(snapshot), rack)?.pumpId).toBe('pump-b');
       expect(rack).not.toBe(6);
       expect(snapshot.gpus.some((gpu) => gpu.resource_id === DEFAULT_XID_GPU_ID)).toBe(true);
-      expect(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: 'judge-x', kind: 'gpu_xid_79', targetId: DEFAULT_XID_GPU_ID, delayS: 0 }).target_resource_id).toBe('gpu-r7-n1-0');
+      expect(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: 'judge-x', fault: 'gpu_xid_79', targetId: DEFAULT_XID_GPU_ID, delayS: 0 }).target_resource_id).toBe('gpu-r7-n1-0');
     } finally { client.close(); }
   });
 });

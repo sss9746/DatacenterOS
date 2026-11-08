@@ -8,8 +8,10 @@ import { duration } from '../../lib/utils';
 import { Button } from '../ui/button';
 import {
   buildFaultInjection, DEFAULT_PUMP_LOSS, DELAY_PRESETS_S, effectivePumpCapacity, percent, PUMP_IDS, PUMP_LOSS_PRESETS,
-  REAL_RESOURCE_IDS, scheduleState, type FaultControlKind, type FaultDelayS, type PumpId, type PumpLoss,
+  REAL_RESOURCE_IDS, scheduleState, type FaultDelayS, type PumpId, type PumpLoss,
 } from './fault-form';
+
+type FaultControlKind = 'pump_degradation' | 'gpu_xid_79';
 import { controlsMode, MODE_BADGE, type ControlsMode } from './mode';
 import './controls.css';
 
@@ -23,6 +25,8 @@ export interface FaultControlsProps {
   onSelectPump: (id: PumpId) => void;
   /** Called after a reset is confirmed (and, live, after `createRun` succeeded). */
   onReset: () => void;
+  /** Embedded under the Demo controls drawer, which owns "Advance 30 sim-s" and "Reset run": hide this form's copies. */
+  hideRunActions?: boolean;
 }
 
 interface Submitted { fault: FaultInjection; submittedAtSimMs: number }
@@ -38,7 +42,7 @@ const describeFault = (fault: FaultInjection) => fault.kind === 'cooling_pump_de
   ? `${fault.target_resource_id} loses ${percent(fault.severity)} capacity`
   : `${fault.target_resource_id} inaccessible (Xid 79)`;
 
-export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, onSelectGpu, onSelectPump, onReset }: FaultControlsProps) {
+export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, onSelectGpu, onSelectPump, onReset, hideRunActions = false }: FaultControlsProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const local = asLocalPhysics(store.client);
   const mode = controlsMode(store.client.mode, Boolean(local), canAdmin);
@@ -66,9 +70,9 @@ export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, 
     try {
       // Fresh clock: the start time is relative to the sim time at submission, not to the last rendered frame.
       const fresh = await store.client.getObservedSnapshot();
-      const fault = buildFaultInjection(kind === 'cooling_pump_degradation'
-        ? { kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: selectedPumpId, capacityLoss: loss, delayS: pumpDelay }
-        : { kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: gpuId, delayS: gpuDelay });
+      const fault = buildFaultInjection(kind === 'pump_degradation'
+        ? { fault: kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: selectedPumpId, severity: loss, delayS: pumpDelay, snapshot: fresh }
+        : { fault: kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: gpuId, delayS: gpuDelay, snapshot: fresh });
       await store.client.injectFault(fault);
       setLog((prev) => ({ store, items: [...(prev.store === store ? prev.items : []), { fault, submittedAtSimMs: fresh.clock.sim_time_ms }] }));
       const where = mode === 'live' ? 'the live run' : mode === 'local' ? 'this local simulation' : 'the fixture mock';
@@ -112,7 +116,7 @@ export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, 
         <p className="presenter-note" id={`${id}-pump-note`}>Persistent until reset. {modeled && capacity
           ? `${selectedPumpId} reports ${percent(capacity.now)} of nominal capacity now; losses multiply, so about ${percent(capacity.after)} would remain.`
           : 'Losses on one pump multiply: two 60% losses leave 16%, not less than zero.'}</p>
-        <Button variant="secondary" aria-describedby={`${id}-pump-note`} onClick={() => void inject('cooling_pump_degradation')}><Fan size={15} aria-hidden="true"/>Degrade {selectedPumpId} by {percent(loss)}</Button>
+        <Button variant="secondary" aria-describedby={`${id}-pump-note`} onClick={() => void inject('pump_degradation')}><Fan size={15} aria-hidden="true"/>Degrade {selectedPumpId} by {percent(loss)}</Button>
       </fieldset>
       <fieldset className="presenter-fieldset" disabled={disabled}>
         <legend><Zap size={14} aria-hidden="true"/>GPU inaccessible (Xid 79)</legend>
@@ -131,11 +135,11 @@ export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, 
         return <li key={fault.fault_id}><span>{describeFault(fault)}</span><span className={`presenter-chip presenter-chip-${schedule}`}>{schedule === 'pending' ? `Accepted · pending until sim ${duration(fault.start_sim_time_ms)}` : schedule === 'start_reached' ? `Accepted · start time reached (sim ${duration(fault.start_sim_time_ms)})` : 'Accepted · fixture effect'}</span></li>;
       })}</ul>
     </div>}
-    <div className="presenter-actions">
+    {!hideRunActions && <div className="presenter-actions">
       {local && <Button variant="secondary" disabled={disabled || Boolean(snapshot?.clock.paused)} onClick={() => void advance()}><FastForward size={15} aria-hidden="true"/>Advance 30 sim-s</Button>}
       <Button variant="ghost" disabled={!canAdmin || busy} aria-expanded={confirmReset} onClick={() => setConfirmReset(true)}><RotateCcw size={14} aria-hidden="true"/>Reset run</Button>
-    </div>
-    {confirmReset && <div className="reset-confirm presenter-reset" role="group" aria-label="Confirm reset">
+    </div>}
+    {!hideRunActions && confirmReset && <div className="reset-confirm presenter-reset" role="group" aria-label="Confirm reset">
       <p>Reset {mode === 'live' ? 'run-demo-1 for every connected viewer' : 'this local preview'}?{mode === 'live' ? ' Stop the agent first.' : ''}</p>
       <Button variant="destructive" disabled={busy || !canAdmin} onClick={() => void reset()}>Confirm reset</Button>
       <Button variant="ghost" onClick={() => setConfirmReset(false)}>Cancel</Button>

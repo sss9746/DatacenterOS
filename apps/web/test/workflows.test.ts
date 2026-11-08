@@ -247,13 +247,19 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(views.map((v) => v.workflow.workflow_id)).toEqual(['wf-example-cooling', 'wf-example-xid']);
     const [cool, xid] = views as [WorkflowView, WorkflowView];
     expect(cool.status.kind).toBe('waiting');
-    expect(cool.waiting?.operation).toBe('checkpoint');
+    expect(cool.waiting?.operation).toBe('migrate_restart'); // the story now ends with job-a moving r2+r3 → r1+r5 from its completed checkpoint
     expect(cool.groups.blocked.map((l) => l.reason)).toEqual(['STALE_DECISION_EPOCH']);
-    expect(cool.attempt).toBe(2);
-    expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:cap')?.chosen).toBe(true);
+    expect(cool.attempt).toBe(3);
+    // The fixture persists `state.candidates[]` in the planner's shape, so the persisted round wins over the plan-event round.
+    expect(cool.candidates?.source).toBe('workflow_state');
+    // Round 3 replaced job-a's rows (mergeCandidates): the chosen job-a option is the move to r1 + r5 that actually executes.
+    expect(cool.candidates?.options.find((o) => o.option_id === 'job-a:migrate_restart')).toMatchObject({ chosen: true, simulated: 'job-a: migrate_restart r1+r5', persisted: { safety: 'allow' } });
+    expect(cool.candidates?.options.filter((o) => o.persisted?.job_id === 'job-a').map((o) => o.persisted?.option)).toEqual(['migrate_restart', 'keep_running']);
+    expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:power_cap')?.chosen).toBe(true);
+    expect(cool.candidates?.options.filter((o) => o.persisted?.job_id === 'job-b').map((o) => o.persisted?.safety)).toEqual(['allow', 'needs_approval', 'deny', 'not_checked']);
     expect(xid.status.kind).toBe('verified');
-    expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-1', count: 1 });
-    expect(xid.workflow.lease_owner).toBe('example-agent-2');
+    expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-alpha-1', count: 1 });
+    expect(xid.workflow.lease_owner).toBe('example-agent-beta-2');
     expect(xid.infra.relatedGpus.map((g) => g.resource_id)).toEqual(['gpu-r7-n1-0']);
     expect(events.every((e) => e.summary.startsWith('Example:'))).toBe(true);
   });

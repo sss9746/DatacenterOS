@@ -1,9 +1,11 @@
-import { memo, useMemo } from 'react';
-import type { ActionDetail, AgentActor, AgentEventInput, PlanRecord, WorkflowRecord } from '@dcos/db-client';
+import { memo, useMemo, useState } from 'react';
+import type { ActionDetail, AgentActor, AgentEventInput, Evidence, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import type { Incident, ObservedSnapshot } from '@dcos/contracts';
-import { CheckCircle2, CircleDashed, Code2, RotateCcw, Sparkles, UserRound } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Code2, RotateCcw, ShieldAlert, Sparkles, UserRound } from 'lucide-react';
 import { Badge, Empty, Panel } from '../ui/panel';
+import { ownerLabel } from '../../app/page-props';
 import { duration } from '../../lib/utils';
+import { DecisionTrace } from '../decision/DecisionTrace';
 import {
   actorLabel,
   actorSummary,
@@ -33,6 +35,8 @@ export interface WorkflowBoardProps {
   plans?: PlanRecord[];
   /** Wall clock for lease expiry labels (defaults to Date.now() at render). */
   nowUnixMs?: number;
+  /** Run-wide evidence window (`getEvidence`): incident links give the Detect step its resources and symptoms. */
+  evidence?: Evidence | null;
 }
 
 const STATUS_TONE: Record<StatusKind, string> = {
@@ -47,16 +51,27 @@ const STATUS_TONE: Record<StatusKind, string> = {
 };
 
 /** Per-workflow progress: one card per persisted workflow, driven by DB rows, agent events and the action ledger. */
-export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs }: WorkflowBoardProps) {
+export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs, evidence = null }: WorkflowBoardProps) {
   const views = useMemo(() => buildWorkflowViews({ workflows, events, actionDetails, incidents, snapshot }), [workflows, events, actionDetails, incidents, snapshot]);
   const source = example ? 'Scripted example' : mode === 'live' ? 'Live DB' : 'Mock data';
   const simNow = snapshot?.clock.sim_time_ms ?? null;
   const now = nowUnixMs ?? Date.now();
-  return <Panel title="Workflows" id="workflows" className="wf-panel" detail={<span className="wf-panel-badges"><Badge>{views.length} {views.length === 1 ? 'workflow' : 'workflows'}</Badge><Badge tone={example ? 'warning' : 'neutral'}>{source}</Badge></span>}>
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = views.find((v) => v.workflow.workflow_id === selectedId) ?? views[0] ?? null;
+  return <Panel title="Workflows" id="workflows" className="wf-panel" detail={<span className="wf-panel-badges"><Badge>{views.length} {views.length === 1 ? 'workflow' : 'workflows'}</Badge><Badge tone={example ? 'example' : 'neutral'}>{source}</Badge></span>}>
     {example && <p className="example-note">Scripted example workflows, written through the mock client APIs. No model, planner or safety engine ran.</p>}
     {views.length === 0
       ? <Empty title="No workflow opened">{mode === 'mock' ? 'No agent is running in mock mode, so the orchestrator has not opened a workflow. Choose the recovery example to see scripted workflows.' : 'The orchestrator has not opened a workflow yet. One appears per incident group once the agent claims it.'}</Empty>
-      : <ol className="wf-list" aria-label="Workflows">{views.map((view) => <li key={view.workflow.workflow_id}><WorkflowCard view={view} example={example} simNow={simNow} now={now} plan={view.planId ? plans.find((p) => p.plan_id === view.planId) ?? null : null}/></li>)}</ol>}
+      : <>
+        {views.length > 1 && <div className="dt-selector" role="group" aria-label="Choose a workflow to trace">{views.map((v) => <button key={v.workflow.workflow_id} type="button" className="dt-select" aria-pressed={selected?.workflow.workflow_id === v.workflow.workflow_id} onClick={() => setSelectedId(v.workflow.workflow_id)}><span className="dt-select-title">{cardTitle(v)}</span><Badge tone={STATUS_TONE[v.status.kind]}>{v.status.label}</Badge></button>)}</div>}
+        {selected && <section className="dt-panel" aria-labelledby={`dt-${selected.workflow.workflow_id}-heading`}>
+          <div className="dt-panel-head"><h3 id={`dt-${selected.workflow.workflow_id}-heading`}>Decision trace · {cardTitle(selected)}</h3><Badge tone={STATUS_TONE[selected.status.kind]}>{selected.status.label}</Badge>{example && <Badge tone="example">Example</Badge>}<code className="wf-key" title="Workflow id">{selected.workflow.workflow_id}</code></div>
+          <p className="dt-panel-note">How this decision was made, step by step: what was detected, every option the planner weighed, their predicted cost, the safety check on each, who chose what and why, what ran, and whether the verifier confirmed it. Missing data reads “not recorded”.</p>
+          <DecisionTrace view={selected} plans={plans} incidents={incidents} evidence={evidence} example={example}/>
+        </section>}
+        <h3 className="dt-cards-head">All workflows</h3>
+        <ol className="wf-list" aria-label="Workflows">{views.map((view) => <li key={view.workflow.workflow_id}><WorkflowCard view={view} example={example} simNow={simNow} now={now} plan={view.planId ? plans.find((p) => p.plan_id === view.planId) ?? null : null}/></li>)}</ol>
+      </>}
   </Panel>;
 }
 
@@ -67,41 +82,98 @@ function ActorBadge({ actor, example }: { actor: AgentActor | null | undefined; 
 const simAt = (ms: number | null) => (ms === null ? 'not recorded' : `${duration(ms)} sim`);
 const wallTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
+/** Plain-English card title: the incident title, else a readable form of the workflow id (`wf-example-cooling` → "example cooling"). */
+export function cardTitle(view: WorkflowView): string {
+  const titled = view.incidents.find((i) => i.title)?.title;
+  if (titled) return titled;
+  return view.workflow.workflow_id.replace(/^wf-/, '').replaceAll(/[-_]+/g, ' ');
+}
+
+/** Owner chip copy from the lease: `owned by agent-alpha`, with the full worker id and expiry only in the tooltip. */
+export function ownerChip(wf: WorkflowRecord, now: number): { text: string; title: string } | null {
+  const label = ownerLabel(wf.lease_owner);
+  if (!label || !wf.lease_owner) return null;
+  const closed = wf.stage === 'done' || wf.stage === 'escalated';
+  const expiry = closed ? 'workflow closed' : wf.lease_expires_unix_ms > now ? `lease expires in ${formatSpan(wf.lease_expires_unix_ms - now)}` : 'lease expired';
+  return { text: `owned by ${label}`, title: `${wf.lease_owner} · ${expiry} · ${wf.attempt} lease ${wf.attempt === 1 ? 'claim' : 'claims'}` };
+}
+
+/** One sentence for a takeover/resume: who picked the workflow up, from whom, and whether the ledger shows a repeat. */
+export function resumeLine(resumed: ResumeEvidence, noDuplicate: boolean | null): string {
+  const by = ownerLabel(resumed.by_worker);
+  const from = ownerLabel(resumed.previous_owner);
+  const verb = resumed.action === 'took_over' || from ? 'Taken over' : 'Resumed';
+  const who = by ? ` by ${by}` : '';
+  const was = from ? ` from ${from}` : '';
+  const count = resumed.count !== null && resumed.count > 1 ? ` (resume #${resumed.count})` : '';
+  const dup = noDuplicate === true ? ' · no duplicate action' : noDuplicate === false ? ' · the ledger shows a repeated action' : '';
+  return `${verb}${who}${was} at ${duration(resumed.sim_time_ms)} sim${count}${dup}`;
+}
+
 const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, plan }: { view: WorkflowView; example: boolean; simNow: number | null; now: number; plan: PlanRecord | null }) {
   const wf = view.workflow;
   const headingId = `wf-${wf.workflow_id}-heading`;
-  const closed = wf.stage === 'done' || wf.stage === 'escalated';
-  const lease = wf.lease_owner === null ? 'no owner' : closed ? `${wf.lease_owner} (workflow closed)` : wf.lease_expires_unix_ms > now ? `${wf.lease_owner} · expires in ${formatSpan(wf.lease_expires_unix_ms - now)}` : `${wf.lease_owner} · lease expired`;
+  const owner = ownerChip(wf, now);
   const age = view.lastEventSimMs !== null && simNow !== null ? ` (${formatSpan(simNow - view.lastEventSimMs)} before current sim time)` : '';
+  const v = view.verification;
+  const needsHuman = v?.verified === false || (v?.unresolved.length ?? 0) > 0 || view.status.kind === 'escalated' || view.status.kind === 'operator_review';
   return <article className={`wf-card wf-kind-${view.status.kind}`} aria-labelledby={headingId}>
     <header className="wf-card-head">
-      <h3 id={headingId}><code>{wf.workflow_id}</code></h3>
+      <h3 id={headingId}>{cardTitle(view)}</h3>
       <Badge tone={STATUS_TONE[view.status.kind]}>{view.status.label}</Badge>
-      {view.resumed && <Badge tone="agent"><RotateCcw size={11} aria-hidden="true"/>Resumed{view.resumed.count !== null && view.resumed.count > 1 ? ` ×${view.resumed.count}` : ''}</Badge>}
-      {example && <Badge tone="warning">Example</Badge>}
+      {needsHuman && v?.verified !== true && view.terminal && <span className="chip wf-chip-human"><UserRound size={12} aria-hidden="true"/>Needs a human</span>}
+      {example && <Badge tone="example">Example</Badge>}
     </header>
-    <ul className="wf-incidents" aria-label="Incidents in this workflow">
-      {view.incidents.length ? view.incidents.map((inc) => <li key={inc.incident_id}><strong>{inc.title ?? 'Incident record not loaded'}</strong><span><code>{inc.incident_id}</code>{inc.state ? ` · ${inc.state}` : ''}</span></li>) : <li><span>No incident linked yet</span></li>}
-    </ul>
-    <ol className="wf-track" aria-label={`Stages for ${wf.workflow_id}`}>
-      {view.steps.map((step) => <li key={step.id} className={`wf-step wf-step-${step.state}`} aria-current={step.id === view.current ? 'step' : undefined}><span className="wf-step-name">{step.label}</span><span className="wf-step-state">{step.stateLabel}</span></li>)}
-    </ol>
+    <p className="wf-owner-row">
+      {owner && <span className="chip wf-owner" title={owner.title}>{owner.text}</span>}
+      {!owner && <span className="chip wf-owner wf-owner-none">no owner</span>}
+      {view.attempt !== null && view.attempt > 1 && <span className="chip wf-attempt" title={view.replan?.reason ? `Replanned: ${view.replan.reason}` : 'Replanned'}>plan attempt {view.attempt}</span>}
+      {view.blockedReason && <span className="chip wf-chip-blocked" title={view.blockedReason}><ShieldAlert size={12} aria-hidden="true"/>1 action blocked by safety</span>}
+    </p>
     <p className={`wf-status wf-status-${view.status.kind}`}><strong>{view.status.label}.</strong> {view.status.detail}</p>
-    {view.replan && wf.stage !== 'replan' && <p className="wf-note">Replanned{view.replan.previous_plan_id ? <> from <code>{view.replan.previous_plan_id}</code></> : ''}: {view.replan.reason ?? 'reason not recorded'}.</p>}
-    {view.resumed && <ResumedRow resumed={view.resumed} noDuplicate={view.resumedWithoutDuplicate}/>}
-    <dl className="wf-labels">
-      <div><dt>Plan</dt><dd>{view.planId ? <code>{view.planId}</code> : 'not recorded'}</dd></div>
-      <div><dt>Plan attempt</dt><dd>{view.attempt ?? 'not recorded'}</dd></div>
-      <div><dt>Lease owner</dt><dd>{lease}</dd></div>
-      <div><dt>Lease claims</dt><dd>{wf.attempt}</dd></div>
-      <div><dt>Last event</dt><dd>{simAt(view.lastEventSimMs)}{age}</dd></div>
-      <div><dt>Row updated</dt><dd>{wallTime(wf.updated_at_unix_ms)} wall</dd></div>
-      <div><dt>Events</dt><dd>{actorSummary(view.actors)}{example && view.events.length ? ' (scripted)' : ''}</dd></div>
-    </dl>
-    <Candidates round={view.candidates} example={example} plan={plan} planId={view.planId}/>
-    <Handoff view={view} example={example}/>
+    {view.resumed && <p className="wf-resume-line" role="note"><RotateCcw size={13} aria-hidden="true"/>{resumeLine(view.resumed, view.resumedWithoutDuplicate)}</p>}
+    <ol className="wf-track" aria-label={`Stages for ${wf.workflow_id}${view.attempt !== null && view.attempt > 1 ? `, plan attempt ${view.attempt}` : ''}`}>
+      {view.steps.map((step) => <li key={step.id} className={`wf-step wf-step-${step.state}`} aria-current={step.id === view.current ? 'step' : undefined}><span className="wf-step-name">{step.label}{step.id === 'compare' && view.attempt !== null && view.attempt > 1 ? <span className="wf-step-attempt"> ×{view.attempt}</span> : null}</span><span className="wf-step-state">{step.stateLabel}</span></li>)}
+    </ol>
+    {view.terminal && <HandoffCard view={view} example={example}/>}
+    <CandidateSummary round={view.candidates} example={example}/>
+    <details className="wf-section wf-evidence"><summary>Evidence<small>incidents, plan, lease, every candidate, ledger lines</small></summary><div className="wf-section-body">
+      <ul className="wf-incidents" aria-label="Incidents in this workflow">
+        {view.incidents.length ? view.incidents.map((inc) => <li key={inc.incident_id}><strong>{inc.title ?? 'Incident record not loaded'}</strong><span><code>{inc.incident_id}</code>{inc.state ? ` · ${inc.state}` : ''}{inc.hypothesis ? ` · ${inc.hypothesis}` : ''}</span></li>) : <li><span>No incident linked yet</span></li>}
+      </ul>
+      {view.replan && wf.stage !== 'replan' && <p className="wf-note">Replanned{view.replan.previous_plan_id ? <> from <code>{view.replan.previous_plan_id}</code></> : ''}: {view.replan.reason ?? 'reason not recorded'}.</p>}
+      {view.resumed && <ResumedRow resumed={view.resumed} noDuplicate={view.resumedWithoutDuplicate}/>}
+      <dl className="wf-labels">
+        <div><dt>Plan</dt><dd>{view.planId ? <code>{view.planId}</code> : 'not recorded'}</dd></div>
+        <div><dt>Plan attempt</dt><dd>{view.attempt ?? 'not recorded'}</dd></div>
+        <div><dt>Lease owner</dt><dd>{wf.lease_owner ? <code>{wf.lease_owner}</code> : 'no owner'}</dd></div>
+        <div><dt>Lease claims</dt><dd>{wf.attempt}</dd></div>
+        <div><dt>Last event</dt><dd>{simAt(view.lastEventSimMs)}{age}</dd></div>
+        <div><dt>Row updated</dt><dd>{wallTime(wf.updated_at_unix_ms)} wall</dd></div>
+        <div><dt>Events</dt><dd>{actorSummary(view.actors)}{example && view.events.length ? ' (scripted)' : ''}</dd></div>
+      </dl>
+      <Candidates round={view.candidates} example={example} plan={plan} planId={view.planId}/>
+      <Handoff view={view} example={example}/>
+    </div></details>
+    <p className="wf-card-foot"><code title="Workflow id">{wf.workflow_id}</code>{view.planId && <code title="Selected plan id">{view.planId}</code>}</p>
   </article>;
 });
+
+/** Chosen vs rejected options at a glance: one line each, reason first, null metrics as "not simulated". */
+function CandidateSummary({ round, example }: { round: CandidateRound | null; example: boolean }) {
+  if (!round || !round.options.length) return null;
+  const sorted = [...round.options].sort((a, b) => Number(b.chosen === true) - Number(a.chosen === true));
+  return <ul className="wf-candidates" aria-label="Candidate options">{sorted.map((o, i) => {
+    const name = o.persisted ? `${o.persisted.job_id} · ${o.persisted.option.replace(`${o.persisted.job_id}:`, '')}` : o.option_id;
+    const reason = o.persisted?.reason ?? (o.chosen === true ? 'chosen by the planner' : o.blocked ? 'blocked by safety' : 'not chosen');
+    return <li key={`${o.option_id}-${i}`} className={o.chosen === true ? 'wf-cand wf-cand-chosen' : o.blocked ? 'wf-cand wf-cand-blocked' : 'wf-cand'} title={o.option_id}>
+      <span className="wf-cand-verdict">{o.chosen === true ? <CheckCircle2 size={13} aria-hidden="true"/> : o.blocked ? <ShieldAlert size={13} aria-hidden="true"/> : <CircleDashed size={13} aria-hidden="true"/>}{o.chosen === true ? 'Chosen' : o.blocked ? 'Blocked' : o.persisted ? 'Rejected' : 'Alternative'}</span>
+      <span className="wf-cand-name">{name}</span>
+      <span className="wf-cand-reason wf-wrap">{reason}</span>
+      <span className="wf-cand-meta">{o.lost_wu === null ? 'not simulated' : `${o.lost_wu} wu lost`} · <ActorBadge actor={o.actor} example={example}/></span>
+    </li>;
+  })}</ul>;
+}
 
 const RESUME_SOURCE_NOTE: Record<ResumeEvidence['source'], string> = {
   workflow_state: 'recorded in the persisted workflow state',
@@ -155,7 +227,7 @@ function Candidates({ round, example, plan, planId }: { round: CandidateRound | 
         {round.source === 'events' && (round.choice
           ? <p className="wf-narrative"><ActorBadge actor={round.choice.actor} example={example}/><span className="wf-wrap">choose_options: {round.choice.reported}</span></p>
           : <p className="wf-muted">No option-level choice was published; the chosen option cannot be identified by id. The plan summary above names it.</p>)}
-        {round.options.length > 0 && <ul className="wf-options">{round.options.map((o) => <li key={o.option_id} className={o.chosen ? 'wf-option-chosen' : ''}>
+        {round.options.length > 0 && <ul className="wf-options">{round.options.map((o, i) => <li key={`${o.option_id}-${i}`} className={o.chosen ? 'wf-option-chosen' : ''}>
           <div className="wf-option-head"><code>{o.option_id}</code>{o.chosen === true && <Badge tone="agent">Chosen</Badge>}{o.chosen === false && <Badge>{o.persisted ? 'Rejected' : 'Alternative'}</Badge>}{o.blocked && <Badge tone="danger">Blocked by safety</Badge>}</div>
           {o.persisted ? <PersistedOption o={o} example={example} showDeficit={round.showDeficit}/> : <>
             <dl>
@@ -210,6 +282,20 @@ function verifiedActionLines(view: WorkflowView): Array<{ key: string; text: str
   return view.groups.completed.filter((l) => l.verified === true).map((l) => ({ key: l.command_key, text: `${operationLabel(l.operation)} ${l.subject}`, source: 'ledger' as const }));
 }
 
+/** Progress and destination lines from the persisted handoff: one line per job, nothing inferred. */
+function outcomeLines(view: WorkflowView): string[] {
+  const v = view.verification;
+  if (!v) return [];
+  const lines: string[] = [];
+  for (const job of v.affectedJobs) {
+    const bits = [job.status, job.progress_work_units !== null ? `progress ${job.progress_work_units} wu` : null, job.durable_work_units !== null ? `durable ${job.durable_work_units} wu` : null].filter(Boolean);
+    if (bits.length) lines.push(`${job.job_id} · ${bits.join(' · ')}`);
+  }
+  for (const c of v.checkpointOutcome) lines.push(`${c.job_id} checkpoint ${c.status}${c.progress_work_units !== null ? ` at ${c.progress_work_units} wu` : ''}${c.accessible === false ? ' · not accessible' : ''}`);
+  for (const p of v.placementOutcome) lines.push(`${p.job_id} placed on ${p.racks.length ? p.racks.join(' + ') : 'racks not recorded'}${p.gpu_ids.length ? ` (${p.gpu_ids.length} GPUs)` : ''}`);
+  return lines;
+}
+
 /**
  * Two-column handoff: what the verifier confirmed (left) and what still needs a person (right). Every line comes from
  * the persisted OperatorHandoff (`state.verification`) or the ledger; empty sides say so instead of disappearing.
@@ -217,17 +303,19 @@ function verifiedActionLines(view: WorkflowView): Array<{ key: string; text: str
 function HandoffCard({ view, example }: { view: WorkflowView; example: boolean }) {
   const v = view.verification;
   const verified = verifiedActionLines(view);
+  const outcome = outcomeLines(view);
   const tone = v?.verified === true ? 'recovered' : v?.verified === false ? 'review' : 'unknown';
   const title = v?.verified === true ? 'Recovered' : v?.verified === false ? 'Not verified' : 'Verification not recorded';
   const evidence = v?.asOf ? (v.asOf.from !== null ? `${duration(v.asOf.from)}–${duration(v.asOf.to)} sim` : `as of ${duration(v.asOf.to)} sim`) : 'time not recorded';
   const unresolved = v?.unresolved ?? [];
-  const outcome = v?.outcome ? v.outcome.replaceAll('_', ' ') : null;
+  const outcomeWord = v?.outcome ? v.outcome.replaceAll('_', ' ') : null;
   return <div className={`wf-handoff-card wf-handoff-${tone}`}>
     <section className="wf-handoff-col wf-handoff-left" aria-label={title}>
-      <h4 className="wf-handoff-title">{v?.verified === true ? <CheckCircle2 size={15} aria-hidden="true"/> : <CircleDashed size={15} aria-hidden="true"/>}{title}{outcome && outcome.toLowerCase() !== title.toLowerCase() ? <span className="wf-handoff-outcome">{outcome}</span> : null}</h4>
+      <h4 className="wf-handoff-title">{v?.verified === true ? <CheckCircle2 size={15} aria-hidden="true"/> : <CircleDashed size={15} aria-hidden="true"/>}{title}{outcomeWord && outcomeWord.toLowerCase() !== title.toLowerCase() ? <span className="wf-handoff-outcome">{outcomeWord}</span> : null}</h4>
       {verified.length
         ? <ul className="wf-handoff-list">{verified.map((l) => <li key={l.key}><span>{l.text}</span><code className="wf-key">{l.key}</code></li>)}</ul>
         : <p className="wf-handoff-empty">No verified actions recorded</p>}
+      {outcome.length > 0 && <ul className="wf-handoff-list wf-handoff-outcomes">{outcome.map((line, i) => <li key={i}><span className="wf-wrap">{line}</span></li>)}</ul>}
       <p className="wf-handoff-verifier">{v ? <>{v.source === 'code' ? 'Deterministic verifier' : v.source ? `Verifier: ${v.source}` : 'Verifier not recorded'} · evidence {evidence}{verified.some((l) => l.source === 'ledger') ? ' · verified in the ledger' : ''}</> : 'No verification result persisted.'}</p>
       {v?.handoff && <p className="wf-handoff-quote wf-wrap">{v.handoff}{example ? ' (scripted)' : ''}</p>}
     </section>
@@ -246,7 +334,9 @@ function Handoff({ view, example }: { view: WorkflowView; example: boolean }) {
   const v = view.verification;
   const g = view.groups;
   const infraCount = view.infra.cooling.length + view.infra.relatedGpus.length + view.infra.otherGpus.length;
-  const detail = <div className="wf-section-body">
+  return <details className="wf-section wf-handoff-section">
+    <summary>{view.terminal ? 'Full handoff record' : 'Actions so far'} · {view.actions.length} {view.actions.length === 1 ? 'action' : 'actions'}</summary>
+    <div className="wf-section-body">
       {!view.terminal && <p className="wf-muted">Handoff not written yet: the agent persists it when it verifies or escalates.</p>}
       <div className="wf-group"><h4>Evidence and hypothesis</h4>{v && v.hypotheses.length ? <ul>{v.hypotheses.map((h, i) => <li key={i}><span className="wf-wrap">{h}</span><span className="wf-muted">persisted handoff</span></li>)}</ul> : view.incidents.some((i) => i.hypothesis) ? <ul>{view.incidents.map((i) => <li key={i.incident_id}><span className="wf-wrap">{i.hypothesis ?? 'No hypothesis recorded.'}</span><code className="wf-key">{i.incident_id}</code></li>)}</ul> : <p className="wf-muted">No hypothesis recorded on the linked incidents.</p>}</div>
       <h4 className="wf-subhead">Workload mitigation</h4>
@@ -262,10 +352,6 @@ function Handoff({ view, example }: { view: WorkflowView; example: boolean }) {
         {v.actions.blocked.map((b) => <li key={`b-${b.command_key}`}><span><strong>BLOCKED</strong> <code className="wf-key">{b.command_key}</code></span><span className="wf-muted wf-wrap">{b.violations.join(', ') || 'no violation codes recorded'}</span></li>)}
         {v.actions.failed.map((f) => <li key={`f-${f.command_key}`}><span><strong>Failed</strong> <code className="wf-key">{f.command_key}</code></span><span className="wf-muted">{f.reason_code}</span></li>)}
       </ul></div>}
-      {v && (v.checkpointOutcome.length > 0 || v.placementOutcome.length > 0) && <div className="wf-group"><h4>Persisted checkpoint and placement outcome</h4><ul>
-        {v.checkpointOutcome.map((c) => <li key={`c-${c.checkpoint_id}`}><span><strong>Checkpoint</strong> {c.job_id} · {c.status}</span><span className="wf-muted">{c.accessible === null ? 'accessibility not recorded' : c.accessible ? 'accessible' : 'not accessible'}{c.progress_work_units !== null ? ` · ${c.progress_work_units} work units` : ''}</span></li>)}
-        {v.placementOutcome.map((pl) => <li key={`p-${pl.job_id}`}><span><strong>Placement</strong> {pl.job_id}</span><span className="wf-muted wf-wrap">{pl.racks.length ? pl.racks.join(' + ') : 'no racks recorded'}{pl.gpu_ids.length ? ` · ${pl.gpu_ids.length} GPUs` : ''}</span></li>)}
-      </ul></div>}
       <div className="wf-group"><h4>Verification</h4>{v ? <>
         <p>{v.outcome ? <><strong>{v.outcome.replaceAll('_', ' ')}</strong> · </> : null}{v.verified === true ? 'Verified' : v.verified === false ? 'Not verified: operator review' : 'Result not recorded'} · evidence {v.asOf ? (v.asOf.from !== null ? `${duration(v.asOf.from)}–${duration(v.asOf.to)} sim` : `as of ${duration(v.asOf.to)} sim`) : 'time not recorded'}{v.source === 'code' ? ' · deterministic verifier' : ''}</p>
         {v.handoff && <blockquote className="wf-handoff wf-wrap">{v.handoff}{example ? ' (scripted)' : ''}</blockquote>}
@@ -279,11 +365,6 @@ function Handoff({ view, example }: { view: WorkflowView; example: boolean }) {
       <InfraList title="Other unavailable GPUs" lines={view.infra.otherGpus}/>
       {infraCount === 0 && <p className="wf-muted">No degraded cooling or unavailable GPU is currently observed.</p>}
       <div className="wf-group"><h4>Next human step</h4><p className="wf-wrap">{view.nextStep ? <>{view.nextStep.text} <span className="wf-muted">({view.nextStep.source === 'verification' ? 'from the persisted handoff' : 'from the escalation reason'})</span></> : 'Not recorded.'}</p></div>
-    </div>;
-  return <details className="wf-section wf-handoff-section" open={view.terminal}>
-    <summary>{view.terminal ? 'Handoff' : 'Actions so far'} · {view.actions.length} {view.actions.length === 1 ? 'action' : 'actions'}</summary>
-    {view.terminal
-      ? <div className="wf-section-body wf-handoff-body"><HandoffCard view={view} example={example}/><details className="wf-raw"><summary>Full handoff record · evidence, ledger, infrastructure</summary>{detail}</details></div>
-      : detail}
+    </div>
   </details>;
 }

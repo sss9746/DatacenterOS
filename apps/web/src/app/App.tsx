@@ -1,28 +1,42 @@
-import { useEffect, useState } from 'react';
-import { Activity, ArrowUpRight, Pause, Play, RefreshCw, AlertTriangle, SlidersHorizontal } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { ArrowUpRight, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useDashboard } from '../data/use-dashboard';
 import { asMock, errorMessage, type Preview } from '../data/dashboard';
-import { Header } from '../components/header/Header';
-import { SimulationView } from '../components/simulation/SimulationView';
-import { ModelAssumptions } from '../components/simulation/ModelAssumptions';
-import { coolingLoops, degradedPumps, isPumpId, loopOfRack, pumpLabel } from '../components/simulation/topology';
-import { RealGpu } from '../components/heatmap/RealGpu';
-import { Jobs } from '../components/jobs/Jobs';
-import { Cooling } from '../components/cooling/Cooling';
-import { Incidents } from '../components/incidents/Incidents';
-import { Feed } from '../components/feed/Feed';
-import { WorkflowBoard } from '../components/workflows/WorkflowBoard';
-import { Ledger } from '../components/ledger/Ledger';
-import { PresenterControls } from '../components/controls/Controls';
+import { Sidebar } from '../components/shell/Sidebar';
+import { TopBar } from '../components/shell/TopBar';
+import { PageHeader } from '../components/shell/PageHeader';
+import { coolingLoops, isPumpId, loopOfRack } from '../components/simulation/topology';
+import { DemoControls } from '../components/controls/DemoControls';
 import { DEFAULT_XID_GPU_ID, type PumpId } from '../components/controls/fault-form';
-import { Scoreboard } from '../components/scoreboard/Scoreboard';
-import { loadRehearsalBatch } from '../data/rehearsal-batch';
-import { Badge } from '../components/ui/panel';
 import { Button } from '../components/ui/button';
-import { duration } from '../lib/utils';
+import { ROUTES, anchorFromHash, hrefOf, routeFromHash, type RouteId } from './routes';
+import type { PageProps } from './page-props';
+import { ClusterPage } from '../pages/ClusterPage';
+import { JobsPage } from '../pages/JobsPage';
+import { RecoveryPage } from '../pages/RecoveryPage';
+import { WorkflowsPage } from '../pages/WorkflowsPage';
+import { BenchmarksPage } from '../pages/BenchmarksPage';
 
-/** `?presenter=1` opens the control drawer on load; judges' default view keeps it closed under the story. */
+/** `?presenter=1` opens the Demo controls drawer on load; judges' default view keeps it closed under the story. */
 const presenterRequested = () => { try { return new URLSearchParams(window.location.search).get('presenter') === '1'; } catch { return false; } };
+const readHash = () => { try { return window.location.hash; } catch { return ''; } };
+/** Data older than this (wall ms) while the clock runs is reported as stale. */
+const STALE_AFTER_MS = 5000;
+
+const PAGES: Record<RouteId, (props: PageProps) => ReactElement> = { cluster: ClusterPage, jobs: JobsPage, recovery: RecoveryPage, workflows: WorkflowsPage, benchmarks: BenchmarksPage };
+
+/** Hash router: the page id comes from `#/…`; legacy anchors are normalised to their page. */
+function useRoute() {
+  const [hash, setHash] = useState(readHash);
+  useEffect(() => { const onHash = () => setHash(readHash()); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
+  const route = routeFromHash(hash);
+  const anchor = anchorFromHash(hash);
+  const navigate = useCallback((next: RouteId, nextAnchor?: string) => { window.location.hash = nextAnchor ? `${hrefOf(next)}/${nextAnchor}` : hrefOf(next); }, []);
+  // Legacy `#jobs` → `#/jobs` and retired `#/real-gpu` → `#/cluster`, so the address bar shows the canonical deep link.
+  useEffect(() => { if (hash && !hash.startsWith(hrefOf(route))) window.history.replaceState(null, '', hrefOf(route)); }, [hash, route]);
+  useEffect(() => { if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0); }, [route, anchor]);
+  return { route, anchor, navigate };
+}
 
 export function App() {
   const [preview, setPreview] = useState<Preview>('physics');
@@ -31,13 +45,15 @@ export function App() {
   const [selectedPumpId, setSelectedPumpId] = useState<PumpId>('pump-a');
   const [speed, setSpeed] = useState(1);
   const [now, setNow] = useState(Date.now());
-  const [openedAt] = useState(Date.now());
-  const [presenterOpen] = useState(presenterRequested);
+  const [demoOpen, setDemoOpen] = useState(presenterRequested);
   const [controlError, setControlError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const { route, navigate } = useRoute();
   const { state, store, error, mode, dbName, canAdmin } = useDashboard(preview, revision);
   const snapshot = state.snapshot;
   const localPhysics = mode === 'mock' && preview === 'physics';
+  const current = ROUTES.find((row) => row.id === route) ?? ROUTES[0];
+  useEffect(() => { document.title = `DataCenterOS · ${current.label}`; }, [current.label]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     const mock = store ? asMock(store.client) : null;
@@ -56,47 +72,30 @@ export function App() {
     } catch (reason) { setControlError(errorMessage(reason)); }
     finally { setPending(false); }
   }
-  const simulatedGpus = snapshot?.gpus.filter((gpu) => gpu.resource_id !== 'gpu-real-0') ?? [];
-  const available = simulatedGpus.filter((gpu) => gpu.availability === 'ready').length;
-  const throttled = simulatedGpus.filter((gpu) => (gpu.clocks_event_reasons & 0x20) !== 0).length;
-  const allocated = new Set(snapshot?.allocations.map((row) => row.gpu_id)).size;
-  const degraded = snapshot ? degradedPumps(snapshot).map((row) => pumpLabel(row.resource_id)) : [];
-  const stale = state.lastReceived !== null && !snapshot?.clock.paused && now - state.lastReceived > 5000;
-  // The pump that cools a rack comes from the snapshot's cooling loops; the fixed split is only for snapshots without one.
+  const stale = state.lastReceived !== null && !snapshot?.clock.paused && now - state.lastReceived > STALE_AFTER_MS;
   const pumpOfRack = (rack: number): PumpId => { const id = snapshot ? loopOfRack(coolingLoops(snapshot), rack)?.pumpId : undefined; return id && isPumpId(id) ? id : rack >= 2 && rack <= 4 ? 'pump-a' : 'pump-b'; };
   const selectGpu = (id: string) => { setSelected(id); const rack = Number(/gpu-r(\d+)-/.exec(id)?.[1]); if (rack >= 1 && rack <= 8) setSelectedPumpId(pumpOfRack(rack)); };
   const example = mode === 'mock' && preview === 'recovery';
-  return <><a className="skip-link" href="#overview">Skip to cluster overview</a><Header mode={mode} localPhysics={localPhysics} dbName={dbName}/><main id="overview" className="main">
-    <div className="page-title"><div><h1>Cluster operations</h1><p>Keep the training work. Contain the failure.</p></div><div className="run-identity"><Activity size={15}/><span>run-demo-1</span><Badge>SIMULATED</Badge></div></div>
-    <div className="run-toolbar"><div className="clocks"><div><span>Sim time</span><strong data-testid="sim-clock">{snapshot ? duration(snapshot.clock.sim_time_ms) : '—'}</strong></div><div><span>Wall time · this session</span><strong>{duration(now - openedAt)}</strong></div><span className={`connection ${error || stale ? 'connection-error' : ''}`}><i/>{error ? 'Connection error' : stale ? 'Stale data' : snapshot ? localPhysics ? 'Local physics' : mode === 'mock' ? 'Fixture playback' : `Live DB connected · ${dbName}` : 'Connecting'}</span></div><div className="run-actions">{mode === 'mock' && <label className="inline-select"><span className="sr-only">Run view</span><select aria-label="Run view" value={preview} onChange={(event) => { setPreview(event.target.value as Preview); }}><option value="physics">Local physics simulation</option><option value="demo">Healthy fixture</option><option value="pump_degraded">Cooling fault</option><option value="recovery">Recovery example</option></select></label>}<label className="inline-select"><span className="sr-only">Simulation speed</span><select aria-label="Simulation speed" disabled={!canAdmin || !snapshot || pending} value={speed} onChange={(event) => void changeRun('speed', Number(event.target.value))}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}× speed</option>)}</select></label><Button variant="secondary" size="sm" disabled={!canAdmin || !snapshot || pending} onClick={() => void changeRun('pause')}>{snapshot?.clock.paused ? <Play size={14}/> : <Pause size={14}/>} {snapshot?.clock.paused ? 'Resume' : 'Pause'}</Button></div></div>
-    {controlError && <p role="alert" className="data-warning">{controlError}</p>}
-    {error && <div className="connection-banner" role="alert"><AlertTriangle size={20}/><div><strong>{snapshot ? 'Updates interrupted. Last received data is shown.' : 'Could not connect to the data source.'}</strong><p>{error}</p>{mode === 'live' && <p>Live mode requires P2’s deployed tables and client. No mock fallback has been substituted.</p>}</div><Button variant="secondary" onClick={() => setRevision((r) => r + 1)}><RefreshCw size={14}/>Retry</Button></div>}
-    {!snapshot && !error && <div className="loading-surface" role="status"><span>Loading the cluster’s public snapshot…</span><div/><div/><div/></div>}
-    {snapshot && <>
-      <div className="cluster-summary" aria-label="Simulated cluster summary">
-        <span><i className="status-dot"/><strong>{available}/{simulatedGpus.length}</strong> GPUs ready</span>
-        <span><strong>{allocated}</strong> allocated</span>
-        <span className={throttled || degraded.length ? 'text-warning' : ''}><strong>{throttled}</strong> thermally throttled</span>
-        {degraded.length > 0 && <span className="text-warning summary-degraded"><i className="status-dot"/><strong>{degraded.join(', ')}</strong> degraded</span>}
-        <span><strong>{snapshot.job_states.filter((job) => job.status === 'running').length}/{snapshot.job_states.length}</strong> jobs running</span>
-        <span className="summary-provenance">Simulated values{localPhysics ? ' · P1 physics · no agent' : mode === 'mock' ? ' · fixture · no live agent' : ''}</span>
-      </div>
-      {example && <p className="data-warning">Recovery example: incidents and tool calls are scripted illustrations. They are not a live diagnosis, executed plan, or benchmark.</p>}
-      <SimulationView snapshot={snapshot} selected={selected} onSelect={selectGpu} onSelectPump={setSelectedPumpId} telemetry={state.evidence?.telemetry}/>
-      <div className="overview-grid">
-        <div className="column"><Jobs snapshot={snapshot} losses={state.losses} history={state.jobHistory} details={state.actionDetails}/></div>
-        <div className="column"><RealGpu evidence={state.evidence} now={now}/><Incidents incidents={state.incidents} evidence={state.evidence} example={example}/><details className="sim-more"><summary>Detailed cooling measurements</summary><Cooling snapshot={snapshot}/></details></div>
-      </div>
-      <WorkflowBoard workflows={state.workflows.filter((row) => row.run_id === snapshot.run_id)} plans={state.plans.filter((row) => row.run_id === snapshot.run_id)} events={state.events} actionDetails={state.actionDetails} incidents={state.incidents} snapshot={snapshot} example={example} mode={mode} nowUnixMs={now}/>
-      <div className="activity-grid"><Feed events={state.events} example={example}/><Ledger actions={state.actions} details={state.actionDetails} simTimeMs={snapshot.clock.sim_time_ms}/></div>
-      {state.signals.length > 0 && <details className="signal-panel"><summary>Observed signals <Badge tone="warning">{state.signals.length}</Badge></summary><div>{[...state.signals].reverse().map((signal) => <p key={signal.event_id}><time>{duration(signal.sim_time_ms)} sim</time><code>{signal.resource_id}</code><strong>{signal.xid_code ? `XID ${signal.xid_code}` : signal.event_type}</strong><span>{signal.message}</span></p>)}</div></details>}
-      <ModelAssumptions snapshot={snapshot}/>
-      <Scoreboard results={state.results} mode={mode} onLoadRehearsal={mode === 'mock' && store ? () => { void loadRehearsalBatch(store.client).catch((reason) => setControlError(errorMessage(reason))); } : undefined}/>
-    </>}
-    <footer className="footer"><span>DataCenterOS <span className="separator">/</span> A GPU cluster digital twin</span><span>Simulated, configurable thresholds: throttle 85 °C · shutdown 92 °C</span><a href="https://github.com/sss9746/DatacenterOS/blob/main/plans/CONTRACTS.md" target="_blank" rel="noreferrer">Model contracts<ArrowUpRight size={13}/></a></footer>
-    {snapshot && store && <details className="presenter-drawer" id="presenter" open={presenterOpen}>
-      <summary><SlidersHorizontal size={16} aria-hidden="true"/><span>Presenter controls</span><small>{canAdmin ? 'Inject a fault · safety probe · reset' : 'Read-only without the presenter token'}</small></summary>
-      <div className="presenter-drawer-body"><PresenterControls store={store} canAdmin={canAdmin} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onReset={() => setRevision((r) => r + 1)}/></div>
-    </details>}
-  </main></>;
+  const Page = PAGES[route];
+  const openDemo = () => { setDemoOpen((open) => !open); if (!demoOpen) requestAnimationFrame(() => document.getElementById('presenter')?.scrollIntoView({ block: 'end' })); };
+  return <>
+    <a className="skip-link" href="#main">Skip to content</a>
+    <TopBar mode={mode} dbName={dbName} localPhysics={localPhysics} snapshot={snapshot} error={error} stale={stale} canAdmin={canAdmin} pending={pending}
+      preview={preview} onPreview={setPreview} speed={speed} onSpeed={(next) => void changeRun('speed', next)} onTogglePause={() => void changeRun('pause')}
+      demoOpen={demoOpen} onToggleDemo={openDemo}/>
+    <Sidebar route={route}/>
+    <main id="main" className="main">
+      <PageHeader route={current}/>
+      {controlError && <p role="alert" className="data-warning">{controlError}</p>}
+      {error && <div className="connection-banner" role="alert"><AlertTriangle size={20} aria-hidden="true"/><div><strong>{snapshot ? 'Updates interrupted. Last received data is shown.' : 'Could not connect to the data source.'}</strong><p>{error}</p>{mode === 'live' && <p>Live mode requires P2’s deployed tables and client. No mock fallback has been substituted.</p>}</div><Button variant="secondary" onClick={() => setRevision((r) => r + 1)}><RefreshCw size={14} aria-hidden="true"/>Retry</Button></div>}
+      {!snapshot && !error && <div className="loading-surface" role="status"><span>Loading the cluster’s public snapshot…</span><div/><div/><div/></div>}
+      {snapshot && store && <>
+        {example && <p className="data-warning">Recovery example: incidents and tool calls are scripted illustrations. They are not a live diagnosis, executed plan, or benchmark.</p>}
+        <Page state={state} store={store} snapshot={snapshot} mode={mode} dbName={dbName} canAdmin={canAdmin} localPhysics={localPhysics} example={example} now={now} runWorkflows={state.workflows.filter((row) => row.run_id === snapshot.run_id)} runPlans={state.plans.filter((row) => row.run_id === snapshot.run_id)} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onError={setControlError} navigate={navigate}/>
+      </>}
+      <div className="main-spacer" aria-hidden="true"/>
+      <footer className="footer"><span>DataCenterOS <span className="separator">/</span> A GPU cluster digital twin</span><span>Simulated, configurable thresholds: throttle 85 °C · shutdown 92 °C</span><a href="https://github.com/sss9746/DatacenterOS/blob/main/plans/CONTRACTS.md" target="_blank" rel="noreferrer">Model contracts<ArrowUpRight size={13} aria-hidden="true"/></a></footer>
+      {snapshot && store && <DemoControls store={store} canAdmin={canAdmin} open={demoOpen} onOpenChange={setDemoOpen} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onReset={() => setRevision((r) => r + 1)} plans={state.plans} actionDetails={state.actionDetails} workflows={state.workflows} snapshot={snapshot}/>}
+    </main>
+  </>;
 }

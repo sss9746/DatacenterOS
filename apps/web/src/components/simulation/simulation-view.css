@@ -1,33 +1,39 @@
-/* Topology explorer. Type floor for projection: nothing below 11px. State is carried by whole-surface tints and
-   1px borders, never by a thick accent edge. */
-.sim-view { --sim-cyan: #83b8c8; --sim-amber: #e2b071; --sim-amber-text: #f0c58f; --sim-red: #df8a8d; margin: 0 0 20px; overflow: hidden; border: 1px solid #3d5360; border-radius: 10px; background: #16232d; color: #e9f0f3; }
-.sim-view-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 24px; border-bottom: 1px solid #344957; background: #1a2a35; }
-.sim-view-title { display: flex; align-items: flex-start; gap: 12px; }
-.sim-view-title svg { margin-top: 2px; color: var(--sim-cyan); }
-.sim-view-title h2 { font-size: 18px; letter-spacing: -.02em; }
-.sim-view-title p { margin-top: 2px; color: #b4c4cc; font-size: 12px; }
-.sim-view-health { display: flex; gap: 14px; flex-wrap: wrap; color: #c2d0d7; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.sim-view-health span::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #8fa8b5; }
-.sim-view-health .sim-count-warning { color: var(--sim-amber-text); font-weight: 600; }
-.sim-view-health .sim-count-warning::before { background: var(--sim-amber); }
-.sim-view-health .sim-count-fault { color: #f3b7b9; font-weight: 600; }
-.sim-view-health .sim-count-fault::before { background: var(--sim-red); }
+/* Simulated cluster, dark operator console. The rack cabinets, per-GPU modules and accelerator cards are the int/r-sprint
+   pictures: state is carried by whole-surface tints, LEDs and 1px borders, never by a thick accent edge. Motion is
+   transform/opacity only, plus the 600ms heat colour transition and the coolant flow in the loop band. Type floor 11px. */
+.sim-view {
+  --sim-cyan: #83b8c8; --sim-amber: #e2b071; --sim-amber-text: #f0c58f; --sim-red: #df8a8d; --sim-green: #8cd5b2;
+  --sim-rack-gap: 9px;
+  --sim-tile-fault: #5f3036; --sim-tile-fault-text: #ffdbd6;
+  --sim-warning: var(--warning, #efc589); --sim-danger: var(--danger, #f0a29d); --sim-agent: var(--agent, #8bd6b1);
+  --sim-job-a: var(--job-a, #9abedc); --sim-job-b: var(--job-b, #c4b5dc); --sim-job-c: var(--job-c, #dbc18f);
+  --sim-ease: cubic-bezier(.2, .7, .2, 1); --sim-fast: 160ms; --sim-slow: 600ms; --sim-drama: 1400ms;
+  position: relative; margin: 0 0 20px; min-width: 0; overflow: clip; border: 1px solid #3d5360; border-radius: 10px;
+  background: #16232d; color: #e9f0f3; font-variant-numeric: tabular-nums;
+}
+.sim-view-header { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; min-height: 62px; padding: 12px 24px; border-bottom: 1px solid #344957; background: #1a2a35; }
+.sim-view-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sim-view-title h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.015em; }
+.sim-ready { color: #b4c4cc; font-size: 12px; }
+.sim-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 11px; color: #b4c4cc; }
+.sim-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.sim-key { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sim-green); box-shadow: 0 0 4px #8cd5b280; }
+.sim-key-warm { background: var(--sim-amber); box-shadow: 0 0 4px #e2b07180; }
+.sim-key-fault { background: var(--sim-red); box-shadow: 0 0 4px #df8a8d80; }
+.sim-key-line { display: inline-block; width: 18px; height: 6px; border: 1px solid #6f9eae; border-top: 0; border-radius: 0 0 5px 5px; }
+.sim-key-line.is-degraded { border-color: var(--sim-amber); border-width: 2px; border-top: 0; }
 
 .sim-explore { padding: 16px 24px 20px; }
-.sim-step { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
-.sim-step > span { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 50%; background: #375b69; color: #f3f9fa; font-size: 12px; font-weight: 700; }
-.sim-step strong { display: block; font-size: 14px; }
-.sim-step p { margin-top: 1px; color: #adbec8; font-size: 12px; }
 
-/* Step 1: pumps */
+/* Pumps */
 .sim-cooling { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-.sim-cooling-route { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; padding: 11px 14px; border: 1px solid #3f5a68; border-radius: 6px; background: #223845; color: #edf3f5; text-align: left; cursor: pointer; transition: background-color 160ms ease-out, border-color 160ms ease-out; }
+.sim-cooling-route { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; min-height: 44px; padding: 11px 14px; border: 1px solid #3f5a68; border-radius: 6px; background: #223845; color: #edf3f5; text-align: left; cursor: pointer; transition: background-color var(--sim-fast) ease-out, border-color var(--sim-fast) ease-out; }
 .sim-cooling-route:hover { background: #294353; }
-.sim-cooling-route > svg { color: var(--sim-cyan); }
+.sim-cooling-route .sim-fan { color: var(--sim-cyan); }
 .sim-cooling-route.is-selected { border-color: #93b5c2; box-shadow: inset 0 0 0 1px #93b5c2; }
 .sim-cooling-route.is-degraded { border-color: #a07a44; background: #352f26; }
 .sim-cooling-route.is-degraded:hover { background: #3e372c; }
-.sim-cooling-route.is-degraded > svg { color: var(--sim-amber); }
+.sim-cooling-route.is-degraded .sim-fan { color: var(--sim-amber); }
 .sim-cooling-route.is-degraded.is-selected { border-color: var(--sim-amber); box-shadow: inset 0 0 0 1px var(--sim-amber); }
 .sim-pump-copy { display: flex; flex-direction: column; min-width: 0; }
 .sim-pump-copy strong { font-size: 13px; }
@@ -35,9 +41,11 @@
 .sim-cooling-route b { margin-left: auto; color: #cbe6dd; font-size: 12px; font-weight: 550; text-align: right; }
 .sim-cooling-route.is-degraded b { color: var(--sim-amber-text); }
 
-/* Step 2: cabinets. Every cabinet shows its 8 modules; state tints the whole cabinet. */
-.sim-racks { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 9px; }
-.sim-rack { --ring: 0 0 0 0 transparent; display: flex; flex-direction: column; min-width: 0; min-height: 158px; padding: 7px 8px 8px; border: 1px solid #5b6f79; border-radius: 5px; background: linear-gradient(115deg, #3a4a52, #26353e 28%, #1c2932 75%, #34434b); box-shadow: inset 2px 0 #7a8b93, inset -2px 0 #111c23, var(--ring), 0 7px 15px #08111950; color: #edf3f5; text-align: left; cursor: pointer; }
+/* Cabinets. Every cabinet shows its 8 modules; state tints the whole cabinet. The SVG overlay above them only draws
+   job-move arcs. Column count mirrors rackColumnsFor() in topology.ts. */
+.sim-rack-field { position: relative; container-type: inline-size; }
+.sim-racks { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--sim-rack-gap); }
+.sim-rack { --ring: 0 0 0 0 transparent; --sim-rack-shadow: inset 2px 0 #7a8b93, inset -2px 0 #111c23, 0 7px 15px #08111950; position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 158px; padding: 7px 8px 8px; border: 1px solid #5b6f79; border-radius: 5px; background: linear-gradient(115deg, #3a4a52, #26353e 28%, #1c2932 75%, #34434b); box-shadow: var(--sim-rack-shadow), var(--ring); color: #edf3f5; text-align: left; cursor: pointer; transition: border-color var(--sim-slow) var(--sim-ease), box-shadow var(--sim-slow) var(--sim-ease); }
 .sim-rack:hover { background: linear-gradient(115deg, #4b626c, #2d414c 30%, #22333e 75%, #3b505b); }
 .sim-rack-warm, .sim-rack-hot { border-color: #9b7a4a; background: linear-gradient(115deg, #4d4536, #37312a 28%, #27221c 75%, #433b2f); }
 .sim-rack-warm:hover, .sim-rack-hot:hover { background: linear-gradient(115deg, #5a5140, #413a31 30%, #2e2821 75%, #4d4436); }
@@ -55,36 +63,64 @@
 .sim-rack-ready { color: #aebfc8; font-size: 11px; white-space: nowrap; }
 .sim-rack-loop-note { display: flex; flex-direction: column; gap: 1px; margin-bottom: 2px; color: var(--sim-amber-text); font-size: 11px; font-weight: 650; line-height: 1.3; }
 .sim-rack-loop-note em { font-style: normal; font-weight: 500; color: #ffd9a3; font-variant-numeric: tabular-nums; }
+.sim-rack-flag { font-size: 11px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; color: var(--sim-agent); }
 .sim-rack-cabinet { display: grid; grid-template-columns: 3px minmax(0, 1fr) 3px; flex: 1; width: 100%; gap: 3px; padding: 5px 3px; border: 1px solid #101a20; border-radius: 2px; background: #111b23; box-shadow: inset 0 3px 8px #050a0d; }
 .sim-rack-rail { background: repeating-linear-gradient(to bottom, #52616a 0 2px, #1b2931 2px 8px); border-radius: 2px; }
 .sim-rack-modules { display: grid; grid-template-rows: repeat(8, minmax(0, 1fr)); gap: 2px; min-height: 0; }
-.sim-rack-module { display: flex; align-items: center; gap: 3px; min-height: 0; padding: 0 3px; border: 1px solid #53636d; border-radius: 1px; background: linear-gradient(#3e4d55, #2c3a42); }
-.sim-rack-module i { width: 4px; height: 4px; flex: 0 0 auto; border-radius: 50%; background: #8cd5b2; box-shadow: 0 0 4px #8cd5b280; }
+.sim-rack-module { position: relative; display: flex; align-items: center; gap: 3px; min-height: 0; padding: 0 3px; border: 1px solid #53636d; border-radius: 1px; background: linear-gradient(#3e4d55, #2c3a42); transition: background-color var(--sim-slow) var(--sim-ease); }
+.sim-rack-module i { width: 4px; height: 4px; flex: 0 0 auto; border-radius: 50%; background: var(--sim-green); box-shadow: 0 0 4px #8cd5b280; transition: background-color var(--sim-slow) var(--sim-ease); }
 .sim-rack-module-warm i, .sim-rack-module-hot i { background: var(--sim-amber); box-shadow: 0 0 4px #e2b07180; }
 .sim-rack-module-fault i { background: var(--sim-red); box-shadow: 0 0 4px #df8a8d80; }
+.sim-rack-module-fault { border-color: #7a4a4f; background: linear-gradient(#4a353a, #352a2e); }
 .sim-rack-module-missing i { background: #6b7a81; box-shadow: none; }
 .sim-rack-module b { flex: 1; height: 3px; min-width: 0; opacity: .7; background: repeating-linear-gradient(90deg, #8da4ae 0 2px, transparent 2px 5px); }
 .sim-rack-module em { width: 5px; height: 5px; flex: 0 0 auto; border: 1px solid #6f828c; border-radius: 50%; }
+.sim-rack-module.is-selected { outline: 1px solid #d9edf3; outline-offset: 0; }
 
-/* Loop band: an open bracket under each contiguous run of cabinets that share a pump. */
-.sim-loop-band { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 9px; margin-top: 8px; }
+/* Loop band: an open bracket under each contiguous run of cabinets that share a pump; coolant flows along it. */
+.sim-loop-band { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--sim-rack-gap); margin-top: 8px; }
 .sim-loop-segment { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.sim-loop-segment i { display: block; height: 7px; margin: 0 6px; border: 1px solid #6f9eae; border-top: 0; border-radius: 0 0 6px 6px; }
+.sim-loop-segment i { position: relative; display: block; height: 7px; margin: 0 6px; border: 1px solid #6f9eae; border-top: 0; border-radius: 0 0 6px 6px; overflow: hidden; }
+.sim-loop-segment i::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; opacity: .8; background: repeating-linear-gradient(90deg, var(--sim-cyan) 0 7px, transparent 7px 16px); background-size: 16px 2px; animation: sim-flow 1.4s linear infinite; }
 .sim-loop-segment span { font-size: 11px; color: #b4c4cc; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sim-loop-segment.is-degraded i { border-color: var(--sim-amber); border-width: 2px; border-top: 0; }
+.sim-loop-segment.is-degraded i::after { background-image: repeating-linear-gradient(90deg, var(--sim-amber) 0 7px, transparent 7px 16px); animation-duration: 3s; }
 .sim-loop-segment.is-degraded span { color: var(--sim-amber-text); font-weight: 650; }
+@keyframes sim-flow { to { background-position: 32px 0; } }
 
-.sim-impact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 10px 0 16px; padding: 10px 14px; border: 1px solid #3f5a68; border-radius: 6px; background: #203440; }
-.sim-impact strong { font-size: 13px; }
-.sim-impact span { color: #c2d1d8; font-size: 12px; }
-.sim-impact.is-degraded { border-color: #a07a44; background: #2f2a22; }
-.sim-impact.is-degraded strong { color: var(--sim-amber-text); }
-.sim-impact.is-degraded span { color: #e3d4bd; }
+/* XID failure sequence: flash → scale(1.06) → settle on the fault colour → ripple ring on the rack. */
+.is-failing { animation: sim-tile-fail var(--sim-drama) var(--sim-ease) 1 both; will-change: transform, box-shadow; z-index: 2; }
+@keyframes sim-tile-fail {
+  0% { background-color: var(--sim-danger); color: var(--sim-danger); transform: scale(1); box-shadow: 0 0 0 0 #f0a29db3; }
+  15% { background-color: var(--sim-danger); color: var(--sim-danger); transform: scale(1.06); }
+  40% { background-color: var(--sim-tile-fault); color: var(--sim-tile-fault-text); transform: scale(1.06) rotate(-2deg); box-shadow: 0 0 0 2px #f0a29db3; }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px #f0a29d00; }
+  100% { background-color: var(--sim-tile-fault); color: var(--sim-tile-fault-text); transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+}
+.sim-rack.is-rippling { animation: sim-rack-ripple var(--sim-drama) var(--sim-ease) 1; }
+@keyframes sim-rack-ripple { 0%, 50% { box-shadow: var(--sim-rack-shadow), var(--ring), 0 0 0 0 #f0a29d99; } 100% { box-shadow: var(--sim-rack-shadow), var(--ring), 0 0 0 14px #f0a29d00; } }
+.sim-rack.is-landing { animation: sim-rack-land var(--sim-drama) var(--sim-ease) 1; }
+@keyframes sim-rack-land { 0% { box-shadow: var(--sim-rack-shadow), var(--ring), 0 0 0 0 #8bd6b199; } 100% { box-shadow: var(--sim-rack-shadow), var(--ring), 0 0 0 12px #8bd6b100; } }
 
-/* Step 3: accelerator cards and the inspector */
-.sim-detail { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, .7fr); gap: 12px; }
-.sim-gpu-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.sim-gpu { display: block; min-width: 0; min-height: 96px; padding: 8px; border: 1px solid #526c7a; border-radius: 4px; background: #20333e; color: #ebf6f8; text-align: left; cursor: pointer; }
+/* Heat haze on throttled / hot accelerator cards: a translucent sheen drifting ±3px. */
+.sim-gpu.is-throttled::after { content: ''; position: absolute; inset: -6px; pointer-events: none; opacity: .3; background: linear-gradient(100deg, transparent 20%, #ffe1ca80 50%, transparent 80%); animation: sim-haze 2.4s ease-in-out infinite alternate; will-change: transform; }
+.sim-gpu-fault.is-throttled::after { display: none; }
+@keyframes sim-haze { from { transform: translate(-3px, 0) skewX(-6deg); } to { transform: translate(3px, 0) skewX(6deg); } }
+
+/* SVG overlay: job-move arcs above the cabinets. */
+.sim-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.sim-move-arc { fill: none; stroke: var(--sim-job-a); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 1200; stroke-dashoffset: 1200; animation: sim-arc-draw var(--sim-drama) var(--sim-ease) 1 forwards; }
+.sim-move-dot { fill: var(--sim-job-a); opacity: 0; animation: sim-dot-land var(--sim-drama) var(--sim-ease) 1 forwards; }
+.sim-move-arc.job-b, .sim-move-dot.job-b { stroke: var(--sim-job-b); fill: var(--sim-job-b); }
+.sim-move-arc.job-c, .sim-move-dot.job-c { stroke: var(--sim-job-c); fill: var(--sim-job-c); }
+.sim-move-arc { fill: none; }
+@keyframes sim-arc-draw { 0% { stroke-dashoffset: 1200; opacity: 1; } 70% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes sim-dot-land { 0%, 60% { opacity: 0; transform: scale(.4); transform-origin: center; transform-box: fill-box; } 75% { opacity: 1; transform: scale(1.3); } 100% { opacity: 0; transform: scale(1); } }
+
+/* Accelerator cards for the chosen rack (the interactive, data-gpu tiles) and the inspector */
+.sim-detail { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, .7fr); gap: 12px; margin-top: 14px; }
+.sim-gpu-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-content: start; }
+.sim-gpu { position: relative; display: block; min-width: 0; min-height: 96px; padding: 8px; border: 1px solid #526c7a; border-radius: 4px; background: #20333e; color: #ebf6f8; text-align: left; overflow: hidden; cursor: pointer; transition: background-color var(--sim-slow) var(--sim-ease), border-color var(--sim-slow) var(--sim-ease); }
 .sim-gpu:hover { filter: brightness(1.16); }
 .sim-gpu.is-selected { outline: 2px solid #e3f0f4; outline-offset: 2px; }
 .sim-gpu-warm, .sim-gpu-hot { background: #433a31; border-color: #b28c5d; }
@@ -97,27 +133,51 @@
 .sim-gpu-connector { position: absolute; right: 1px; top: 9px; width: 6px; height: 26px; border: 1px solid #c09f5f; border-radius: 0 2px 2px 0; background: repeating-linear-gradient(to bottom, #bd9b55 0 3px, #6c592f 3px 5px); }
 .sim-gpu-fan { width: 26px; height: 26px; flex: 0 0 auto; border: 3px solid #536770; border-radius: 50%; background: repeating-conic-gradient(from 12deg, #536771 0 18deg, #15232b 18deg 45deg); box-shadow: inset 0 0 0 4px #1c2a31, 0 0 0 1px #101b21; }
 .sim-gpu-vents { flex: 1; height: 22px; background: repeating-linear-gradient(to bottom, #677b82 0 2px, transparent 2px 5px); opacity: .65; }
-.sim-gpu-led { width: 5px; height: 5px; align-self: flex-start; flex: 0 0 auto; border-radius: 50%; background: #8cd5b2; box-shadow: 0 0 5px #8cd5b2; }
+.sim-gpu-led { width: 5px; height: 5px; align-self: flex-start; flex: 0 0 auto; border-radius: 50%; background: var(--sim-green); box-shadow: 0 0 5px var(--sim-green); }
 .sim-gpu-warm .sim-gpu-led, .sim-gpu-hot .sim-gpu-led { background: var(--sim-amber); box-shadow: 0 0 5px var(--sim-amber); }
 .sim-gpu-fault .sim-gpu-led { background: var(--sim-red); box-shadow: 0 0 5px var(--sim-red); }
 .sim-gpu-caption { display: flex; justify-content: space-between; align-items: baseline; gap: 5px; }
 .sim-gpu-caption > span { display: flex; flex-direction: column; font-size: 12px; font-weight: 650; }
 .sim-gpu-caption small { color: #bfced5; font-size: 11px; font-weight: 400; }
 .sim-gpu-caption strong { font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
 .sim-inspector { min-height: 140px; padding: 14px 16px; border: 1px solid #405968; border-radius: 5px; background: #1e303c; }
 .sim-inspector-heading { display: flex; align-items: center; gap: 8px; }
 .sim-inspector-heading svg { color: var(--sim-cyan); }
-.sim-inspector-heading strong { font-size: 14px; }
-.sim-inspector p { margin-top: 6px; color: #c3d1d7; font-size: 12px; }
-.sim-inspector dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 8px; margin-top: 14px; }
-.sim-inspector dt { color: #adbec8; font-size: 11px; }
-.sim-inspector dd { margin: 2px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.sim-inspector-heading strong { font-size: 14px; font-weight: 600; }
+.sim-inspector p { margin: 6px 0 0; color: #c3d1d7; font-size: 12px; }
+.sim-inspector-state.is-hot, .sim-inspector-state.is-fault { color: var(--sim-danger); font-weight: 600; }
+.sim-inspector-state.is-warm { color: var(--sim-warning); font-weight: 600; }
+.sim-inspector-job { color: #e9f0f3; }
+.sim-inspector-more { margin-top: 8px; }
+.sim-inspector-more > summary { cursor: pointer; font-size: 12px; font-weight: 550; color: #adbec8; }
+.sim-inspector dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 8px; margin: 12px 0 0; }
+.sim-inspector dt { color: #adbec8; font-size: 11px; margin-bottom: 2px; }
+.sim-inspector dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
-/* Secondary disclosures that reuse the topology's surface language. */
-.sim-more { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-.sim-more > summary { padding: 15px 18px; cursor: pointer; color: var(--foreground); font-size: 13px; font-weight: 600; }
-.sim-more[open] > summary { border-bottom: 1px solid var(--line); }
-.sim-more > .panel { border: 0; border-radius: 0 0 8px 8px; }
+/* Page-level pieces owned by the Cluster page: the situation line and the impact tiles. `.stat` is the shared class;
+   the rules below only arrange it and tint it, so A's shared styling still applies. */
+.cluster-situation { margin: 20px 0 18px; font-size: 15px; line-height: 1.45; color: var(--foreground, #e8edf2); max-width: none; }
+.cluster-situation.is-warning { color: var(--warning, #efc589); }
+.cluster-situation.is-danger { color: var(--danger, #f0a29d); }
+.cluster-situation small { display: block; margin-top: 2px; font-size: 12px; color: var(--muted, #a6b4c3); }
+.cluster-impact { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.cluster-impact-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cluster-impact-side { grid-template-columns: minmax(0, 1fr); }
+.cluster-impact .stat { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line, #303c49); border-radius: 12px; background: var(--surface, #171e27); }
+.cluster-impact .stat-value { font-size: 26px; font-weight: 500; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--foreground, #e8edf2); }
+.cluster-impact .stat-label { font-size: 12px; color: var(--muted, #a6b4c3); line-height: 1.35; }
+.cluster-impact .stat.is-warning { border-color: #8a6b3b; }
+.cluster-impact .stat.is-warning .stat-value { color: var(--warning, #efc589); }
+.cluster-impact .stat.is-danger { border-color: #9d6065; }
+.cluster-impact .stat.is-danger .stat-value { color: var(--danger, #f0a29d); }
+.cluster-impact .stat.is-agent .stat-value { color: var(--agent, #8bd6b1); }
+
+/* Secondary disclosures that reuse the cluster's surface language. */
+.sim-more { border: 1px solid var(--line, #303c49); border-radius: 12px; background: var(--surface, #171e27); color: var(--foreground, #e8edf2); }
+.sim-more > summary { padding: 15px 20px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.sim-more[open] > summary { border-bottom: 1px solid var(--line, #303c49); }
+.sim-more > .panel { border: 0; border-radius: 0 0 12px 12px; }
 
 /* Wide screens: all eight cards on one row beside the inspector, so the whole explorer fits one 1440×900 viewport. */
 @media (min-width: 1251px) {
@@ -130,19 +190,70 @@
   .sim-gpu-connector { top: 8px; height: 24px; }
   .sim-gpu-caption { gap: 4px; }
 }
-@media (max-width: 1250px) {
+/* Wrapped layouts: the loop band is hidden (each affected cabinet already carries its loop note and ring). */
+@container (max-width: 719px) {
   .sim-racks { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .sim-loop-band { display: none; } /* cabinets wrap to two rows; each affected cabinet already carries its loop note */
   .sim-rack { min-height: 160px; }
 }
-@media (max-width: 1000px) { .sim-detail { grid-template-columns: 1fr; } }
-@media (max-width: 620px) {
+@container (max-width: 399px) {
+  .sim-racks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1250px) { .sim-loop-band { display: none; } }
+@media (max-width: 1000px) {
+  .sim-detail { grid-template-columns: 1fr; }
+  .cluster-impact-main { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
   .sim-view-header { align-items: flex-start; flex-direction: column; padding: 16px; }
   .sim-explore { padding: 16px; }
   .sim-cooling { grid-template-columns: 1fr; }
-  .sim-racks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sim-gpu-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sim-rack { padding: 8px; }
   .sim-gpu-board { gap: 5px; }
   .sim-gpu-fan { width: 24px; height: 24px; }
+  .cluster-impact-main { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .cluster-impact .stat { padding: 12px 14px; }
+  .cluster-impact .stat-value { font-size: 22px; }
+  .cluster-situation { font-size: 14px; }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .sim-view *, .sim-view *::before, .sim-view *::after { animation: none !important; transition-duration: 160ms !important; }
+  .sim-move-arc { stroke-dashoffset: 0; opacity: .8; }
+  .sim-move-dot { opacity: .8; }
+}
+
+/* Job placement on the cabinet modules: a 2px job-colour stripe says which job holds a GPU. During a move the
+   destination modules fill with the job colour (--fill = restart progress from the ledger's start/due times, else a
+   pulse), freed source modules go dim and dashed, and a failed job's old modules carry the danger tint. */
+.sim-rack-module.job-a { --mod-job: var(--sim-job-a); } .sim-rack-module.job-b { --mod-job: var(--sim-job-b); } .sim-rack-module.job-c { --mod-job: var(--sim-job-c); }
+.sim-rack-module.has-job::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--mod-job, var(--sim-job-a)); opacity: .9; }
+.sim-rack-module.is-move-dest { border-color: var(--mod-job); background: linear-gradient(90deg, color-mix(in srgb, var(--mod-job) 48%, #2c3a42) var(--fill, 0%), #2c3a42 var(--fill, 0%)); transition: background var(--sim-slow) var(--sim-ease); }
+.sim-rack-module.is-move-dest.is-arriving, .sim-rack-module.is-move-dest.is-restarting { animation: sim-dest-pulse 1.2s ease-in-out infinite; }
+.sim-rack-module.is-move-dest.is-landed { animation: sim-dest-land var(--sim-drama) var(--sim-ease) 1; background: color-mix(in srgb, var(--mod-job) 44%, #2c3a42); }
+.sim-rack-module.is-move-source { border-style: dashed; border-color: color-mix(in srgb, var(--mod-job) 65%, transparent); background: #1b262d; opacity: .6; }
+.sim-rack-module.is-move-source i { background: #6b7a81; box-shadow: none; }
+.sim-rack-module.is-move-source::before { opacity: .35; }
+.sim-rack-module.is-failed-source { border-color: #7a4a4f; background: #2a1f22; }
+.sim-rack-flag.is-failed { color: var(--sim-danger); }
+@keyframes sim-dest-pulse { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mod-job) 55%, transparent); } }
+@keyframes sim-dest-land { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mod-job) 80%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+
+/* Persistent move arc while a job is in flight: dashed job-colour path, a particle travelling along it, and the
+   floating label "job-a → R1+R5 · from checkpoint ckpt-…". Settles to a solid faint arc once the job is running. */
+.sim-move-live { --live-job: var(--sim-job-a); }
+.sim-move-live.job-b { --live-job: var(--sim-job-b); } .sim-move-live.job-c { --live-job: var(--sim-job-c); }
+.sim-move-live-arc { fill: none; stroke: var(--live-job); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 7; opacity: .85; animation: sim-live-dash 1.1s linear infinite; }
+.sim-move-live.phase-running .sim-move-live-arc { stroke-dasharray: none; opacity: .45; animation: none; }
+.sim-move-live-dot { fill: var(--live-job); filter: drop-shadow(0 0 4px var(--live-job)); }
+.sim-move-live-plate { fill: #0f1a21; stroke: var(--live-job); stroke-width: 1; opacity: .95; }
+.sim-move-live-label { fill: #eef5f8; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@keyframes sim-live-dash { to { stroke-dashoffset: -26; } }
+@media (prefers-reduced-motion: reduce) { .sim-move-live-arc, .sim-rack-module.is-move-dest { animation: none !important; } }
+
+/* sensor_stale: the GPU keeps running but its readings stopped updating (derived from last_seen lag vs its peers) */
+.sim-gpu.is-stale { border-style: dashed; border-color: #a4905c; }
+.sim-gpu.is-stale .sim-gpu-board { opacity: .55; filter: grayscale(.5); }
+.sim-gpu-stale { display: block; font-style: normal; font-size: 10px; font-weight: 600; color: #e2c98a; }
+.sim-rack-module.is-stale { opacity: .55; outline: 1px dashed #a4905c; outline-offset: -1px; }
+.sim-rack-loop-note.is-node-down { color: #ffbcb3; }

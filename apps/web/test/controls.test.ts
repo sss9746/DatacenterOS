@@ -3,35 +3,36 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createMockClient } from '@dcos/db-client';
 import { DashboardStore } from '../src/data/dashboard';
-import { PresenterControls } from '../src/components/controls/Controls';
-import { validatePayload, type ActionStatus } from '@dcos/contracts';
-import type { ActionDetail } from '@dcos/db-client';
+import { DemoControls, PresenterControls } from '../src/components/controls/Controls';
+import { commandGpuIds, defaultXidTarget } from '../src/components/controls/xid-target';
+import { validatePayload, type ActionStatus, type ObservedSnapshot } from '@dcos/contracts';
+import type { ActionDetail, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import { STEP_MS } from '@dcos/physics';
 import { createLocalPhysicsClient } from '../src/data/local-physics';
-import { buildFaultInjection, effectivePumpCapacity, FaultFormError, scheduleState } from '../src/components/controls/fault-form';
+import { buildFaultInjection, DEFAULT_XID_GPU_ID, effectivePumpCapacity, FaultFormError, scheduleState } from '../src/components/controls/fault-form';
 import { buildR6Probe, probeConflict, probeIds, probeVerdict, thermalEvidence, violationsOf } from '../src/components/controls/safety-probe';
 
 const base = { runId: 'run-demo-1', simTimeMs: 600_000, faultId: 'judge-test' };
 
 describe('buildFaultInjection', () => {
   it('encodes pump capacity loss as severity and starts on the next tick for delay 0', () => {
-    const fault = buildFaultInjection({ ...base, kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.6, delayS: 0 });
+    const fault = buildFaultInjection({ ...base, fault: 'pump_degradation', targetId: 'pump-a', severity: 0.6, delayS: 0 });
     expect(fault).toMatchObject({ kind: 'cooling_pump_degradation', target_resource_id: 'pump-a', severity: 0.6, start_sim_time_ms: 600_000 + STEP_MS, duration_sim_ms: null, parameters: { capacity_factor: 0.4 } });
     expect(validatePayload('FaultInjection', fault).ok).toBe(true);
   });
 
   it('uses the selected positive delay and a fixed severity of 1 for Xid 79', () => {
-    const fault = buildFaultInjection({ ...base, kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 30 });
+    const fault = buildFaultInjection({ ...base, fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 30 });
     expect(fault).toMatchObject({ kind: 'gpu_xid_79', severity: 1, start_sim_time_ms: 630_000, duration_sim_ms: null, parameters: {} });
     expect(validatePayload('FaultInjection', fault).ok).toBe(true);
   });
 
   it('rejects the real GPU, unknown pumps and off-preset values', () => {
-    expect(() => buildFaultInjection({ ...base, kind: 'gpu_xid_79', targetId: 'gpu-real-0', delayS: 0 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'cooling_pump_degradation', targetId: 'pump-c', capacityLoss: 0.6, delayS: 0 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.5 as 0.6, delayS: 0 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 5 as 10 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'gpu_xid_48' as 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'gpu_xid_79', targetId: 'gpu-real-0', delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'pump_degradation', targetId: 'pump-c', severity: 0.6, delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'pump_degradation', targetId: 'pump-a', severity: 0.5, delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 5 as 10 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'gpu_xid_48', targetId: 'gpu-r3-n1-0', delayS: 0, durationS: 30 })).toThrow(FaultFormError);
   });
 
   it('multiplies combined pump losses and reports pending until the start time', () => {
@@ -47,7 +48,7 @@ describe('buildFaultInjection', () => {
     try {
       for (const id of ['a', 'b']) {
         const snapshot = await client.getObservedSnapshot();
-        await client.injectFault(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: `judge-${id}`, kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.6, delayS: 0 }));
+        await client.injectFault(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: `judge-${id}`, fault: 'pump_degradation', targetId: 'pump-a', severity: 0.6, delayS: 0 }));
         client.tick();
       }
       const after = await client.getObservedSnapshot();
@@ -104,7 +105,7 @@ describe('presenter r6 safety probe', () => {
     const client = createLocalPhysicsClient();
     try {
       const start = await client.getObservedSnapshot();
-      await client.injectFault(buildFaultInjection({ runId: start.run_id, simTimeMs: start.clock.sim_time_ms, faultId: 'judge-b', kind: 'cooling_pump_degradation', targetId: 'pump-b', capacityLoss: 0.8, delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: start.run_id, simTimeMs: start.clock.sim_time_ms, faultId: 'judge-b', fault: 'pump_degradation', targetId: 'pump-b', severity: 0.8, delayS: 0 }));
       client.advance(120);
       const snapshot = await client.getObservedSnapshot();
       const build = buildR6Probe(snapshot, probeIds('u3'));
@@ -155,5 +156,72 @@ describe('presenter controls markup', () => {
       const preview = await render(fixture, true);
       expect(preview).toContain('Mock fixture preview'); expect(preview).not.toContain('Advance 30 sim-s');
     } finally { readOnly.close(); fixture.close(); }
+  });
+});
+
+describe('default XID 79 target (demo controls step 3)', () => {
+  const gpu = (id: string, ready = true) => ({ resource_id: id, availability: ready ? 'ready' : 'unavailable', last_xid_code: ready ? null : 79 });
+  const snapshot = { run_id: 'run-demo-1', gpus: ['gpu-r3-n1-0', 'gpu-r5-n1-0', 'gpu-r5-n1-1', 'gpu-r7-n1-0'].map((id) => gpu(id)) } as unknown as ObservedSnapshot;
+  const workflow = (id: string, planId: string | null, stage: WorkflowRecord['stage'], updated: number): WorkflowRecord => ({ workflow_id: id, run_id: 'run-demo-1', stage, state: {}, incident_ids: [], plan_id: planId, current_command_key: null, last_processed_event_seq: 0, attempt: 1, lease_owner: 'w', lease_expires_unix_ms: 0, fencing_token: 1n, updated_at_unix_ms: updated, version: 1 });
+  const plan = (id: string, keys: string[]) => ({ plan_id: id, command_keys: keys } as unknown as PlanRecord);
+  const detail = (key: string, workflowId: string, planId: string, args: Record<string, unknown>, target = 'job-b') => ({ command: { command_key: key, workflow_id: workflowId, plan_id: planId, target_resource_id: target, arguments: args } } as unknown as ActionDetail);
+  const noPlan = { plans: [], workflows: [], actionDetails: [], snapshot };
+
+  it('prefers a destination GPU of the newest open workflow plan', () => {
+    const input = {
+      snapshot, selectedGpuId: 'gpu-r3-n1-0',
+      workflows: [workflow('wf-old', 'plan-old', 'execute', 10), workflow('wf-new', 'plan-new', 'execute', 20), workflow('wf-done', 'plan-done', 'done', 30)],
+      plans: [plan('plan-old', ['k-old']), plan('plan-new', ['k-new']), plan('plan-done', ['k-done'])],
+      actionDetails: [detail('k-old', 'wf-old', 'plan-old', { destination_gpu_ids: ['gpu-r3-n1-0'] }), detail('k-new', 'wf-new', 'plan-new', { destination_gpu_ids: ['gpu-r5-n1-0', 'gpu-r5-n1-1'] }), detail('k-done', 'wf-done', 'plan-done', { destination_gpu_ids: ['gpu-r7-n1-0'] })],
+    };
+    expect(defaultXidTarget(input)).toEqual({ gpuId: 'gpu-r5-n1-0', source: 'plan', planId: 'plan-new' });
+  });
+
+  it('skips failed, real and unknown GPUs and falls back to a gpu- target or the next command', () => {
+    const failed = { ...snapshot, gpus: [gpu('gpu-r5-n1-0', false), gpu('gpu-r5-n1-1'), gpu('gpu-r7-n1-0')] } as unknown as ObservedSnapshot;
+    const input = { snapshot: failed, selectedGpuId: 'gpu-r7-n1-0', workflows: [workflow('wf', 'plan', 'execute', 1)], plans: [plan('plan', ['k1', 'k2'])],
+      actionDetails: [detail('k1', 'wf', 'plan', { destination_gpu_ids: ['gpu-real-0', 'gpu-r5-n1-0', 'gpu-r9-n9-9'] }), detail('k2', 'wf', 'plan', {}, 'gpu-r5-n1-1')] };
+    expect(defaultXidTarget(input)).toMatchObject({ gpuId: 'gpu-r5-n1-1', source: 'plan' });
+    expect(commandGpuIds(detail('x', 'wf', 'plan', { destination_gpu_ids: ['gpu-a'] }, 'gpu-b').command)).toEqual(['gpu-a', 'gpu-b']);
+  });
+
+  it('uses the selected GPU when no plan names one, else the documented default', () => {
+    expect(defaultXidTarget({ ...noPlan, selectedGpuId: 'gpu-r3-n1-0' })).toEqual({ gpuId: 'gpu-r3-n1-0', source: 'selected', planId: null });
+    expect(defaultXidTarget({ ...noPlan, selectedGpuId: 'gpu-r7-n1-0' })).toEqual({ gpuId: DEFAULT_XID_GPU_ID, source: 'default', planId: null });
+    expect(defaultXidTarget({ ...noPlan, selectedGpuId: 'gpu-real-0' })).toMatchObject({ gpuId: 'gpu-r7-n1-0', source: 'default' });
+    expect(defaultXidTarget({ ...noPlan, selectedGpuId: 'gpu-missing' })).toMatchObject({ source: 'default' });
+    // an open workflow on another run never drives this run's target
+    expect(defaultXidTarget({ ...noPlan, selectedGpuId: 'gpu-r3-n1-0', workflows: [{ ...workflow('wf', 'p', 'execute', 1), run_id: 'other' }], plans: [plan('p', ['k'])], actionDetails: [detail('k', 'wf', 'p', { destination_gpu_ids: ['gpu-r5-n1-0'] })] })).toMatchObject({ source: 'selected' });
+  });
+});
+
+describe('demo controls markup', () => {
+  const render = async (store: DashboardStore, canAdmin: boolean) => {
+    await store.refresh();
+    const snapshot = store.state.snapshot!;
+    return renderToStaticMarkup(createElement(DemoControls, { store, canAdmin, open: true, selectedGpuId: 'gpu-r3-n1-0', selectedPumpId: 'pump-a', onSelectGpu: () => {}, onSelectPump: () => {}, onReset: () => {}, plans: [], actionDetails: [], workflows: [], snapshot }));
+  };
+
+  it('renders #presenter open with the four numbered steps, Advance and the Advanced form in the local preview', async () => {
+    const store = new DashboardStore(createLocalPhysicsClient());
+    try {
+      const html = await render(store, true);
+      expect(html).toMatch(/<details id="presenter" class="demo-controls demo-controls-local" open=""/);
+      for (const name of ['Break cooling pump A', 'Try unsafe move to hot rack 6', 'Fail a GPU (XID 79)', 'Reset run']) expect(html).toContain(name);
+      expect(html).toContain('Target: <code>gpu-r3-n1-0</code>'); expect(html).toContain('selected in the cluster');
+      expect(html).toContain('Advance 30 sim-s'); expect(html).toContain('Fault library'); expect(html).toContain('Checkpoint storage unavailable'); expect(html).toContain('Manual safety probe');
+      expect(html).toContain('the browser never gets process control');
+      expect((html.match(/>Reset run</g) ?? []).length).toBe(1);
+    } finally { store.close(); }
+  });
+
+  it('disables the steps with the read-only reason without the presenter token', async () => {
+    const store = new DashboardStore(createMockClient());
+    try {
+      const html = await render(store, false);
+      expect(html).toContain('Read-only without the presenter token');
+      expect((html.match(/class="demo-step-button[^"]*" disabled=""/g) ?? []).length).toBe(4);
+      expect(html).not.toContain('Manual safety probe');
+    } finally { store.close(); }
   });
 });

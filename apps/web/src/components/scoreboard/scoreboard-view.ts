@@ -332,6 +332,23 @@ export function buildScoreboard(results: readonly EvaluationResult[]) {
 }
 export type ScoreboardView = ReturnType<typeof buildScoreboard>;
 
+/**
+ * One plain-English line of model-use provenance, summed from the rows' own provenance counters. Nothing is inferred
+ * from `policy`: a batch whose nemotron rows never called the model says so, and never gains a "Nemotron" name here.
+ */
+export function provenanceLine(view: Pick<ScoreboardView, 'legacyOnly' | 'header' | 'columns'>): string {
+  if (view.legacyOnly) return 'Provenance unavailable on these rows (legacy results); model use cannot be checked.';
+  const c = view.header.counts;
+  const nemotron = view.columns.find((column) => column.policy === 'nemotron');
+  const deterministic = nemotron !== undefined && nemotron.total > 0 && nemotron.counts.deterministic === nemotron.total;
+  if (deterministic) return 'Deterministic planner · no model calls · cannot substantiate a Nemotron performance claim';
+  if (c.live_model_responses > 0 || c.cache_hits > 0 || c.fallback_decisions > 0) {
+    const parts = [`${c.live_model_responses} live Nemotron ${c.live_model_responses === 1 ? 'call' : 'calls'}`, `${c.cache_hits} cached`, `${c.fallback_decisions} ${c.fallback_decisions === 1 ? 'fallback' : 'fallbacks'}`];
+    return `${parts.join(' + ')} across ${c.model_requests} model ${c.model_requests === 1 ? 'request' : 'requests'}`;
+  }
+  return 'No model calls recorded in this batch · cannot substantiate a Nemotron performance claim';
+}
+
 /** JSON export: raw rows (provenance included), derived labels, refusal reasons and the aggregate report. */
 export function exportPayload(view: ScoreboardView, mode: 'mock' | 'live', results: readonly EvaluationResult[]) {
   return {

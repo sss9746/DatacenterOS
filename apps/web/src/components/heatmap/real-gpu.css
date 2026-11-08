@@ -1,0 +1,49 @@
+/* The one REAL tile (gpu-real-0), top-right of the Cluster overview above the safety tile. NVIDIA green (--real) marks
+   live hardware readings only; a replayed recording or an offline collector never gets it. The tile's own rules live in
+   styles.css (.real-gpu); this file only places it and adds the "How to read this tile" disclosure. */
+.cluster-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); gap: 12px; align-items: stretch; margin: 0 0 20px; }
+.cluster-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cluster-side > .cluster-impact { flex: 1 0 auto; }
+.cluster-side > .cluster-impact .stat { height: 100%; }
+
+.real-gpu-wrap { display: flex; flex-direction: column; min-width: 0; }
+.real-gpu-wrap > .real-gpu { margin: 0; min-width: 0; padding: 14px 16px 12px; border-radius: 12px 12px 0 0; }
+.real-gpu-wrap > .real-gpu h2 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.real-gpu-wrap > .real-gpu .real-gpu-pulse { margin-top: 10px; }
+.real-gpu-wrap > .real-gpu .real-gpu-metrics { gap: 10px 14px; margin: 12px 0 8px; }
+.real-gpu-wrap > .real-gpu .real-gpu-metrics dd strong { font-size: 18px; }
+.real-gpu-wrap > .real-gpu small { margin-top: 8px; }
+.real-gpu-wrap > .real-gpu.is-live .real-gpu-pulse { color: var(--foreground); font-weight: 550; }
+.real-gpu-wrap > .real-gpu.is-stale .real-gpu-pulse { color: var(--warning); font-weight: 550; }
+.real-gpu-wrap > .real-gpu .offline-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #5b6d80; }
+.real-gpu-wrap > .real-gpu .pulse-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--real); box-shadow: 0 0 0 0 rgba(118, 185, 0, .45); }
+.real-gpu-wrap > .real-gpu.is-stale .pulse-dot { background: #5b6d80; box-shadow: none; }
+.real-gpu-wrap > .real-gpu.is-live .real-gpu-metrics dd strong { color: #d4f0a6; }
+@media (prefers-reduced-motion: no-preference) {
+  .real-gpu-wrap > .real-gpu.is-live .pulse-dot { animation: real-gpu-pulse 1.8s cubic-bezier(.2, .7, .2, 1) infinite; }
+  @keyframes real-gpu-pulse { 0% { box-shadow: 0 0 0 0 rgba(118, 185, 0, .45); } 100% { box-shadow: 0 0 0 8px rgba(118, 185, 0, 0); } }
+}
+
+/* Disclosure attached under the tile; it inherits the tile's dashed (offline) or solid (live) edge. */
+.real-gpu-how { margin-top: -1px; border: 1px dashed #485665; border-top: 0; border-radius: 0 0 12px 12px; background: var(--surface); }
+.real-gpu-wrap > .real-gpu.is-live + .real-gpu-how { border-style: solid; border-color: #3f5a1c; }
+.real-gpu-how > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 550; color: var(--muted); }
+.real-gpu-how > summary:hover { color: var(--foreground); }
+.real-gpu-how[open] > summary { border-bottom: 1px solid var(--line); color: var(--foreground); }
+.real-gpu-how > p { padding: 10px 16px 0; font-size: 12px; line-height: 1.6; color: #ccd6df; }
+.real-gpu-how code { font-size: 11px; color: #d6e0e9; }
+.real-gpu-legend { list-style: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 14px; margin: 0; }
+.real-gpu-legend li { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: baseline; gap: 10px; font-size: 11px; line-height: 1.5; color: var(--muted); min-width: 0; }
+.real-gpu-legend li strong { color: var(--foreground); font-weight: 600; }
+.real-gpu-legend .badge { justify-self: start; }
+.real-gpu-legend .real-gpu-offline-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 550; color: #c1cbd5; white-space: nowrap; }
+.real-gpu-legend .real-gpu-offline-dot::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #5b6d80; }
+
+/* Narrow: the impact summary (four tiles, then the safety tile) comes first; the real GPU tile stacks after it. */
+@media (max-width: 1000px) {
+  .cluster-top { grid-template-columns: minmax(0, 1fr); }
+  .cluster-side { display: contents; }
+  .cluster-impact-main { order: 0; }
+  .cluster-impact-side { order: 1; }
+  .real-gpu-wrap { order: 2; }
+}
