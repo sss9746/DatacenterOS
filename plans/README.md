@@ -2,11 +2,13 @@
 
 Four software lanes plus one shared hardware lane. **Each lane owns its own folders, so merges don't collide.**
 
+**Integrator / orchestrator:** Suvan's Claude session. It owns `plans/`, `packages/contracts/`, root config and `scripts/`, does **all merges to `main`**, runs the gate checks and writes no lane code. Suvan himself builds **P3**.
+
 | Lane | Person | Plan file | Owns | Branch |
 |---|---|---|---|---|
-| **P1: Simulation + safety + baselines + contracts, integrator** | Suvan | [`LANE-P1-sim.md`](LANE-P1-sim.md) | `packages/physics/`, `packages/contracts/`, `plans/`, root config, `scripts/`, **all merges to `main`** | `lane/p1-sim` |
+| **P1: Simulation + safety + baselines** | ___ | [`LANE-P1-sim.md`](LANE-P1-sim.md) | `packages/physics/` | `lane/p1-sim` |
 | **P2: SpacetimeDB + durability** | ___ | [`LANE-P2-db.md`](LANE-P2-db.md) | `apps/db/`, `packages/db-client/`, tokens, publishing | `lane/p2-db` |
-| **P3: Nemotron + orchestration** | ___ | [`LANE-P3-agent.md`](LANE-P3-agent.md) | `apps/agent/` | `lane/p3-agent` |
+| **P3: Nemotron + orchestration** | **Suvan** | [`LANE-P3-agent.md`](LANE-P3-agent.md) | `apps/agent/` | `lane/p3-agent` |
 | **P4: Frontend + evaluation + pitch** | ___ | [`LANE-P4-web.md`](LANE-P4-web.md) | `apps/web/`, `apps/evaluation/`, `docs/` | `lane/p4-web` |
 | **HW: Pico fan + real GPU (shared, optional)** | everyone | [`LANE-HW-shared.md`](LANE-HW-shared.md) | `hardware/` | `lane/hw` |
 
@@ -41,7 +43,7 @@ Then fill in `plans/status/<P1|P2|P3|P4|HW>.md` and push your branch.
 
 ## Rules (humans and Claude agents)
 1. **Only edit paths your lane owns** (CONTRACTS §0.1). Need something from another lane? Open a GitHub issue titled `REQUEST <lane>: …` and say so in team chat.
-2. **Contracts:** only P1 edits `plans/CONTRACTS.md` and `packages/contracts/`. To request a change, open an issue titled `CONTRACT <lane>: …`. After Gate 0, changes are **additive only**.
+2. **Contracts:** only the orchestrator edits `plans/CONTRACTS.md` and `packages/contracts/`. To request a change, open an issue titled `CONTRACT <lane>: …`. After Gate 0, changes are **additive only**.
    - Wire types come from `@dcos/contracts`.
    - DB types come from `@dcos/db-client`.
    - **Never hand-write a duplicate type.**
@@ -49,14 +51,14 @@ Then fill in `plans/status/<P1|P2|P3|P4|HW>.md` and push your branch.
    - P1 ships `packages/physics/fixtures/gpu/*.json` by **8:45 PM**.
    - P2 ships a mock db-client (same API, backed by those fixtures) by **9:00 PM**.
 4. **Small commits:** `feat(p2): …`, `fix(p3): …`. Never commit secrets, `node_modules`, `.env.local`, or recordings over 5 MB.
-5. **Only P1 merges to `main`,** at the sync points: **9:00 PM · 11:30 PM · 1:30 AM · 4:30 AM · 7:30 AM · 9:45 AM.**
+5. **Only the orchestrator merges to `main`,** at the sync points: **9:00 PM · 11:30 PM · 1:30 AM · 4:30 AM · 7:30 AM · 9:45 AM.**
    - Before each sync: `git fetch && git rebase origin/main`, run your lane's checks, and open a PR into `main`.
-   - P1 merges in this order: P1 → P2 → P3 → P4 → HW.
-   - After each merge, P1 smoke-tests the gate.
+   - Merge order: P1 → P2 → P3 → P4 → HW.
+   - After each merge, the orchestrator smoke-tests the gate.
 6. **Update `plans/status/<lane>.md` at every sync:** done / doing / blocked / needs.
 7. **Feature freeze is 10:00 AM Sunday.** After that, only `fix(demo):` commits approved by P1.
 
-## Gate checklists (P1 runs these after each merge)
+## Gate checklists (the orchestrator runs these after each merge)
 **Gate 0, 9:00 PM: skeleton**
 - [ ] `pnpm -r test` and `pnpm contracts:validate` pass
 - [ ] `apps/db` publishes to `dcos-dev`, imports `@dcos/physics` (or the `sync:physics` fallback is decided), and generates bindings into `packages/db-client`

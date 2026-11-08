@@ -1,17 +1,17 @@
-# Lane ownership (plans/CONTRACTS.md §0.1). Replace <P2_GH> <P3_GH> <P4_GH> with GitHub handles.
+# Lane ownership (plans/CONTRACTS.md §0.1). Replace <P1_GH> <P2_GH> <P4_GH> with GitHub handles.
 *                         @Suvan8806
-/packages/physics/        @Suvan8806
+/packages/physics/        @<P1_GH>
 /packages/contracts/      @Suvan8806
 /plans/                   @Suvan8806
 /scripts/                 @Suvan8806
 /apps/db/                 @<P2_GH>
 /packages/db-client/      @<P2_GH>
-/apps/agent/              @<P3_GH>
+/apps/agent/              @Suvan8806
 /apps/web/                @<P4_GH>
 /apps/evaluation/         @<P4_GH>
 /docs/                    @<P4_GH>
-/hardware/                @Suvan8806 @<P2_GH> @<P3_GH> @<P4_GH>
+/hardware/                @Suvan8806 @<P1_GH> @<P2_GH> @<P4_GH>
 /plans/status/P2.md       @<P2_GH>
 /plans/status/P3.md       @<P3_GH>
 /plans/status/P4.md       @<P4_GH>
-/plans/status/HW.md       @Suvan8806 @<P2_GH> @<P3_GH> @<P4_GH>
+/plans/status/HW.md       @Suvan8806 @<P1_GH> @<P2_GH> @<P4_GH>

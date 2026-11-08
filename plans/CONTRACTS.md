@@ -2,7 +2,7 @@
 
 > **Read §0 first.** It adapts the design kit (sections A–E below, written by Kaushik) to this repo: paths, IDs, the Pico hardware, and the names of the functions each lane calls.
 > **If §0 and A–E disagree, §0 wins.**
-> **Only P1 (Suvan) edits this file.** To request a change, open a GitHub issue titled `CONTRACT <lane>: …`. After Gate 0 (9:00 PM), changes are additive only.
+> **Only the orchestrator (Suvan's Claude session) edits this file.** To request a change, open a GitHub issue titled `CONTRACT <lane>: …`. After Gate 0 (9:00 PM), changes are additive only.
 
 ## 0. Repo adaptation (v1.1.0)
 

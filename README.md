@@ -13,13 +13,13 @@ HackUTD 2026 "Zero Day", targeting the NMC², NVIDIA and SpacetimeDB tracks.
 ## Repo layout & owners
 | Path | Lane | What lives there |
 |---|---|---|
-| `packages/contracts/` | P1 (Suvan) | `@dcos/contracts`: JSON Schema v1.1.0, examples, validator, generated TS types |
-| `packages/physics/` | P1 (Suvan) | `@dcos/physics`: pure simulation, `simulatePlan`, `evaluateSafety`, baseline policies, scenarios (v0 facility API kept under `/v0`) |
+| `packages/contracts/` | Orchestrator | `@dcos/contracts`: JSON Schema v1.1.0, examples, validator, generated TS types |
+| `packages/physics/` | P1 | `@dcos/physics`: pure simulation, `simulatePlan`, `evaluateSafety`, baseline policies, scenarios (v0 facility API kept under `/v0`) |
 | `apps/db/`, `packages/db-client/` | P2 | SpacetimeDB TypeScript module + generated bindings / typed client / mock |
-| `apps/agent/` | P3 | Node.js orchestrator on NVIDIA NIM (Nemotron), `nemotronPolicy` |
+| `apps/agent/` | P3 (Suvan) | Node.js orchestrator on NVIDIA NIM (Nemotron), `nemotronPolicy` |
 | `apps/web/`, `apps/evaluation/`, `docs/` | P4 | Dashboard, evaluation harness, pitch, Devpost |
 | `hardware/` | everyone | Pico 2 W fan + gateway; real-GPU `nvidia-smi` collector |
-| `plans/` | P1 | Plans, architecture, contracts, status |
+| `plans/` | Orchestrator | Plans, architecture, contracts, status |
 
 Only the owning lane edits a path. Need a change elsewhere? Open an issue titled `REQUEST <lane>: …`.
 

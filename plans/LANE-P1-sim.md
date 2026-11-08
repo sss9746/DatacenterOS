@@ -1,6 +1,6 @@
-# Lane P1: simulation + safety + baselines + contracts (Suvan, integrator)
+# Lane P1: simulation + safety + baselines (owner: ___)
 
-**Owns:** `packages/physics/`, `packages/contracts/`, `plans/`, root config (`package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.env.example`, `CODEOWNERS`), `scripts/`.
+**Owns:** `packages/physics/`. The orchestrator (Suvan's Claude session) owns `packages/contracts/`, `plans/`, root config and `scripts/`, and does the merges. A contract change is a request to the orchestrator.
 **Branch:** `lane/p1-sim`.
 **Must not:** write DB reducers, agent code or UI.
 **Reads:** ARCHITECTURE §2, §5; CONTRACTS §0.3–§0.7.
@@ -12,7 +12,7 @@
 ## Deliverables in order (‖ = can run in parallel worktrees)
 | ID | By | Task | Owns | Done when |
 |---|---|---|---|---|
-| **P1-0** | 8:15 PM | Commit and push the v3 plans + contracts package. Open PR `lane/p1-sim → main`, merge it, and tell the team to pull | plans, contracts | `main` has PLAN.md v3 and `packages/contracts`; `pnpm -r test` green on a fresh clone |
+| **P1-0** | ✅ done | Plan v3 + `@dcos/contracts` on `main` (orchestrator) | — | — |
 | **P1-1** ‖ | 8:45 PM | **GPU fixtures for everyone:** `packages/physics/fixtures/gpu/` containing `observed_snapshot_demo.json` (ObservedSnapshot for `gpu_demo_8` at t=0), `observed_snapshot_pump_degraded.json` (t=120 s after pump-a degradation), `tick_result_example.json`, `signal_xid79.json`. All validate with `validatePayload`. Hand-built or script-built; must match the §0.3 IDs | `fixtures/gpu/**`, `scripts/make-gpu-fixtures.ts` | A test validates every fixture; P2, P3 and P4 are pinged |
 | **P1-2** ‖ | 9:30 PM | Move the v0 exports to `@dcos/physics/v0` (package `exports` map). The new root exports §0.6 names. The 95 v0 tests keep passing | `src/index.ts`, `src/v0/index.ts`, `package.json` | `pnpm -r test` green; `import { step } from '@dcos/physics'` is the new GPU `step` |
 | **P1-3** | 10:00 PM | **`buildPreset('gpu_demo_8')` + world model:** resources, dependency edges (§0.3), per-loop cooling (pump-a → loop-a → r2–r4), 64 GPUs, 3 jobs with specs and starting checkpoints, `toObserved()` | `src/gpu/preset.ts`, `src/gpu/world.ts`, `src/gpu/observe.ts` | Snapshot validates; 64 GPUs; job placements as in §0.3; `toObserved` has no private fields |
@@ -22,7 +22,6 @@
 | **P1-7** ‖ | 1:15 AM | **`simulatePlan()`:** clone an *estimated* world from the ObservedSnapshot (no private faults; current observed degradation persists), apply the commands, step over a 600 s horizon, return PlanMetrics, plus a "do nothing" reference | `src/gpu/simulate.ts` | Deterministic; in the pump-degraded fixture, job-a's checkpoint + move beats keep-running, and for job-b keep/cap beats move |
 | **P1-8** ‖ | 2:00 AM | **Baseline policies:** `reactivePolicy` (only on XID 48/79: cordon + restart from checkpoint on free GPUs) and `thresholdPolicy` (GPU over 83 °C → checkpoint + move the job if safe). Pure functions | `src/gpu/policies.ts` | Tests on fixtures; neither reads private fields |
 | **P1-9** | 3:30 AM | **Scenarios:** at least 10 (20 stretch) seeded `fixtures/scenarios/*.json` from ARCHITECTURE §9 (warning-only, severe pump, failed GPU, pump + GPU mid-checkpoint, no spare capacity, non-preemptible, hot destination, storage inaccessible, stale telemetry, two independent incidents, near-complete job, harmful preventive move…), plus `loadScenarios()` and an offline `runScenario(scenario, policy)` → `EvaluationResult` | `fixtures/scenarios/**`, `src/gpu/scenarios.ts`, `src/gpu/run.ts` | `runScenario` with reactive and threshold returns valid EvaluationResults; hand them to P4 |
-| **P1-10** | every sync | **Integrator:** merge P2→P3→P4→HW, run the gate checklist, tag `tier1` at Gate 3, update status | — | Gate boxes ticked in plans/README.md |
 
 ## Claude sub-agent prompts (each in its own worktree)
 - **P1-1:** "Build `packages/physics/fixtures/gpu/` per plans/LANE-P1-sim.md P1-1 and CONTRACTS §0.3–§0.5. Use `@dcos/contracts` types and `validatePayload` in a vitest test. Own only `fixtures/gpu/**`, `scripts/make-gpu-fixtures.ts` and `test/gpu-fixtures.test.ts`."

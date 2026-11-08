@@ -44,11 +44,13 @@ Optional (Gate 5): a judge pinches the real fan (Pico) to trigger step 2, and th
 Then: **9:30 AM** backup video recorded · **10:00 AM** feature freeze · **11:30 AM** submitted (deadline 12:00) · **1–4 PM** judging. Devpost is registered by **10:45 PM** Saturday (P4).
 
 ## Team
+**Integrator:** Suvan's Claude orchestrator session. It owns `plans/`, the contracts and root config, merges to `main` at every sync and runs the gate checks. It writes no lane code.
+
 | Lane | Person | Plan |
 |---|---|---|
-| P1: simulation, safety, baselines, contracts, **integrator** | Suvan | [`plans/LANE-P1-sim.md`](plans/LANE-P1-sim.md) |
+| P1: simulation, safety, baselines | ___ | [`plans/LANE-P1-sim.md`](plans/LANE-P1-sim.md) |
 | P2: SpacetimeDB + durability | ___ | [`plans/LANE-P2-db.md`](plans/LANE-P2-db.md) |
-| P3: Nemotron + orchestration | ___ | [`plans/LANE-P3-agent.md`](plans/LANE-P3-agent.md) |
+| P3: Nemotron + orchestration | **Suvan** | [`plans/LANE-P3-agent.md`](plans/LANE-P3-agent.md) |
 | P4: frontend + evaluation + pitch | ___ | [`plans/LANE-P4-web.md`](plans/LANE-P4-web.md) |
 | HW: Pico fan + real GPU (shared, optional) | everyone | [`plans/LANE-HW-shared.md`](plans/LANE-HW-shared.md) |
 
