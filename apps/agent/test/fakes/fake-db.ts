@@ -117,6 +117,7 @@ export class FakeDb implements DbPort {
   private readonly physics: PhysicsPort | undefined;
   private readonly defaultOpDurationMs: number;
   private readonly claimLeaseMs: number;
+  private readonly startRejections = new Map<string, string[]>();
   private readonly applyCordon: boolean;
   /** Jobs whose migrate_restart / power_cap / keep_running completed: tick() accrues progress for them while running. */
   private readonly progressingJobs = new Set<string>();
@@ -226,6 +227,11 @@ export class FakeDb implements DbPort {
 
   injectTelemetry(ev: TelemetryEvent): void {
     this.telemetry.push(clone(ev));
+  }
+
+  /** Make start_action's safety recheck reject this key, as the live reducer does for newly found violations. */
+  rejectStart(commandKey: string, violations: string[]): void {
+    this.startRejections.set(commandKey, violations);
   }
 
   /** Force a running/claimed action to fail (e.g. its destination died). */
@@ -496,6 +502,8 @@ export class FakeDb implements DbPort {
         throw new DbError('INVALID_TRANSITION', `${commandKey} depends on ${dep}, which has not succeeded`);
       }
     }
+    const violations = this.startRejections.get(commandKey);
+    if (violations) return this.transition(rec, 'failed', { reason_code: 'SAFETY_REJECTED', result: { ...rec.status.result, violations } });
     rec.dueSimMs = this.simMs + this.durationFor(rec.cmd);
     const running = this.transition(rec, 'running');
     this.applyStart(rec);

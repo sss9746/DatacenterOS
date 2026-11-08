@@ -9,3 +9,5 @@ export * from './types.js';
 export { createMockClient, MOCK_FIXTURES } from './mock.js';
 export type { MockCall, MockClientOptions, MockDbClient, MockSnapshotName } from './mock.js';
 export { connect } from './live.js';
+export { controlledReset } from './reset.js';
+export type { ControlledResetOptions, ControlledResetResult } from './reset.js';

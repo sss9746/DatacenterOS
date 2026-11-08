@@ -9,7 +9,11 @@ import { arg, connectCli, jsonArg, sleep, waitFor } from './stdb.mjs';
 
 const DB = process.argv[2] ?? 'dcos-dev';
 const RUN = 'run-demo-1';
-const { call, sql, check, expectError, done } = connectCli(DB);
+if (DB === 'dcos') {
+  console.error('this smoke test resets the run; a check never resets prod dcos');
+  process.exit(2);
+}
+const { call, sql, check, expectError, done } = connectCli(DB, process.env.STDB_SERVER ?? 'maincloud');
 const action = (key) => sql(`SELECT * FROM action WHERE command_key = '${key}'`)[0];
 const run = () => sql(`SELECT * FROM run WHERE run_id = '${RUN}'`)[0];
 const job = (id) => sql(`SELECT * FROM job_current WHERE job_id = '${id}'`)[0];
@@ -173,5 +177,84 @@ call('configure_run', [arg(RUN), jsonArg({ speed: 1 })]);
 
 const allEvents = sql(`SELECT * FROM action_event WHERE command_key = 'ck-job-a-1'`).map((e) => e.status);
 check('action_event on every transition', allEvents.join('>') === 'requested>claimed>running>succeeded>succeeded', allEvents.join('>'));
+
+// --- R2: start_action fails closed ---------------------------------------------------------------
+// A claim lasts 15 s of wall time, so runs go to speed 5 before waiting on 10+ simulated seconds.
+const gpu = (id) => sql(`SELECT * FROM gpu_current WHERE resource_id = '${id}'`)[0];
+const rackGpus = (r) => Array.from({ length: 8 }, (_, i) => `gpu-r${r}-n1-${i}`);
+const moveDest = [...rackGpus(1), ...rackGpus(5)];
+const leasesOf = (actionId) => sql(`SELECT * FROM resource_lease WHERE action_id = '${actionId}'`);
+const allocOf = (jobId) => sql(`SELECT * FROM job_gpu_allocation WHERE job_id = '${jobId}'`).map((x) => x.gpu_id).sort().join();
+const speed5 = () => call('configure_run', [arg(RUN), jsonArg({ speed: 5 })]);
+async function freshRun() {
+  check('R2: create_run', call('create_run', [arg(RUN), '42', arg('gpu_demo_8')]).ok);
+  await waitFor('first tick', () => Number(run().tick_index) > 0);
+}
+function injectNextTick(faultId, kind, target) {
+  const start = Number(run().sim_time_ms) + 1000;
+  const fault = { schema_version: '1.1.0', fault_id: faultId, run_id: RUN, target_resource_id: target, kind, start_sim_time_ms: start, duration_sim_ms: null, severity: 1, parameters: {}, seed_offset: 0 };
+  check(`R2: inject ${kind} on ${target}`, call('inject_fault', [jsonArg(fault)]).ok);
+  return start;
+}
+const startOf = (key) => call('start_action', [arg(key), String(action(key).lease_token)]);
+const lastTick = () => Number(run().tick_index);
+const twoTicksLater = (t) => waitFor('two more ticks', () => lastTick() >= t + 2);
+
+// Evidence goes stale between the accepted request and the start.
+await freshRun();
+const allocBefore = allocOf('job-a');
+call('request_action', [jsonArg(command({ action_id: 'act-r2-stale', command_key: 'r2-stale', operation: 'migrate_restart', arguments: { destination_gpu_ids: moveDest }, expected_resource_versions: { 'job-a': job('job-a').version } }))]);
+check('R2 stale evidence: request accepted while fresh', action('r2-stale').status === 'requested', action('r2-stale').status);
+const staleFrom = injectNextTick('flt-r2-stale', 'sensor_stale', 'gpu-r1-n1-0');
+check('R2 stale evidence: claimed', call('claim_action', [arg('r2-stale'), '1', arg('worker-1')]).ok);
+speed5();
+await waitFor('evidence older than 10 sim-s', () => Number(run().sim_time_ms) >= staleFrom + 11_000, 12_000);
+const frozen = gpu('gpu-r1-n1-0');
+check('R2 stale evidence: GPU reading is frozen and older than 10 sim-s', Number(run().sim_time_ms) - Number(frozen.last_seen_sim_ms) > 10_000, `last_seen ${frozen.last_seen_sim_ms}`);
+check('R2 stale evidence: start returns without throwing', startOf('r2-stale').ok);
+const staleRow = action('r2-stale');
+const staleResult = JSON.parse(staleRow.result_json);
+check('R2 stale evidence: failed / SAFETY_REJECTED with EVIDENCE_STALE', staleRow.status === 'failed' && staleRow.reason_code === 'SAFETY_REJECTED' && staleResult.violations?.includes('EVIDENCE_STALE'), `${staleRow.status} ${staleRow.reason_code} ${staleResult.violations}`);
+check('R2 stale evidence: start_safety evidence recorded', staleResult.start_safety?.evidence?.stale_evidence_ids?.includes('gpu-r1-n1-0') === true, JSON.stringify(staleResult.start_safety?.evidence?.stale_evidence_ids));
+check('R2 stale evidence: claim released', leasesOf('act-r2-stale').length === 0);
+const tickAtFail = lastTick();
+await twoTicksLater(tickAtFail);
+const destAllocated = sql('SELECT * FROM job_gpu_allocation').filter((x) => moveDest.includes(x.gpu_id));
+check('R2 stale evidence: two ticks later job-a is untouched', job('job-a').status === 'running' && allocOf('job-a') === allocBefore, job('job-a').status);
+check('R2 stale evidence: no destination GPU allocated', destAllocated.length === 0, `${destAllocated.length}`);
+check('R2 stale evidence: still failed with no due time', action('r2-stale').status === 'failed' && action('r2-stale').due_sim_time_ms === null);
+
+// A resource version changes between the accepted request and the start.
+await freshRun();
+const verDest = 'gpu-r1-n1-0';
+const verBefore = gpu(verDest).version;
+call('request_action', [jsonArg(command({ action_id: 'act-r2-ver', command_key: 'r2-ver', operation: 'migrate_restart', arguments: { destination_gpu_ids: moveDest }, expected_resource_versions: { [verDest]: verBefore } }))]);
+injectNextTick('flt-r2-ver', 'gpu_xid_79', verDest);
+check('R2 stale version: claimed', call('claim_action', [arg('r2-ver'), '1', arg('worker-1')]).ok);
+speed5();
+await waitFor('GPU version bump', () => gpu(verDest).version !== verBefore, 12_000);
+check('R2 stale version: start returns without throwing', startOf('r2-ver').ok);
+const verRow = action('r2-ver');
+const verResult = JSON.parse(verRow.result_json);
+check('R2 stale version: failed / SAFETY_REJECTED with STALE_RESOURCE_VERSION', verRow.status === 'failed' && verRow.reason_code === 'SAFETY_REJECTED' && verResult.violations?.join() === 'STALE_RESOURCE_VERSION', `${verRow.status} ${verRow.reason_code} ${verResult.violations}`);
+check('R2 stale version: evidence names the GPU, claim released', verResult.stale_resource_ids?.includes(verDest) && leasesOf('act-r2-ver').length === 0);
+
+// Normal start: the action's own leases (job, GPUs, destination) don't count against it.
+await freshRun();
+call('request_action', [jsonArg(command({ action_id: 'act-r2-ok', command_key: 'r2-ok', operation: 'migrate_restart', arguments: { destination_gpu_ids: moveDest }, expected_resource_versions: { 'job-a': job('job-a').version } }))]);
+check('R2 normal start: claimed', call('claim_action', [arg('r2-ok'), '1', arg('worker-1')]).ok);
+check('R2 normal start: start ok', startOf('r2-ok').ok);
+const okRow = action('r2-ok');
+check('R2 normal start: running, no start_safety, leases kept', okRow.status === 'running' && JSON.parse(okRow.result_json).start_safety === undefined && leasesOf('act-r2-ok').length > 0, `${okRow.status} ${okRow.reason_code ?? ''}`);
+
+// An unrelated action's lease doesn't block a start.
+await freshRun();
+call('request_action', [jsonArg(command({ action_id: 'act-r2-other', command_key: 'r2-other', operation: 'keep_running', target_resource_id: 'job-b', job_id: 'job-b' }))]);
+check('R2 unrelated lease: job-b claimed by another worker', call('claim_action', [arg('r2-other'), '1', arg('worker-2')]).ok);
+call('request_action', [jsonArg(command({ action_id: 'act-r2-mine', command_key: 'r2-mine' }))]);
+check('R2 unrelated lease: job-a checkpoint claimed', call('claim_action', [arg('r2-mine'), '1', arg('worker-1')]).ok);
+check('R2 unrelated lease: start ok', startOf('r2-mine').ok);
+check('R2 unrelated lease: job-a checkpoint running', action('r2-mine').status === 'running', action('r2-mine').status);
+call('cancel_action', [arg('r2-other'), arg('TEST_DONE'), String(action('r2-other').lease_token)]);
 
 done();

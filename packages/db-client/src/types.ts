@@ -7,10 +7,17 @@ import type {
   ActionStatus,
   Incident,
   IncidentLink,
+  PlanCandidate,
   SafetyDecision,
   SignalEvent,
   TelemetryEvent,
 } from '@dcos/contracts';
+
+/**
+ * A stored plan. Find the selected one through `workflow.plan_id`. `status` stays `proposed` in the
+ * current ledger, so it says nothing about whether a plan was adopted or executed.
+ */
+export type PlanRecord = PlanCandidate & { status: string };
 
 /** F-NV1 stages (CONTRACTS §0.8). */
 export type AgentStage = 'triage' | 'diagnose' | 'plan' | 'safety' | 'execute' | 'replan' | 'verify';
