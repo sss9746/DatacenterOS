@@ -1,122 +1,83 @@
-# DataCenterOS team plans: start here (v3)
+# Team implementation guide — fixed-cluster v4
 
-Four software lanes plus one shared hardware lane. **Each lane owns its own folders, so merges don't collide.**
+**Current scope:** [IMPLEMENTATION-SCOPE.md](IMPLEMENTATION-SCOPE.md). **Start from evidence:** [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md). **Next tasks:** [IMPLEMENTATION-TASKS.md](IMPLEMENTATION-TASKS.md). This guide supersedes the original kickoff schedule; existing lane/checkpoint reports remain historical evidence.
 
-**Integrator / orchestrator:** Suvan's Claude session. It owns `plans/`, `packages/contracts/`, root config and `scripts/`, does **all merges to `main`**, runs the gate checks and writes no lane code. Suvan himself builds **P3**.
+## Owners and integration
 
-| Lane | Person | Plan file | Owns | Branch |
-|---|---|---|---|---|
-| **P1: Simulation + safety + baselines** | ___ | [`LANE-P1-sim.md`](LANE-P1-sim.md) | `packages/physics/` | `lane/p1-sim` |
-| **P2: SpacetimeDB + durability** | ___ | [`LANE-P2-db.md`](LANE-P2-db.md) | `apps/db/`, `packages/db-client/`, tokens, publishing | `lane/p2-db` |
-| **P3: Nemotron + orchestration** | **Suvan** | [`LANE-P3-agent.md`](LANE-P3-agent.md) | `apps/agent/` | `lane/p3-agent` |
-| **P4: Frontend + evaluation + pitch** | ___ | [`LANE-P4-web.md`](LANE-P4-web.md) | `apps/web/`, `apps/evaluation/`, `docs/` | `lane/p4-web` |
-| **HW: Pico fan + real GPU (shared, optional)** | everyone | [`LANE-HW-shared.md`](LANE-HW-shared.md) | `hardware/` | `lane/hw` |
+| Lane | Plan | Paths | Branch convention |
+|---|---|---|---|
+| Integrator (Suvan's coordinating session) | Root plan + R0/R7 | `plans/`, `packages/contracts/`, root config, `scripts/` | Integrates to `main` |
+| P1 | [Simulation](LANE-P1-sim.md) | `packages/physics/` | `lane/p1-sim` |
+| P2 (Kaushik) | [DB/durability](LANE-P2-db.md) | `apps/db/`, `packages/db-client/` | `lane/p2-db` |
+| P3 (Suvan) | [Agent](LANE-P3-agent.md) | `apps/agent/` | `lane/p3-agent` |
+| P4 | [Dashboard/evaluation](LANE-P4-web.md) | `apps/web/`, `apps/evaluation/`, `docs/`, `demo/` | Existing `P4` branch; do not recreate it just to match an old name |
+| HW | [Optional observations](LANE-HW-shared.md) | `hardware/` | `lane/hw` |
 
-Write your name in the Person column of [`../PLAN.md`](../PLAN.md) and in your status file.
+Implementation stays in lane-owned paths; cross-lane interfaces go through the integrator. This user-requested planning revision updates all planning documents; it does not alter implementation ownership. Additive contract changes require schema/types/fixtures/consumers together. Never duplicate wire types or force-push main. Only the integrator merges software work to main.
 
-## Read these, in order (about 20 minutes)
-1. [`../PLAN.md`](../PLAN.md): pitch, demo, gates, cut order (2 pages)
-2. [`CONTRACTS.md`](CONTRACTS.md) **§0**: paths, IDs, function names, reason codes, roles, env vars. Then skim the kit sections A–E.
-3. [`ARCHITECTURE.md`](ARCHITECTURE.md): §0 (decisions), §1 (diagram), and the sections for your lane:
-   - P1: §2, §5
-   - P2: §3, §6, §7
-   - P3: §4, §5, §6
-   - P4: §9, §11
-4. **Your lane file.**
+At the audit, `origin/main` 95e1abd already contains P3/P4 code. A P2-only checkout is not the full product. Refresh from current main using the team's usual integration procedure before implementing R tasks; do not rebuild missing-on-this-branch packages.
 
-Background only: [`RESEARCH.md`](RESEARCH.md) (incident stats) and [`NICHE-DECISION.md`](NICHE-DECISION.md) (why GPU reliability). Older plans live only in git history.
+## Reading and working rules
 
-## First 15 minutes (everyone)
-```bash
-git clone https://github.com/sss9746/DatacenterOS && cd DatacenterOS
-git checkout -b lane/<p1-sim|p2-db|p3-agent|p4-web|hw>
-corepack enable && pnpm install          # Node 22+
-pnpm -r test                              # physics 95 + contracts 15 must pass
-pip install jsonschema && pnpm contracts:validate
-cp .env.example .env.local                # never commit .env.local; P2 sends tokens in team chat
-```
-Then fill in `plans/status/<P1|P2|P3|P4|HW>.md` and push your branch.
+1. Read root [PLAN.md](../PLAN.md), status audit, scope, CONTRACTS §0 and your lane's R tasks.
+2. Use the installed SDK/generated bindings; physics exports built `dist` while client/contracts source consumers use TS tooling. Build physics before DB/Node consumers. Use package scripts, not obsolete guessed commands.
+3. Keep pure physics free of filesystem/network/wall-clock dependencies. NIM runs outside reducers. No private fault truth in agent inputs.
+4. Work in small commits and lane-isolated worktrees when parallelizing. User-authorized planning changes do not require a new approval loop.
+5. Record commit, checks, target DB and artifact paths in status. Mark **source present**, **unit checked**, **live reported**, and **live verified now** distinctly.
+6. Do not commit tokens, `.env.local`, model secrets, node_modules or large recordings. Public web builds are read-only; local presenter mode carries admin controls.
+7. Reset-bearing live tests explicitly name a disposable dev/local target. Stop the agent before reset and start fresh sessions afterward. No test defaults to prod.
 
-> ⚠️ **Never force-push to `main`.** Kaushik's original kit (commit `3dd17d0`) now lives in `plans/ARCHITECTURE.md`, `plans/CONTRACTS.md` and `packages/contracts/`; its IMPLEMENTATION_TASKS became the lane files.
+## Gate evidence as of the audit
 
-**Running TypeScript:** `@dcos/contracts` and `@dcos/physics` point at `.ts` source. Run Node apps with **`tsx`** (`pnpm add -D tsx`, then `tsx src/main.ts`). Vite and vitest handle it natively.
+P2 reports Gate 2 on dev/prod/local and real pump recovery; main has integrated agent/web/evaluator code. Live browser proof, actual combined agent restart and the full measured model comparison remain open. The old 697-test result is historical, not a fresh run here.
 
-## Rules (humans and Claude agents)
-1. **Only edit paths your lane owns** (CONTRACTS §0.1). Need something from another lane? Open a GitHub issue titled `REQUEST <lane>: …` and say so in team chat.
-2. **Contracts:** only the orchestrator edits `plans/CONTRACTS.md` and `packages/contracts/`. To request a change, open an issue titled `CONTRACT <lane>: …`. After Gate 0, changes are **additive only**.
-   - Wire types come from `@dcos/contracts`.
-   - DB types come from `@dcos/db-client`.
-   - **Never hand-write a duplicate type.**
-3. **Build against fixtures and mocks first,** so nobody waits on anybody:
-   - P1 ships `packages/physics/fixtures/gpu/*.json` by **8:45 PM**.
-   - P2 ships a mock db-client (same API, backed by those fixtures) by **9:00 PM**.
-4. **Small commits:** `feat(p2): …`, `fix(p3): …`. Never commit secrets, `node_modules`, `.env.local`, or recordings over 5 MB.
-5. **Only the orchestrator merges to `main`,** at the sync points: **9:00 PM · 11:30 PM · 1:30 AM · 4:30 AM · 7:30 AM · 9:45 AM.**
-   - Before each sync: `git fetch && git rebase origin/main`, run your lane's checks, and open a PR into `main`.
-   - Merge order: P1 → P2 → P3 → P4 → HW.
-   - After each merge, the orchestrator smoke-tests the gate.
-6. **Update `plans/status/<lane>.md` at every sync:** done / doing / blocked / needs.
-7. **Feature freeze is 10:00 AM Sunday.** After that, only `fix(demo):` commits approved by P1.
+## Acceptance gates
 
-## Gate checklists (the orchestrator runs these after each merge)
-**Gate 0, 9:00 PM: skeleton**
-- [ ] `pnpm -r test` and `pnpm contracts:validate` pass
-- [ ] `apps/db` publishes to `dcos-dev`, imports `@dcos/physics` (or the `sync:physics` fallback is decided), and generates bindings into `packages/db-client`
-- [ ] The agent's NIM smoke test returns a valid tool call for `get_job_state`
-- [ ] `apps/web` renders the 8×8 heat map from P1's mock fixture
+Gate checkboxes below are intentionally open until the final integrated commit has linked evidence. Existing partial evidence is preserved in the status audit and P2 checkpoints; this is not a claim that completed foundation work must be rebuilt.
 
-**Gate 1, 11:30 PM: world with no AI**
-- [ ] `create_run('run-demo-1', 42, 'gpu_demo_8')` seeds 64 GPUs and 3 jobs. Ticks advance `sim_time_ms`.
-- [ ] `inject_fault` pump-a degradation at **610,000 ms** (run start + 10 s; CONTRACTS §0.12 #2): racks r2–r4 heat up, and GPUs over 85 °C throttle.
-- [ ] XID 79 on `gpu-r3-n1-0`: `job-a` fails back to `durable_work_units`, and the signal event appears.
-- [ ] The browser shows all of this live from SpacetimeDB.
+### Gate 0 — integrated baseline (R0)
 
-**Gate 2, 1:30 AM: durable manual actions**
-- [ ] Manual checkpoint: requested → claimed → running → succeeded across ticks.
-- [ ] Retrying the same `command_key` 10× gives exactly one checkpoint.
-- [ ] A move onto `rack-r6` is denied with `DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT`. A stale epoch is denied with `STALE_DECISION_EPOCH`.
-- [ ] Killing the caller mid-checkpoint doesn't cancel it; a stale fencing token is rejected.
+- [ ] Current main builds/typechecks using declared package scripts; workspace tests and contract validator pass.
+- [ ] Actual configured NIM model returns validated tool calls; current DB module imports pure physics.
+- [ ] Dashboard renders fixed 64-GPU preset; no topology editor is required.
+- [ ] Optional provenance schema preserves old payloads and round-trips new metadata.
 
-**Gate 3, 4:30 AM: agent + overlap + crash** → tag `tier1`
-- [ ] Pump fault → the agent opens one incident tied to evidence IDs, scores keep/cap/move with `simulatePlan`, and executes.
-- [ ] XID 79 on the destination: a second incident opens, the plan is superseded, and the agent replans with no double allocation.
-- [ ] Kill the agent during the checkpoint, then restart: it reconciles by `command_key`, with no duplicate.
-- [ ] The F-NV1 feed shows tool calls and summaries live.
+### Gate 1 — autonomous world + live browser (R4)
 
-**Gate 4, 8:30 AM: proof**
-- [ ] At least 10 scenarios × {reactive, threshold, nemotron} with identical seeds, with `evaluation_result` rows written from real runs.
-- [ ] The scoreboard renders them, including losses and needless moves.
-- [ ] The 3-minute run-through works twice in a row.
+- [ ] Seed42 run starts at sim600000; scheduled ticks advance without client-driven world mutation.
+- [ ] Pump-a degradation at start+10s heats its racks; UI shows actual live observations, age and model/source labels.
+- [ ] Xid79 on an allocated GPU emits a signal and rolls its job back to durable work; unrelated unused-GPU loss does not fail other jobs.
+- [ ] Browser disconnect/reconnect preserves honest stale state and rebuilds from DB.
 
-## Driving Claude Code in your lane
-Paste this into Claude Code from your repo checkout:
+### Gate 2 — safe durable actions (R1/R2/R4)
 
-    Read PLAN.md, plans/README.md, plans/CONTRACTS.md (§0 first) and plans/LANE-<X>.md.
-    Do task <TASK-ID> exactly as written. Only edit files my lane owns. Do not change contracts
-    (if one is needed, stop and write it in plans/status/<X>.md as "CONTRACT request").
-    Run the task's "Done when" checks, commit "feat(<lane>): <task-id> <summary>", and report:
-    files changed, how verified, open questions.
+- [ ] Checkpoint lifecycle spans ticks; durable work changes only after a valid completed write.
+- [ ] Ten identical retries yield one operation/checkpoint; changed payload under the same key is rejected.
+- [ ] Hot r6/stale decision checks produce actual stable reasons and no invalid allocation.
+- [ ] Stale evidence emerging before start is blocked; changed destination conditions before completion fail safely.
+- [ ] Stale ownership rejected; running action survives caller SIGKILL; full reservations remain coherent.
+- [ ] Live ledger shows operation, targets, safety evidence and history via `onActionDetails`.
 
-**Parallel sub-agents:**
-- Run each in its own worktree: `git worktree add ../dcos-<lane>-<n> -b wt/<lane>-<n>-<topic>`.
-- Every task in a lane file lists the files it owns, and tasks marked **‖** can run in parallel.
-- Merge worktrees back into your lane branch yourself.
+### Gate 3 — actual orchestrator overlap/crash + handoff (R3/R5)
 
-## Timeline (Sat → Sun)
-| Time | Milestone |
-|---|---|
-| 7:45–9:00 PM | Gate 0; P1 fixtures at 8:45 |
-| 9:00 PM | **Sync 1**, contracts frozen (additive after this) |
-| 10:45 PM | **Devpost registered** (P4); track rules confirmed with organizers |
-| 11:30 PM | **Sync 2, Gate 1** |
-| 1:30 AM | **Sync 3, Gate 2**; P2 + P4 sleep 1:30–4:30 |
-| 4:30 AM | **Sync 4, Gate 3**, tag `tier1`; P1 + P3 sleep 4:30–7:30 |
-| 7:30 AM | **Sync 5**, everyone back; Gate 4 push; optional Gate 5 |
-| 8:30 AM | Gate 4 passed; stop starting new features at 9:00 |
-| 9:30 AM | Backup demo video recorded |
-| 9:45 AM | **Sync 6** (final) |
-| 10:00 AM | **Feature freeze** |
-| 11:30 AM | **Submitted** (deadline 12:00) |
-| 1:00–4:00 PM | Judging |
+- [ ] Real NIM pump recovery reaches observed progress with actual model/code attribution.
+- [ ] Destination Xid79 is triggered from the actual plan while source checkpoint is running; separate incident and correct replan.
+- [ ] Actual orchestrator process is killed/restarted; it reconciles existing keys, completes recovery once, with no duplicate placement.
+- [ ] Fresh postconditions verify recovery; persisted handoff names remaining infrastructure risk/human action.
+- [ ] Browser displays both incidents and per-workflow waiting/replan/resume/verify states.
 
-**If behind at 2:30 AM,** apply the cut order in `PLAN.md`. Never cut the overlap, crash recovery, the blocked action or the real baseline numbers.
+### Gate 4 — measured proof (R6/R7)
+
+- [ ] Checked-in adapter runs the fixed 12-case matrix × three policies (all20 optional) on matched initial conditions.
+- [ ] Per-case provenance includes actual live/cache/fallback usage, versions, horizon and unfinished jobs.
+- [ ] Artifacts/read-back/scoreboard agree; partial/mixed batches and missing metadata are not falsely certified.
+- [ ] Losses/ties, finite-horizon metric definitions and zero simulated decision latency are disclosed.
+- [ ] Two complete rehearsals, measured duration, backup recording, deployment/submission evidence.
+
+### Gate 5 — optional hardware
+
+Only after required gates: authenticated/validated ingestion, explicit source/freshness, real GPU nonallocatable, fan-to-cooling demo mapping opt-in and labeled. No software acceptance depends on hardware.
+
+## Implementation prompt
+
+> Read PLAN.md, plans/IMPLEMENTATION-STATUS.md, plans/IMPLEMENTATION-SCOPE.md, plans/CONTRACTS.md §0 and my lane file. Implement task Rn from plans/IMPLEMENTATION-TASKS.md in owned paths. Reuse current code. Run its acceptance checks and update the lane report with commit/artifact evidence. Do not claim live proof from a mock or publish/reset prod to run a test.

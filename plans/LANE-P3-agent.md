@@ -1,3 +1,13 @@
+# P3 — current remaining work (2026-11-08)
+
+The agent and model policy exist on main. Start with **R3** observed verification and durable handoff, then **R5** actual orchestrator kill/restart and overlap. Support R6 per-case model usage. Existing crash tests use fake DB/physics; preserve them but add real-process evidence. Fencing prevents stale owners; persisted workflow/action/checkpoint records preserve progress.
+
+**Current instructions:** [implementation tasks](IMPLEMENTATION-TASKS.md), [fixed scope](IMPLEMENTATION-SCOPE.md), [audited status](IMPLEMENTATION-STATUS.md). These replace the kickoff schedule and acceptance assumptions below. Ownership boundaries remain. Historical times, test counts, build-from-scratch tasks and old demo instructions below are retained for traceability, not current priorities.
+
+---
+
+## Archived kickoff plan
+
 # Lane P3: Nemotron + incident orchestration (Node.js / TypeScript)
 
 **Owns:** `apps/agent/` (package name `agent`), covering the NIM client, tools, workflow engine and the `nemotronPolicy` adapter.

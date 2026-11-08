@@ -1,3 +1,13 @@
+# HW — current remaining work (2026-11-08)
+
+Hardware remains optional **O1**, after required software proof. Pico 2 W sound sensing and real GPU telemetry are observations, not automatic hardware repair or allocatable simulated capacity. P2-9 ingestion is not implemented. Do not let this lane delay R1–R7.
+
+**Current instructions:** [implementation tasks](IMPLEMENTATION-TASKS.md), [fixed scope](IMPLEMENTATION-SCOPE.md), [audited status](IMPLEMENTATION-STATUS.md). These replace the kickoff schedule and acceptance assumptions below. Ownership boundaries remain. Historical times, test counts, build-from-scratch tasks and old demo instructions below are retained for traceability, not current priorities.
+
+---
+
+## Archived kickoff plan
+
 # Lane HW (shared, optional): Pico fan + real Brev GPU (Gate 5)
 
 **Owner:** the whole team. Whoever is blocked or ahead claims the next task in `plans/status/HW.md` first.

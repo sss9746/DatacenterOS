@@ -2,6 +2,7 @@
 
 > **Read §0 first.** It adapts the design kit (sections A–E below, written by Kaushik) to this repo: paths, IDs, the Pico hardware, and the names of the functions each lane calls.
 > **If §0 and A–E disagree, §0 wins.**
+> **2026-11-08 scope revision:** [IMPLEMENTATION-SCOPE.md](IMPLEMENTATION-SCOPE.md) fixes the topology and limits advertised faults. §0.13 clarifies behavior; §0.14 specifies a pending additive evaluation extension. This documentation update does not itself change the wire schema or implemented code.
 > **Only the orchestrator (Suvan's Claude session) edits this file.** To request a change, open a GitHub issue titled `CONTRACT <lane>: …`. After Gate 0 (9:00 PM), changes are additive only.
 
 ## 0. Repo adaptation (v1.1.0)
@@ -9,7 +10,7 @@
 ### 0.1 Layout, owners, branches
 | Path | Package | Owner | Branch |
 |---|---|---|---|
-| `packages/contracts/` | `@dcos/contracts`: JSON Schema, examples, validator, **generated TS types**, `validatePayload()` | P1 | `lane/p1-sim` |
+| `packages/contracts/` | `@dcos/contracts`: JSON Schema, examples, validator, **generated TS types**, `validatePayload()` | Integrator | `main` |
 | `packages/physics/` | `@dcos/physics`: pure simulation, `simulatePlan`, `evaluateSafety`, baseline policies, presets, scenarios | P1 | `lane/p1-sim` |
 | `apps/db/` | SpacetimeDB TypeScript module (tables, reducers, scheduled tick) | P2 | `lane/p2-db` |
 | `packages/db-client/` | Generated SpacetimeDB bindings + typed helpers for P3/P4 (§0.6) | P2 | `lane/p2-db` |
@@ -18,7 +19,7 @@
 | `apps/evaluation/` | Scenario × policy harness, writes `evaluation_result` | P4 | `lane/p4-web` |
 | `docs/pitch/`, `docs/devpost.md` | Pitch deck, Devpost text | P4 | `lane/p4-web` |
 | `hardware/` | Pico 2 W firmware, fan gateway, `nvidia-smi` collector (F-NV2) | Everyone (shared) | `lane/hw` |
-| `plans/`, root config, `scripts/` | Plans, contracts, workspace | P1 | `lane/p1-sim` |
+| `plans/`, root config, `scripts/` | Plans, contracts, workspace | Integrator | `main` |
 
 - The workspace is `packages/*` and `apps/*`, and everything is **TypeScript**. One exception: `hardware/pico/main.py` is MicroPython running on the board.
 - **The old Python agent plan is cancelled.**
@@ -64,7 +65,7 @@ Run ID: `run-demo-1`. Dependency edges go `consumer → provider` (`gpu → node
 
 Racks r1, r5, r7 and r8 are free capacity. The existing facility model (`compileTopology`, `step` for racks/pumps/UPS) stays; P1 adds the GPU layer on top, and **the old v0 API keeps passing its 95 tests**.
 
-### 0.4 Simulated defaults (shown in the UI as *simulated, configurable*)
+### 0.4 Simulated defaults (fixed demo profile; shown as assumptions, not hardware specifications)
 | Value | Default |
 |---|---|
 | GPU temperature | rack inlet + 35 °C × load (≈70 °C healthy) |
@@ -72,7 +73,7 @@ Racks r1, r5, r7 and r8 are free capacity. The existing facility model (`compile
 | Shutdown | **92 °C**: GPU unavailable; non-elastic job fails |
 | SM clock | 1980 MHz nominal |
 | Power | 700 W per GPU, limit 700 W; power cap = 500 W, clock −15% |
-| Checkpoint | 30 sim-s to write; interval 10 sim-min |
+| Checkpoint | 30 sim-s to write; interval field 10 sim-min is descriptive (no automatic periodic writes implemented) |
 | Restart after move | 120 sim-s |
 | Planner horizon | 600 sim-s |
 | Tick | `step_ms` 1000; demo speed 1×–5× |
@@ -125,7 +126,7 @@ The existing v0 functions (`step` for the facility, `simulate`, `checkAction`) m
 ### 0.7 Safety reason codes (frozen; `SafetyDecision.violations`)
 `DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT`, `DEST_POWER_HEADROOM_INSUFFICIENT`, `DEST_GPU_UNHEALTHY`, `DEST_GPU_BUSY`, `DEST_GPU_LEASED`, `DEST_GPU_COUNT_INSUFFICIENT`, `DEST_NOT_COMPATIBLE`, `CHECKPOINT_NOT_ACCESSIBLE`, `NO_COMPLETED_CHECKPOINT`, `JOB_NOT_PREEMPTIBLE`, `CHECKPOINT_UNSUPPORTED`, `STALE_DECISION_EPOCH`, `STALE_RESOURCE_VERSION`, `CONFLICTING_ACTION`, `EVIDENCE_STALE`, `UNSUPPORTED_OPERATION`, `CORDON_IS_NOT_REPAIR`, `REAL_GPU_NOT_ALLOCATABLE`
 
-`decision` is `allow | deny | needs_approval`.
+`decision` is `allow | deny | needs_approval | retry_new_snapshot` (the last value already exists in the schema and physics). Stale epoch/version requires a fresh snapshot; any hard violation prevents execution.
 
 ### 0.8 Additions to the kit's tables (§B)
 - **`agent_event`** gains `tool_calls_json`: `[{ tool, args_summary, result_summary, actor }]` with `actor: "nemotron" | "code"`, plus an event-level `actor` column with the same values. This is **F-NV1**: the dashboard shows Nemotron's tool calls and a one-line summary for each step.
@@ -221,11 +222,54 @@ The browser can read public tables without a token. **Tokens are handed out by P
    - cordon → `cordoned`
 9. **Scenario:** `{ scenario_id, seed, preset_id, faults, horizon_s }` may also carry optional `initial_overrides` and `description` fields. P1 documents their exact shape in `packages/physics`.
 
+### 0.13 Fixed-cluster scope and clarified execution semantics (2026-11-08)
+
+1. **No topology editor or arbitrary faults.** Freeze the 8-rack/64-GPU preset and IDs. Required judge controls are pump degradation and Xid79; the existing additional fixtures remain regression coverage. The exact control/target list is in IMPLEMENTATION-SCOPE §3.
+2. **64 simulated GPU rows at creation.** `gpu-real-0` / `node-real-0` exist as resource metadata; ingestion creates the real GPU's current row later. No real node current row is required. No real GPU allocation/control.
+3. **Metric compatibility:** preserve existing wire strings. `DCGM_FI_DEV_POWER_USAGE` is the project's legacy field155 name (current DCGM uses `DCGM_FI_DEV_BOARD_POWER_WATTS`). Thresholds/clock penalties are illustrative constants; do not rename the profile H100 or claim hardware calibration. See RESEARCH S2/S6.
+4. **`onActionDetails(cb)` already exists** in `@dcos/db-client` on main: use its typed command, safety/start-safety, claimed owner, due time and history projection. Do not infer missing command data from `command_key`.
+5. **Request/start safety:** nonempty violations block, including `EVIDENCE_STALE`; violation-free `needs_approval` follows §0.11 #17. Align `start_action` with this rule in R2; current code is weaker.
+6. **Migration allocation occurs at start**, atomically for the complete set; completion ends restart. R1 adds phase-aware destination/freshness/thermal/power/storage checks before running. Own placement/reservations must be recognized; unrelated epoch changes do not invalidate valid in-flight work. Failed completion leaves a failed job with coherent released allocation and protected durable work, not a fictional rollback to the old placement.
+7. **Verification is distinct from success in the ledger.** R3 requires actual postconditions and relevant fresh observations. An escalation acknowledges operator work; it does not establish recovery. A migrated job does not mean a pump/GPU was repaired.
+8. **Reset boundary:** live reset runs with the agent stopped and old client sessions closed, then fresh processes reconnect. Same run/resource IDs are reused and token counters can restart; cross-generation concurrent reset safety is not claimed.
+9. **Target restrictions:** ordinary `network_link_down` has no workload effect; non-GPU `sensor_stale` lacks full freezing semantics. Do not expose them as working features. Store outage uses the existing alias targeting `ckpt-store-1`; no new fault enum is required.
+10. **Fallback labels:** retain the current deterministic planning fallback, actor `code`, and explicit approval configuration. It need not equal `thresholdPolicy`; benchmark it honestly. No raw chain-of-thought is stored or displayed.
+
+### 0.14 Evaluation provenance extension (specified; pending R0/R6 implementation)
+
+Add **optional** `EvaluationResult.provenance` to the canonical JSON Schema and generated types. Keep wire `schema_version: "1.1.0"`, current required fields, policy enum and `publishEvaluationResult` / `onEvaluation` signatures. This is a coordinated additive schema extension: old validators use `additionalProperties:false` and must be updated before new producers publish. No handwritten parallel wire type. The docs alone do not make this field accepted today.
+
+The optional object is strict; if present, require every field below. Unknown legacy provenance is absence, not fabricated defaults.
+
+| Field | Type / meaning |
+|---|---|
+| `batch_id` | Identifier; one measured matrix |
+| `code_revision` | Nonempty string; exact tested commit |
+| `physics_profile_version` | Nonempty string; model version |
+| `policy_version` | Nonempty string; code/config version for this policy |
+| `model_id` | String or null (rule policy / unconfigured) |
+| `prompt_version` | String or null; prompt/config revision, including cache-relevant settings |
+| `model_enabled` | Boolean; false for pure rules or explicitly deterministic planner |
+| `model_requests` | Nonnegative integer; attempted calls through the model/cache port |
+| `live_model_responses` | Nonnegative integer; successful uncached model responses; instrument explicitly |
+| `cache_hits` | Nonnegative integer; responses replayed from identified model/prompt cache |
+| `fallback_decisions` | Nonnegative integer; planner selections made without usable model choice; includes explicit no-model mode |
+| `decision_wall_time_ms` | Nonnegative number; measured total time spent in policy calls for this case |
+| `horizon_sim_s` | Positive integer; case observation horizon |
+| `latency_model` | Literal `zero_simulated_decision_latency` for current offline runner |
+| `unfinished_job_ids` | Unique Identifier array; all jobs not completed at horizon |
+| `failed_job_ids` | Unique Identifier array; subset currently failed at horizon |
+| `trace_sha256` | 64 lowercase hex characters; hash of saved canonical command-trace artifact |
+
+Store provenance with existing `metrics_json`; fill the existing version columns from it. Round-trip it through validators, mock/live client, export and UI. No new table/column is necessary. The current result key `(scenario_id, policy, seed)` overwrites older rows: preserve complete batch artifacts and reject mixed batch/revision/horizon comparisons in the scoreboard. Use a shared per-case `run_id` across policies.
+
+`policy: nemotron` alone is not model provenance. Derive visible labels from `model_enabled`, response/cache counts and fallback count. A case requiring no model call can legitimately have zero counts. Legacy rows display provenance unavailable; no-model or mixed runs are never silently presented as fully model-assisted. Offline crash counts remain zero; live crash evidence is separate.
+
 ---
 
 # Design kit contracts (Kaushik, v1.1.0 with §0 adaptations)
 
-**This replaces the earlier broad `CONTRACTS.md` (see git history).** The attached `contracts.schema.json` is the canonical cross-service **wire schema**; `example-payloads.json` contains five validated examples. No team member changes field names independently. All public JSON uses `snake_case` and `schema_version: "1.0.0"`.
+**Adapted design-kit reference.** The checked-in `contracts.schema.json` is canonical; `example-payloads.json` contains validated examples. All public JSON uses `snake_case` and `schema_version: "1.1.0"`. §0 overrides older kit assumptions, including paths, optional hardware and execution timing.
 
 ## A. Cross-cutting rules
 
@@ -323,7 +367,7 @@ publish_evaluation_result(result_json: string): void
 - `submit_plan` writes proposal only; `request_action` runs **fresh** safety check and rejects bad `decision_epoch`/resource versions.
 - `claim_action` grabs the *entire* affected resource closure in a single sorted transaction, not only the primary GPU. For `migrate_restart`, lock job, source GPU set, destination GPU set, and affected rack/node reservation records. Build the lock set *inside the trusted reducer*, not from user-supplied IDs.
 - `start_action` does not complete a checkpoint in one transaction. It creates `checkpoint(status='writing')` and assigns `due_sim_time_ms`; later `advance_tick` finishes it iff resource/checkpoint conditions remain valid.
-- On completion of `migrate_restart`, allocation is all-or-nothing; no duplicate GPU assignment. `checkpoint` and `migration` are separate ledger commands connected by `action_dependency`.
+- At start of `migrate_restart`, allocation is all-or-nothing; completion ends restart after phase-aware checks (§0.13/R1). No duplicate GPU assignment. Checkpoint and migration are separate ledger commands connected by `action_dependency`.
 - Reject `command_key` collisions where `payload_hash` differs. Retrying the same command returns the persisted record, regardless of whether a network timeout occurred.
 - Resource `fencing_token` is monotonically incremented for each lease acquisition and checked for delayed work. **Separate short-lived `workflow` worker leases from durable `resource_lease` reservations held by running simulator commands.** Agent process death may expire the workflow lease but must not release a running checkpoint reservation. Lease expiry by itself does not undo an already-running real-world effect.
 - Replan on new relevant `decision_epoch` only; mark old proposed actions superseded and cancel only safe-to-cancel ones. At delayed completion, validate the **affected resources and operation-specific prerequisites** (not every unrelated global epoch change). A completed checkpoint remains valid even if its downstream migration plan becomes stale.
@@ -343,7 +387,7 @@ The canonical JSON Schema contains these `#/$defs` types:
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "event_id": "evt-r1-00081",
   "run_id": "run-demo-1",
   "resource_id": "gpu-r3-n1-0",
@@ -360,17 +404,17 @@ The canonical JSON Schema contains these `#/$defs` types:
 }
 ```
 
-Note: `source_kind=simulator` should normally use `quality=estimated` rather than implying a measured real NVIDIA GPU temperature. For demo dashboards, label the source explicitly. Physical fan fields should use `metric='fan.vibration_rms_g'`/`unit='g'`; their values must not be passed off as DCGM GPU counters.
+Note: `source_kind=simulator` normally uses `quality=estimated`. Label source explicitly. Current optional Pico microphone telemetry uses `fan.sound_rms` / `fan.anomaly_score` with unit `ratio`; it is not a GPU measurement or proof of pump failure.
 
 ### Example: actionable safety decision
 
 ```json
 {
-  "schema_version": "1.0.0", "run_id": "run-demo-1", "plan_id": "plan-2",
+  "schema_version": "1.1.0", "run_id": "run-demo-1", "plan_id": "plan-2",
   "action_id": "act-13", "decision": "deny", "checked_decision_epoch": 6,
   "violations": ["DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT"],
   "checked_resource_ids": ["rack-r6", "node-r6-n1", "job-a"],
-  "evidence": {"required_headroom_c": 7.0, "available_headroom_c": 2.0}
+  "evidence": {"required_headroom_c": 5.0, "available_headroom_c": 2.0}
 }
 ```
 

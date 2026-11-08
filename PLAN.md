@@ -1,69 +1,83 @@
-# DataCenterOS: master plan (v3, Sat Nov 7, 2026, HackUTD "Zero Day")
+# DataCenterOS — fixed-cluster delivery plan (v4)
 
-> **Start here, then read [`plans/README.md`](plans/README.md).** The design is [`plans/ARCHITECTURE.md`](plans/ARCHITECTURE.md) (Kaushik's kit), and every shared name is in [`plans/CONTRACTS.md`](plans/CONTRACTS.md) (**read §0 first**). Older plans live only in git history (before commit `85e2653`).
+**Updated 2026-11-08, America/Chicago.** User-approved direction: remove the topology editor and finish an evidence-backed GPU reliability demonstration for NMC²'s **Mission: Keep the World Running**.
 
-## One line
-**When a GPU data center starts failing, our Nemotron agents decide, job by job, whether to keep running, cap power, or checkpoint and move.** They keep separate failures separate, survive their own crash mid-recovery, and waste less training work than rule-based baselines.
+## Product
 
-## Problem and people
-- Large training runs span many GPUs. If **one** GPU in a job dies, the whole job falls back to its last checkpoint.
-- Meta reported **419 unexpected interruptions in 54 days** training Llama 3 405B on 16,384 H100s, 58.7% of them GPU-related ([arXiv 2407.21783](https://arxiv.org/pdf/2407.21783)).
-- Existing tools (such as NVIDIA's NVSentinel) focus on GPU health and node remediation.
-- **Who we're building for:** the night-shift operator at a GPU facility like NMC²'s 400 MW Spartanburg site.
+Help an operator protect training progress during overlapping infrastructure failures, understand why a recovery was chosen or blocked, and hand over unresolved work. A fixed simulated cluster provides a reproducible setting; Nemotron assists diagnosis/choice while deterministic code checks safety and SpacetimeDB preserves actions/workflows.
 
-## Tracks
-| Track | Why we qualify |
+**Pitch:** “When cooling or GPU failures threaten training jobs, DataCenterOS compares recovery options, executes safe actions, and resumes recovery after its own agent crashes.” This is the target demonstration; individual completion evidence is tracked below. Better benchmark performance is a hypothesis to test, not a promised outcome.
+
+## Read in this order
+
+1. [Implementation status](plans/IMPLEMENTATION-STATUS.md): what exists and what is actually proved.
+2. [Exact scope](plans/IMPLEMENTATION-SCOPE.md): component inventory, faults, actions, UI and evaluation.
+3. [Remaining tasks](plans/IMPLEMENTATION-TASKS.md): R0–R7, owners, dependencies and acceptance.
+4. [Shared contracts](plans/CONTRACTS.md) §0: frozen names; §0.13 clarified semantics; §0.14 pending additive provenance.
+5. [Research](plans/RESEARCH.md): primary sources, design implications and limitations.
+6. [Team/gates](plans/README.md), [architecture](plans/ARCHITECTURE.md), then your lane plan.
+
+## What exists now
+
+Audited source: `origin/main` **95e1abd**; local P2 checkout **b2678c4**. Main includes physics, DB/client, agent, dashboard and evaluator. Do not recreate agent/web packages because they are absent on the P2 branch.
+
+P2 reports successful real Nemotron pump recovery on dev and prod, Gate 2 on dev/prod/local, and a 697-test integrated suite. These are recorded historical results, not fresh checks performed by this planning revision. Full live dashboard, combined overlap/actual-agent restart and provenance-complete benchmark proof remain open. [Evidence audit](plans/IMPLEMENTATION-STATUS.md)
+
+## Scope lock
+
+| Keep | Boundary |
 |---|---|
-| **NMC²** | GPU infrastructure reliability, one of the three areas NMC² told us to choose from |
-| **NVIDIA** | Nemotron (NIM on Brev) does diagnosis, planning and replanning through tool calls; the telemetry uses DCGM/XID names; **F-NV1** shows its tool calls live; **F-NV2** streams one real Brev GPU |
-| **SpacetimeDB** | It's the authoritative live twin plus a durable action ledger, leases and workflow state, which is why the agent survives its own crash |
+| Eight racks, eight nodes, 64 `demo_gpu` GPUs | Fixed graph and resource IDs; read-only inspection |
+| Two cooling loops/pumps | Simplified shared heat/capacity behavior |
+| GPU power/headroom and cap response | No full facility power, UPS or generator model |
+| One checkpoint store and three fixed jobs | Accessibility and durable work; no arbitrary workload builder |
+| Pump degradation + Xid79 judge controls | Supported targets/timing/severity; no arbitrary problem interpreter |
+| Estimated plan comparisons, safety and durable execution | Model assumptions visible; no physical control |
+| Actual agent crash/resume, separate incidents, operator handoff | Verified state/events drive progress UI |
+| Same-scenario baseline comparison | Model/cache/fallback provenance, ties and losses disclosed |
 
-## Demo (3 minutes, ARCHITECTURE §11)
-1. An 8-rack, 64-GPU cluster with 3 training jobs (`gpu_demo_8`).
-2. **Pump A degrades.** Racks r2–r4 heat up, and the agent identifies one cooling incident instead of 24 GPU alerts.
-3. **Choices per job**, scored by `simulatePlan` and shown on screen:
-   - `job-a` (old checkpoint) checkpoints and moves.
-   - `job-b` (fresh checkpoint) keeps running or caps power.
-   - A move onto hot `rack-r6` is **blocked** with `DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT`.
-4. **XID 79** hits the destination GPU mid-checkpoint. A second incident opens, the plan is invalidated, and the agent **replans**.
-5. **Kill the agent process.** SpacetimeDB finishes the checkpoint. On restart, the agent reconciles by `command_key` and doesn't duplicate anything.
-6. **Scoreboard:** Nemotron vs. the reactive and threshold baselines on the same seeded scenarios, including needless moves and the cases where we lost.
+Cut from submission: topology editor, mixed GPU profiles, network/switch emulation, new power-grid behavior and production-calibration claims. Existing secondary fault fixtures/tests remain. Hardware ingestion and advanced fault buttons are optional after software proof.
 
-Optional (Gate 5): a judge pinches the real fan (Pico) to trigger step 2, and the real Brev GPU tile heats up live.
+## Remaining execution order
 
-## Gates (pass/fail, details in plans/README.md)
-| Gate | What passes | Due |
+| Work | Owner | Completion evidence |
 |---|---|---|
-| **0** | Contracts package green; DB module publishes and imports physics; NIM returns a valid tool call; web renders mock rows | **9:00 PM** |
-| **1** | World with no AI: pump degrades, GPUs heat, jobs progress, XID 79 kills a job back to its durable checkpoint; live in the browser | **11:30 PM** |
-| **2** | Durable manual actions: checkpoint goes requested → running → succeeded over ticks; 10× retry gives one checkpoint; unsafe moves rejected with reason codes | **1:30 AM** |
-| **3** | Agent + stacked fault + crash: two incidents, replan, kill and resume with no duplicates; F-NV1 feed live | **4:30 AM** → tag `tier1` |
-| **4** | ≥10 seeded scenarios × 3 policies, real results on the scoreboard; pitch done | **8:30 AM** |
-| **5** (optional) | Pico fan via gateway; F-NV2 real GPU; XID 48 / XID 74 / network link | After Gate 3, stop at 9:00 AM |
+| R0: integrated baseline + additive result provenance | Integrator / P2 / P3 / P4 | Old/new contracts validate, metadata round-trips |
+| R1: delayed completion safety | P1 | Same-tick and changed-destination regression tests |
+| R2: start-time stale-evidence rejection | P2 | Rejected start has no world effect; Gate 2 still passes |
+| R3: observed verification + durable handoff | P3 | No ledger-only false recovery; unresolved hardware recorded |
+| R4: live dashboard/action details | P4 | Browser observes actual DB effects and per-workflow stages |
+| R5: real process crash + destination overlap | P3/P2 with P4 | Recorded real kill/restart/reconcile/replan without duplicate work |
+| R6: evaluation adapter + fixed matrix | P4/P3/P1/P2 | ≥12 cases × 3 policies, artifacts match scoreboard |
+| R7: rehearsal/video/submission | Integrator/P4 | Two complete runs, measured pitch duration, final evidence |
 
-Then: **9:30 AM** backup video recorded · **10:00 AM** feature freeze · **11:30 AM** submitted (deadline 12:00) · **1–4 PM** judging. Devpost is registered by **10:45 PM** Saturday (P4).
+R1–R4 can proceed in lane-isolated parallel work after the baseline sync. R6 adapter work can begin early; final scores follow final physics/safety revisions. Full task specifications are in [IMPLEMENTATION-TASKS.md](plans/IMPLEMENTATION-TASKS.md).
 
-## Team
-**Integrator:** Suvan's Claude orchestrator session. It owns `plans/`, the contracts and root config, merges to `main` at every sync and runs the gate checks. It writes no lane code.
+## Demo sequence
 
-| Lane | Person | Plan |
-|---|---|---|
-| P1: simulation, safety, baselines | ___ | [`plans/LANE-P1-sim.md`](plans/LANE-P1-sim.md) |
-| P2: SpacetimeDB + durability | ___ | [`plans/LANE-P2-db.md`](plans/LANE-P2-db.md) |
-| P3: Nemotron + orchestration | **Suvan** | [`plans/LANE-P3-agent.md`](plans/LANE-P3-agent.md) |
-| P4: frontend + evaluation + pitch | ___ | [`plans/LANE-P4-web.md`](plans/LANE-P4-web.md) |
-| HW: Pico fan + real GPU (shared, optional) | everyone | [`plans/LANE-HW-shared.md`](plans/LANE-HW-shared.md) |
+1. Show fixed cluster, simulation label and job-a/job-b checkpoint-age difference.
+2. Degrade pump A; inspect cooling evidence and actual candidate keep/cap/move scores.
+3. Show a separate manual hot-r6 safety probe rejected with real reason/evidence, without conflicting in-flight work.
+4. Observe job-a checkpoint running and the actual proposed destination; inject Xid79 into that destination.
+5. Kill the actual orchestrator, let DB-owned work continue, restart, reconcile existing keys and select a safe remaining placement.
+6. Show two incidents, verified job progress and a handoff that leaves pump/GPU service unresolved.
+7. Show measured results and model-use disclosures, including cases where the approach ties or loses.
 
-## Cut order if behind (from IMPLEMENTATION_TASKS)
-1. XID 74, network links, CMDB and Ceph (already Tier 2)
-2. Hardware demo
-3. Power-cap (keep `keep_running`, checkpoint/pause, move/restart)
-4. Evaluation from 20 cases to 10
+Use state triggers rather than guessing a destination or relying on fixed sleeps. A fake-backed crash test and fixed scenario17 are useful tests, not proof of this live sequence. Measure wall duration; if longer than the three-minute pitch slot, use a labeled recording of a real run.
 
-**Never cut:** one stacked-fault overlap, crash recovery, one blocked unsafe action, and real baseline numbers.
+## Submission gates and cut order
 
-## Honesty rules
-- Every number shown is either from a real run or labeled **simulated**.
-- Never call the baseline "NVSentinel". It's a "reactive rule-based baseline".
-- Never show raw chain-of-thought; show tool calls and summaries.
-- The private fault truth never reaches the agent.
+Keep Gate 0–4 names for continuity; see [checklists](plans/README.md). Gate 3 is not yet complete merely because pump-only NIM recovery worked. Gate 4 requires the checked-in adapter, measured matrix and honest provenance.
+
+Cut optional hardware first, then advanced fault buttons, then nonessential UI polish, then the 20-case extension down to the fixed 12-case matrix. Keep already-implemented power cap with verified postconditions. Never cut hard safety, independent overlap, real process recovery, persistent handoff or honest results. Unproved claims stay explicitly incomplete.
+
+Existing event targets from the team plan: backup video 9:30 AM, feature freeze 10:00 AM, submit 11:30 AM on Sunday Nov 8 (recorded deadline noon), judging 1–4 PM. P4 must confirm organizer rules/deadlines; these are team-recorded targets, not newly verified external facts. Old per-task kickoff times are superseded by R0–R7 dependency order.
+
+## Claim rules
+
+- `demo_gpu` temperatures, power and timing are simulated assumptions, not calibrated DGX specifications.
+- Tokens reject stale writers; workflow records/ledger/checkpoints preserve different kinds of progress.
+- Workload recovery does not repair a pump/GPU. Handoff is part of the deliverable.
+- Code versus Nemotron versus cache/fallback is visible. No raw chain-of-thought or hidden future faults.
+- Reactive/threshold baselines are our simplified policies, not NVSentinel replicas. Existing NVIDIA tools already automate substantial recovery.
+- Offline zero-decision-latency results do not establish real-world savings or actual crash recovery.

@@ -1,3 +1,13 @@
+# P1 — current remaining work (2026-11-08)
+
+The fixed GPU simulator, safety, forecasts, two baselines and 20 scenario fixtures exist on main. Start with **R1**: phase-aware completion checks and coherent restart failure. Support R6 with detailed runner outputs and regenerated results after semantic changes. Do not rebuild the simulator or add topology configuration.
+
+**Current instructions:** [implementation tasks](IMPLEMENTATION-TASKS.md), [fixed scope](IMPLEMENTATION-SCOPE.md), [audited status](IMPLEMENTATION-STATUS.md). These replace the kickoff schedule and acceptance assumptions below. Ownership boundaries remain. Historical times, test counts, build-from-scratch tasks and old demo instructions below are retained for traceability, not current priorities.
+
+---
+
+## Archived kickoff plan
+
 # Lane P1: simulation + safety + baselines (owner: ___)
 
 **Owns:** `packages/physics/`. The orchestrator (Suvan's Claude session) owns `packages/contracts/`, `plans/`, root config and `scripts/`, and does the merges. A contract change is a request to the orchestrator.
