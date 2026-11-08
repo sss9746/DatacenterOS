@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentEventInput, ToolCallSummary, WorkflowRecord } from '@dcos/db-client';
 import type { Incident } from '@dcos/contracts';
 import { seatOf } from '../src/components/agent-room/seat-of';
-import { boundSummary, buildRoomView, dividerText, processName, processOfEvent, resumeAnchorIndex, resumeDividerText, type Bubble, type Divider } from '../src/components/agent-room/room-view';
+import { boundSummary, buildRoomView, dividerText, parseAgentMessage, processLabel, processName, processOfEvent, resumeAnchorIndex, resumeDividerText, zoneOfWorker, AGENTS_THREAD_ID, type Bubble, type Divider } from '../src/components/agent-room/room-view';
 
 const call = (tool: string, actor: ToolCallSummary['actor'] = 'code'): ToolCallSummary => ({ tool, args_summary: 'a', result_summary: 'r', actor });
 let seq = 0;
@@ -188,5 +188,48 @@ describe('agent processes', () => {
     expect(dividerText({ previous_owner: 'agent-alpha-1', by_worker: 'agent-alpha-9', count: 2 })).toBe('Agent process stopped → new process resumed by agent-alpha-9 (#2), reconciling…');
     expect(dividerText({ previous_owner: null, by_worker: 'agent-beta-2', count: null })).toBe('Agent process stopped → new process resumed by agent-beta-2, reconciling…');
     expect(dividerText({ previous_owner: 'agent-alpha-1', by_worker: 'agent-beta-2', count: null })).toBe('agent-alpha stopped → agent-beta took over (lease reclaimed), reconciling…');
+  });
+});
+
+describe('cross-agent messages and zones', () => {
+  const now = 1_700_000_100_000;
+  const msg = (args: string, result = 'hello'): ToolCallSummary => ({ tool: 'agent_message', args_summary: args, result_summary: result, actor: 'code' });
+  it('parses from/to/topic tokens in any order and rejects malformed calls', () => {
+    expect(parseAgentMessage(msg('topic=ack to=agent-beta-2 from=agent-alpha-1'))).toEqual({ from: 'agent-alpha-1', to: 'agent-beta-2', topic: 'ack', zone: null });
+    expect(parseAgentMessage(msg('from=agent-alpha-1 to=all topic=takeover'))).toMatchObject({ to: 'all', topic: 'takeover' });
+    expect(parseAgentMessage(msg('from=agent-alpha-1 to=agent-beta-2 topic=cross_zone_move zone="loop B"'))).toMatchObject({ topic: 'cross_zone_move', zone: 'loop B' });
+    expect(parseAgentMessage(msg('from=agent-alpha-1 to=agent-beta-2 topic=gossip'))).toBeNull();
+    expect(parseAgentMessage(msg('from=agent-alpha-1 topic=ack'))).toBeNull();
+    expect(parseAgentMessage({ tool: 'get_action_status', args_summary: 'from=a to=b topic=ack', result_summary: '' })).toBeNull();
+  });
+  it('derives zones from worker ids or the message token, never otherwise', () => {
+    expect(zoneOfWorker('agent-alpha@loopA')).toBe('loop A');
+    expect(zoneOfWorker('agent-loop-b-7')).toBe('loop B');
+    expect(zoneOfWorker('agent-alpha-12345')).toBeNull();
+    expect(processName('agent-alpha-3@loopA')).toBe('agent-alpha');
+    expect(processLabel('agent-alpha', 'loop A')).toBe('agent-alpha · loop A');
+    expect(processLabel('agent-alpha', null)).toBe('agent-alpha');
+    expect(processLabel(null, 'loop A')).toBeNull();
+  });
+  it('renders message bubbles in their own thread and in the shared Agents lane, with a takeover divider and resolved sender/receiver threads', () => {
+    const events = [
+      ev({ workflow_id: 'wf-1', sim_time_ms: 100, stage: 'plan', tool_calls: [msg('from=agent-alpha-1 to=agent-beta-2 topic=cross_zone_move zone="loop B"', 'ok to use r8?')] }),
+      ev({ workflow_id: 'wf-2', sim_time_ms: 110, stage: 'plan', tool_calls: [msg('from=agent-beta-2 to=agent-alpha-1 topic=ack', 'yes')] }),
+      ev({ workflow_id: 'wf-2', sim_time_ms: 120, stage: 'execute', tool_calls: [msg('from=agent-beta-2 to=all topic=takeover', 'took over wf-2')] }),
+      ev({ workflow_id: 'wf-2', sim_time_ms: 130, stage: 'execute', tool_calls: [{ tool: 'agent_message', args_summary: 'garbage', result_summary: 'x' }] }),
+    ];
+    const wfs = [wf({ workflow_id: 'wf-1', lease_owner: 'agent-alpha-1', lease_expires_unix_ms: now + 1 }), wf({ workflow_id: 'wf-2', incident_ids: ['inc-2'], lease_owner: 'agent-beta-2', lease_expires_unix_ms: now + 1 })];
+    const view = buildRoomView({ events, workflows: wfs, incidents: [], nowUnixMs: now, example: false });
+    expect(view.threads.map((t) => t.id)).toEqual(['wf-1', 'wf-2', AGENTS_THREAD_ID]);
+    const first = view.threads[0]!.items[0] as Bubble;
+    expect(first.message).toMatchObject({ fromLabel: 'agent-alpha', toLabel: 'agent-beta', topic: 'cross_zone_move', text: 'ok to use r8?', fromThreadId: 'wf-1', toThreadId: 'wf-2' });
+    expect(first.zone).toBe('loop B');
+    const lane = view.threads[2]!;
+    expect(lane.items.map((i) => i.kind)).toEqual(['bubble', 'bubble', 'divider', 'bubble']);
+    expect((lane.items[2] as Divider).text).toBe('agent-beta → all · takeover');
+    expect((lane.items[3] as Bubble).message?.toThreadId).toBeNull();
+    const malformed = view.threads[1]!.items.filter((i): i is Bubble => i.kind === 'bubble').at(-1)!;
+    expect(malformed.message).toBeNull();
+    expect(view.counts.processes).toBe(2);
   });
 });

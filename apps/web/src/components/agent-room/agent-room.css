@@ -48,7 +48,7 @@
 }
 #agent-room > .panel-heading :focus-visible { outline-color: var(--ar-cream); }
 #agent-room .ar-head-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
-#agent-room .ar-head-line { font-family: var(--ar-display); font-size: 19px; line-height: 1.25; font-weight: 650; letter-spacing: -.015em; color: var(--ar-cream); }
+#agent-room .ar-head-line { font-family: var(--ar-display); font-size: 17px; line-height: 1.25; font-weight: 650; letter-spacing: -.015em; color: var(--ar-cream); }
 #agent-room .ar-head-badges { display: inline-flex; gap: 6px; }
 
 /* ---------------------------------------------------------------- badges (scoped, so the room is right before/after the shell merge) */
@@ -72,7 +72,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent);
 }
 #agent-room .ar-seat {
-  display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; row-gap: 3px; align-items: center;
+  display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; row-gap: 4px; align-items: center; align-content: center;
   padding: 8px 10px; background: var(--ar-paper); border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); border-radius: 10px; min-width: 0;
 }
 #agent-room .ar-avatar {
@@ -91,8 +91,16 @@
   background: var(--ar-forest); color: var(--ar-cream); border: 2px solid var(--ar-paper);
 }
 #agent-room .ar-seat-name { font-size: 14px; line-height: 1.3; font-weight: 600; color: var(--ar-ink); }
-#agent-room .ar-seat .badge { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-#agent-room .ar-seat-role { grid-column: 2; font-family: var(--ar-mono); font-size: 12px; line-height: 1.3; color: var(--ar-ink-muted); overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#agent-room .ar-seat .badge { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 1.2; }
+#agent-room .ar-seat .badge-nemotron::before { display: inline-block; vertical-align: 1px; margin-right: 5px; }
+@container agent-room (max-width: 679px) {
+  #agent-room .ar-seats { gap: 8px; padding: 12px 12px 10px; }
+  #agent-room .ar-seat { grid-template-columns: 36px minmax(0, 1fr); column-gap: 8px; padding: 7px 8px; }
+  #agent-room .ar-avatar { width: 36px; height: 36px; font-size: 16px; }
+  #agent-room .ar-avatar-check { width: 14px; height: 14px; }
+  #agent-room .ar-seat .badge { font-size: 10.5px; letter-spacing: .04em; padding: 2px 6px; }
+  #agent-room .ar-seat-name { font-size: 13px; }
+}
 #agent-room .ar-badge-full { display: none; }
 #agent-room .ar-badge-short { display: inline; }
 @container agent-room (min-width: 680px) {
@@ -106,9 +114,9 @@
 }
 
 /* ---------------------------------------------------------------- thread tabs */
-#agent-room .ar-tabs { display: flex; gap: 6px; padding: 10px 16px 0; overflow-x: auto; scrollbar-width: thin; background: var(--ar-inset); position: relative; z-index: 1; }
+#agent-room .ar-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; background: var(--ar-inset); position: relative; z-index: 1; }
 #agent-room .ar-tab {
-  flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; align-items: center; min-height: 40px; padding: 6px 12px;
+  flex: 1 1 0; min-width: 150px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 40px; padding: 6px 10px;
   background: transparent; color: var(--ar-ink-muted); border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
   font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; text-align: left; transition: background-color var(--ar-t-fast) var(--ar-ease), color var(--ar-t-fast) var(--ar-ease);
 }
@@ -119,25 +127,38 @@
 #agent-room .ar-accent-b { --ar-accent: var(--ar-amber); }
 #agent-room .ar-accent-run { --ar-accent: var(--ar-sage); }
 #agent-room .ar-tab .ar-tab-swatch { background: var(--ar-accent); }
-#agent-room .ar-tab-title { min-width: 0; overflow: hidden; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-#agent-room .ar-tab-meta { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#agent-room .ar-tab-top { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+#agent-room .ar-tab-title { flex: 1 1 100%; min-width: 72px; overflow: hidden; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#agent-room .ar-tab-top .badge { flex: none; }
+#agent-room .ar-tab-sub { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding-left: 18px; }
 @container agent-room (max-width: 600px) {
-  #agent-room .ar-tab { grid-template-columns: 10px minmax(0, 1fr); }
-  #agent-room .ar-tab-count { display: none; }
-  #agent-room .ar-tab-meta { grid-column: 2; justify-content: flex-start; }
-  #agent-room .ar-tab-meta:empty { display: none; }
+  #agent-room .ar-tab-count, #agent-room .ar-tab-top .badge { display: none; }
+}
+@container agent-room (max-width: 560px) {
+  #agent-room .ar-tab:not(.is-selected) .ar-tab-owner { display: none; }
+  #agent-room .ar-tab-sub:empty { display: none; }
 }
 #agent-room .ar-tab-count { flex: none; font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); padding: 1px 6px; border-radius: 999px; background: var(--ar-inset); }
 #agent-room .ar-tab.is-selected .ar-tab-count { background: var(--ar-cream); }
 #agent-room .ar-tab-state, #agent-room .ar-tab-silent { flex: none; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; }
 #agent-room .ar-tab-state { background: var(--ar-forest); color: var(--ar-cream); }
-#agent-room .ar-tab-owner { flex: none; font-family: var(--ar-mono); font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ar-ink-muted); padding: 2px 6px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); background: var(--ar-paper); }
-#agent-room .ar-tab-owner.is-lapsed { color: var(--ar-orange-ink); border-color: var(--ar-orange-ink); background: var(--ar-orange-soft); font-weight: 600; }
+#agent-room .ar-tab-owner { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--ar-mono); font-size: 11.5px; line-height: 1.4; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ar-ink-muted); }
+#agent-room .ar-tab-owner.is-lapsed { color: var(--ar-orange-ink); font-weight: 600; }
+#agent-room .ar-tab-sub .ar-tab-state, #agent-room .ar-tab-sub .ar-tab-silent { flex: none; }
+#agent-room .ar-accent-agents { --ar-accent: var(--ar-ink-muted); }
+#agent-room .ar-accent-agents .ar-tab-swatch { border-radius: 50%; }
+
+/* travelling message between two thread tabs */
+#agent-room .ar-travel { position: absolute; height: 8px; pointer-events: none; }
+#agent-room .ar-travel-line { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--ar-ink-muted); transform-origin: left center; animation: ar-draw var(--ar-t-drama) var(--ar-ease) both; }
+#agent-room .ar-travel-dot { position: absolute; top: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--ar-orange); animation: ar-tab-travel var(--ar-t-drama) var(--ar-ease) both; }
+@keyframes ar-tab-travel { 0% { transform: translateX(0); opacity: 0; } 10% { opacity: 1; } 100% { transform: translateX(calc(var(--ar-dir, 1) * (var(--ar-span, 100%) - 8px))); opacity: 1; } }
 /* Phone-only owner line (the tab chip is hidden there). */
 #agent-room .ar-active-owner { display: none; margin: 0 16px; padding: 6px 10px 0; font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); background: var(--ar-paper); border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); border-bottom: none; border-radius: 0 10px 0 0; }
 #agent-room .ar-active-owner.is-lapsed { color: var(--ar-orange-ink); font-weight: 600; }
 #agent-room .ar-active-owner + .ar-stream { border-top: none; border-top-right-radius: 0; }
-#agent-room .ar-msg-process { font-family: var(--ar-mono); font-size: 12.5px; color: var(--ar-ink-muted); }
+#agent-room .ar-msg-process { font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+#agent-room .ar-msg-process::before { content: "· "; }
 #agent-room .ar-tab-silent { background: var(--ar-orange-soft); color: var(--ar-orange-ink); }
 
 /* ---------------------------------------------------------------- stream */
@@ -168,8 +189,20 @@
 #agent-room .ar-msg.is-blocked .ar-bubble { background: var(--ar-orange-soft); }
 #agent-room .ar-msg-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
 #agent-room .ar-msg-seat { font-size: 14px; line-height: 1.3; font-weight: 600; color: var(--ar-ink); }
-#agent-room .ar-msg-stage { margin-left: auto; font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); white-space: nowrap; }
-#agent-room .ar-msg-text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ar-ink); }
+#agent-room .ar-msg-stage { font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); white-space: nowrap; }
+#agent-room .ar-msg-text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ar-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#agent-room .ar-bubble:has(.ar-more[open]) .ar-msg-text { display: block; -webkit-line-clamp: unset; }
+#agent-room .ar-more { margin-top: 4px; }
+#agent-room .ar-more > summary { list-style: none; cursor: pointer; display: inline-block; font-size: 12px; font-weight: 600; color: var(--ar-ink-muted); padding: 2px 0; border-bottom: 1px dotted var(--ar-sage); }
+#agent-room .ar-more > summary::-webkit-details-marker { display: none; }
+#agent-room .ar-more > summary:hover { color: var(--ar-ink); }
+#agent-room .ar-more[open] > summary { color: var(--ar-ink); }
+#agent-room .ar-msg-detail { margin: 6px 0 0; font-size: 12px; color: var(--ar-ink-muted); }
+#agent-room .ar-msg-route { display: inline-flex; align-items: center; gap: 4px; font-family: var(--ar-mono); font-size: 13px; font-weight: 600; }
+#agent-room .ar-msg-x .ar-msg-avatar { background: var(--ar-paper); color: var(--ar-ink-muted); box-shadow: 0 0 0 1px var(--ar-sage); font-size: 14px; }
+#agent-room .ar-msg-x .ar-bubble { border-left-style: dashed; }
+#agent-room .ar-topic-conflict .ar-bubble { background: var(--ar-orange-soft); }
+#agent-room .badge-warning { background: var(--ar-amber); color: var(--ar-ink); }
 
 #agent-room .ar-tools { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 #agent-room .ar-tool { position: relative; }
@@ -224,9 +257,9 @@
   #agent-room .ar-tab { flex: 0 0 auto; max-width: 72%; }
   #agent-room .ar-stream { max-height: 440px; margin: 0 12px 12px; padding: 12px 10px 8px; }
   #agent-room .ar-tabs { padding: 10px 12px 0; }
-  #agent-room .ar-tab-state, #agent-room .ar-tab-silent, #agent-room .ar-tab-owner { display: none; }
+  #agent-room .ar-tab-sub { display: none; }
   #agent-room .ar-active-owner { display: flex; margin: 0 12px; }
-  #agent-room .ar-msg-stage { margin-left: 0; width: 100%; }
+  #agent-room .ar-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
 }
 
 /* ---------------------------------------------------------------- reduced motion */
@@ -234,5 +267,6 @@
   #agent-room .ar-seat.is-thinking .ar-avatar { animation: none; box-shadow: 0 0 0 2px var(--ar-forest), 0 0 0 5px color-mix(in srgb, var(--ar-forest) 25%, transparent); }
   #agent-room .ar-msg.is-new { animation-duration: 160ms; }
   #agent-room .ar-handoff.is-travelling .ar-handoff-track::before, #agent-room .ar-handoff.is-travelling .ar-handoff-dot { animation: none; }
+  #agent-room .ar-travel { display: none; }
   #agent-room .ar-tab, #agent-room .ar-tool summary { transition: none; }
 }
