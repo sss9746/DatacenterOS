@@ -6,4 +6,11 @@ export { toObserved, PRIVATE_KEYS } from './observe.js';
 export { step } from './step.js';
 export { enqueueCommands, inFlightCommands, commandOutcome, type InFlightView } from './actions.js';
 export type { CommandOutcome } from './world.js';
-export { evaluateSafety } from './safety.js';
+export {
+  evaluateSafety,
+  SAFETY_REASON_CODES,
+  SAFETY_LOOKAHEAD_S,
+  REQUIRED_THERMAL_HEADROOM_C,
+  type SafetyContext,
+} from './safety.js';
+export { simulatePlan, simulatePlanWithReference, estimateWorld, type PlanMetrics } from './simulate.js';
