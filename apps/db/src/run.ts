@@ -5,10 +5,12 @@
 // scoped to the run (incl. actions, incidents, telemetry, faults) is deleted first.
 import { ScheduleAt, t } from 'spacetimedb/server';
 import { validatePayload, type PhysicsWorld } from '@dcos/contracts';
+import { buildPreset, GPU_MODEL_VERSION, PRESET_ID, type PresetId } from '@dcos/physics';
 import spacetimedb, { type Ctx } from './schema';
 import { reject, requireRole } from './auth';
 import { projectWorld } from './projection';
-import { buildPresetStandIn, PRESET_IDS, type PresetId } from './preset';
+
+const PRESET_IDS: readonly string[] = [PRESET_ID];
 
 /** Mirrors db-client `RunConfig`. `speed` is also stored on `run.speed`. */
 export interface RunConfig {
@@ -100,7 +102,7 @@ export const create_run = spacetimedb.reducer(
   (ctx, { run_id, seed, preset_id }) => {
     requireRole(ctx, 'admin');
     requireId('run_id', run_id);
-    if (!(PRESET_IDS as readonly string[]).includes(preset_id)) {
+    if (!PRESET_IDS.includes(preset_id)) {
       reject('INVALID_PAYLOAD', `preset_id must be one of ${PRESET_IDS.join(', ')}`);
     }
 
@@ -112,8 +114,7 @@ export const create_run = spacetimedb.reducer(
     }
     const cleared = ctx.db.run.run_id.find(run_id) ? clearRun(ctx, run_id) : 0;
 
-    // TODO(P1-3): swap for `buildPreset(preset_id, run_id, seed)` from @dcos/physics.
-    const world = buildPresetStandIn(preset_id as PresetId, run_id, seed);
+    const world = buildPreset(preset_id as PresetId, run_id, seed);
     const v = validatePayload('PhysicsWorld', world);
     if (!v.ok) throw new Error(`buildPreset produced an invalid PhysicsWorld: ${v.errors.slice(0, 5).join('; ')}`);
 
@@ -137,7 +138,7 @@ export const create_run = spacetimedb.reducer(
       decision_epoch: c.decision_epoch,
       paused: c.paused,
       speed: DEFAULT_CONFIG.speed,
-      profile_version: `${preset_id}@p2-standin`,
+      profile_version: `${preset_id}@${GPU_MODEL_VERSION}`,
     });
     const writes = projectWorld(ctx, world);
     // advance_tick once per wall second (clearRun removed any previous schedule for this run).

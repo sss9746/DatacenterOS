@@ -2,21 +2,19 @@
 // create_run). Runs `run.speed` logical steps of `step_ms`; skips while paused. The interval
 // schedule doesn't replay missed seconds.
 //
-// Order inside one tick (LANE-P2 design): faults due → physics step → due action completions
-// (P2-5 plugs in here) → epoch bump → commit (world_state, projection, telemetry, signals).
-import type { PhysicsTickResult, SignalEvent, SimulationTickInput, TelemetryEvent } from '@dcos/contracts';
+// Order inside one tick (LANE-P2 design): faults due → physics step (which also completes due
+// commands and bumps decision_epoch on material_change) → ledger updates (P2-5 plugs in here) →
+// commit (world_state, projection, telemetry, signals).
+import type { SignalEvent, TelemetryEvent } from '@dcos/contracts';
+import { step } from '@dcos/physics';
 import spacetimedb, { tick_schedule, type Ctx } from './schema';
 import { reject } from './auth';
 import { loadWorld, saveWorld } from './run';
 import { pendingFaults, takeDueFaults } from './faults';
 import { projectWorld } from './projection';
-import { stepStandIn } from './step-standin';
 
 /** CONTRACTS §0.8: keep at most 2,000 telemetry rows. */
 export const TELEMETRY_MAX_ROWS = 2000;
-
-// TODO(P1-4): swap for `step` from @dcos/physics (same signature).
-const stepWorld: (input: SimulationTickInput) => PhysicsTickResult = stepStandIn;
 
 function appendTelemetry(ctx: Ctx, events: TelemetryEvent[], nowMs: number): number {
   let n = 0;
@@ -97,7 +95,6 @@ export const advance_tick = spacetimedb.reducer(
 
     const nowMs = Number(ctx.timestamp.toMillis());
     let world = loadWorld(ctx, run.run_id);
-    let material = false;
     let telemetry: TelemetryEvent[] = [];
     const signals: SignalEvent[] = [];
     const pending = pendingFaults(ctx, run.run_id); // one scan per tick, not per step
@@ -105,7 +102,7 @@ export const advance_tick = spacetimedb.reducer(
     for (let i = 0; i < Math.max(1, run.speed); i++) {
       const stepMs = world.observable.clock.step_ms;
       const due = takeDueFaults(ctx, pending, world.observable.clock.sim_time_ms + stepMs);
-      const result = stepWorld({
+      const result = step({
         schema_version: '1.1.0',
         run_id: run.run_id,
         step_ms: stepMs,
@@ -114,14 +111,11 @@ export const advance_tick = spacetimedb.reducer(
         due_faults_private: due,
         requested_action_ids: [], // P2-5: running actions' ids
       });
-      world = result.world_after;
-      material = material || result.material_change;
+      world = result.world_after; // step bumps decision_epoch itself on material_change
       telemetry = result.telemetry; // only the last step's samples: ≤ 1 per metric per GPU per wall second
       signals.push(...result.signals); // every signal is kept
       // P2-5: result.completed_command_keys / failed_command_keys → action ledger (revalidated).
     }
-
-    if (material) world.observable.clock.decision_epoch += 1;
 
     saveWorld(ctx, world);
     projectWorld(ctx, world);

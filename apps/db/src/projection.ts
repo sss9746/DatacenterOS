@@ -8,6 +8,7 @@
 //
 // Telemetry and signals aren't part of the snapshot; the tick appends them (P2-4).
 import type { ObservedSnapshot, PhysicsWorld } from '@dcos/contracts';
+import { toObserved } from '@dcos/physics';
 import type { Ctx } from './schema';
 
 type PkIndex<K, R> = { find(key: K): R | null; update(row: R): R; delete(key: K): boolean };
@@ -71,7 +72,7 @@ function resourceStatus(obs: ObservedSnapshot): Map<string, { status: string; ve
 }
 
 export function projectWorld(ctx: Ctx, world: PhysicsWorld): number {
-  const obs = world.observable;
+  const obs = toObserved(world); // strips any private key (defense in depth)
   const runId = world.run_id;
   const db = ctx.db;
   let writes = 0;

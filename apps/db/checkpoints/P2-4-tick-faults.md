@@ -15,11 +15,11 @@ The world runs on its own: a scheduled tick advances physics, faults take effect
 
 ## Done when (Gate 1)
 - [x] Ticks advance `run.sim_time_ms` without any client connected
-- [ ] pump-a degradation at 10,000 ms → r2–r4 `temp_c` rises in `gpu_current`; GPUs > 85 °C throttle; r5–r8 stay cool (**⛔ P1-4 `step`**; fault is accepted and delivered, heat model is P1's)
-- [x] XID 79 on `gpu-r3-n1-0` → `signal_event` row + job-a `failed`/`restarting`, progress back to `durable_work_units` (stand-in step; re-check with P1's)
+- [x] pump-a degradation at 10,000 ms → r2–r4 `temp_c` rises in `gpu_current`; GPUs > 85 °C throttle; r5–r8 stay cool (real P1 physics)
+- [x] XID 79 on `gpu-r3-n1-0` → `signal_event` row + job-a `failed`/`restarting`, progress back to `durable_work_units` (real P1 physics)
 - [x] `telemetry_recent` stays ≤ 2,000 rows
 - [x] `pause_run` stops time; `configure_run` speed 5 → 5 s per wall second
-- [ ] Reducer time stays under the limit from the booth answer at speed 5× (no booth answer yet; stand-in keeps up at 5×, re-check with P1's step)
+- [ ] Reducer time stays under the limit from the booth answer at speed 5× (no booth answer yet; at 5× with real physics the tick keeps pace and the logs show no errors; locally 50 steps incl. JSON round-trips = 75 ms)
 - [ ] Dashboard (P4) sees it live (needs P4)
 
 ## Blocked by
@@ -48,7 +48,16 @@ Review of the uncommitted P2-4 diff (codex exec, read-only). All four **fixed** 
 - `pause_run true`: 5 s wall → `sim_time_ms` unchanged. `speed 5`: 678000 → 733000 in 11 s = 5 sim-s per wall-s. The logs show no tick errors.
 - `tsc` clean (db, db-client); `pnpm -r test` 15 / 92 / 15.
 
-**Open**
-- Gate 1's heat check waits for P1-4 `step`. §0.12 #2: the gate's "10,000 ms" means **610000** (start + 10 s).
+**Real physics swapped in** (after `git merge origin/lane/p1-sim`, `b6040a4`)
+- Both stand-ins (`preset.ts` + fixture JSON, `step-standin.ts`) were deleted. `create_run` calls `buildPreset`; `advance_tick` calls `step`; `projectWorld` projects `toObserved(world)` (it strips private keys, defense in depth). My own epoch bump was removed because P1's `step` already bumps `decision_epoch` on `material_change`. `ping` no longer uses `makeRng`, which moved to `@dcos/physics/v0`. `profile_version` = `gpu_demo_8@gpu_v1`.
+- Live on `dcos-dev`: pump-a degradation at 10000 (speed 5). r2–r4 max temp 70.2 → 73.1 → 76.3 → 79.5 → 82.7 → 85.9 °C (8 GPUs throttled per rack at 85.9); r1/r5/r7/r8 stay at 38.7 °C; r6 stays at 82.2 °C (hot by design); pump-a `degraded`, capacity estimate 9600 W; epoch 1 → 12. XID 79 at 5000: signal `sig.5000.gpu-r3-n1-0.xid_error` (critical), GPU `unreachable`/79, job-a `failed` 95088 → 86400 (= durable), epoch 1. `pnpm -r test`: 15 / 335 / 15.
+
+**P1's `buildPreset` misses three contract points** (P1 to fix; P2 can't patch them, because shifting the clock would desync P1's hidden state):
+- clock starts at **0**, not 600000; both checkpoints are stamped at 0 (§0.12 #2). Until it's fixed, the gate times are relative to 0 (pump fault at 10000).
+- no `node-real-0` and no `gpu-real-0` `gpu_current` row (§0.11 #4), so `gpu_current` = **64**, not the 65 that P2-3's check expects
+- `cooling_current` has pumps only, no loop rows (§0.11 #9)
+- also: the thermal throttle bit is `0x40` (`CLOCKS_EVENT_HW_THERMAL`), but §0.11 #5 says `clocks_event_reasons & 0x20`. P1 and P3 must agree, or P3 won't see throttling.
+
+**Open** §0.12 #2: the gate's "10,000 ms" means **610000** (start + 10 s).
 - Reducer time limit: still no booth answer. The stand-in tick keeps up at 5×. P1's real step runs 5× per tick, and each tick parses and stringifies the ~100 KB world, so re-check at 5× once it lands. If it's too slow, write the world only on the last step (already true) and cap `speed`.
-- Telemetry budget: the stand-in writes 64 rows per tick, so 2,000 rows ≈ 31 s of history. If P1's step emits 4 DCGM metrics per GPU, that's ≈ 8 s of history. P4 may want the temperature metric kept longer; if so, we'd add per-metric retention later.
+- Telemetry budget: P1's `step` emits **266 rows per tick**, so the 2,000-row cap ≈ **7.5 s** of history. If P4's charts need longer, options: keep only the temperature metric per GPU in `telemetry_recent`, or downsample. Needs a P4 decision.
