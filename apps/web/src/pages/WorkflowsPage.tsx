@@ -3,6 +3,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { SHUTDOWN_C, SLOWDOWN_C } from '@dcos/physics';
 import type { PageProps } from '../app/page-props';
 import { WorkflowBoard } from '../components/workflows/WorkflowBoard';
+import { TeamSection } from '../components/team/TeamSection';
 import { Ledger } from '../components/ledger/Ledger';
 import { Feed } from '../components/feed/Feed';
 import { ModelAssumptions } from '../components/simulation/ModelAssumptions';
@@ -34,7 +35,8 @@ const readTabFromHash = (): TabId => {
  * Page 4 — "Where is each recovery, and what was blocked?" Owner: agent D. Four tabs over one read model: every section
  * is rendered (inactive ones are `hidden`) so anchors keep resolving and the shell can scroll to any section id.
  */
-export function WorkflowsPage({ state, snapshot, runWorkflows, runPlans, example, mode, localPhysics, now }: PageProps) {
+export function WorkflowsPage(props: PageProps) {
+  const { state, snapshot, runWorkflows, runPlans, example, mode, localPhysics, now, recorded } = props;
   const [tab, setTab] = useState<TabId>(readTabFromHash);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   useEffect(() => {
@@ -65,7 +67,7 @@ export function WorkflowsPage({ state, snapshot, runWorkflows, runPlans, example
       </button>)}
     </div>
     <div id="wf-pane-workflows" role="tabpanel" aria-labelledby="wf-tab-workflows" hidden={tab !== 'workflows'} className="wf-pane">
-      <WorkflowBoard workflows={runWorkflows} plans={runPlans} events={state.events} actionDetails={state.actionDetails} incidents={state.incidents} snapshot={snapshot} example={example} mode={mode} nowUnixMs={now} evidence={state.evidence}/>
+      <WorkflowBoard workflows={runWorkflows} plans={runPlans} events={state.events} actionDetails={state.actionDetails} incidents={state.incidents} snapshot={snapshot} example={example} mode={mode} nowUnixMs={now} evidence={state.evidence} renderSelected={(view) => <TeamSection key={view.workflow.workflow_id} view={view} mode={mode} example={example} recorded={recorded}/>}/>
     </div>
     <div id="wf-pane-ledger" role="tabpanel" aria-labelledby="wf-tab-ledger" hidden={tab !== 'ledger'} className="wf-pane">
       <Ledger actions={state.actions} details={state.actionDetails} simTimeMs={snapshot.clock.sim_time_ms}/>

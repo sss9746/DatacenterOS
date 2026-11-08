@@ -68,7 +68,8 @@ Integration branch: `int/r-sprint`. Agent-team work: `Prod-Multi-Agent-System`, 
 | **Supervisor** (`supervised` script): relaunches a crashed agent, which reclaims the workflow after its lease expires | 🧪 (stand-in child only; not yet run with the real agent) |
 | **Waiting recovery:** failed checkpoint-backed jobs wait for capacity, then restart; jobs with no checkpoint go to an operator | ✅ on local DB (SB, SBK) |
 | Per-incident workflows, zones, inter-process agent messages and automatic hot-standby takeover (`r/multi-agent`) | Dropped, not merged |
-| Agent tests: 540 (`Prod-Multi-Agent-System`) | 🧪 |
+| **Live team progress:** the round writes `state.team` while agents think (trace v2: per-call status, phase, message timing); the last 4 rounds stay in `state.team_rounds`; a round cut short by a crash shows as interrupted | ✅ live on `dcos-dev` once (L3 team mode, 09:16): the stage moved through thinking → covering → Lead thinking → closed during both rounds; both rounds kept after the replan. A SIGKILL *during* a round (interrupted) is unit-tested only |
+| Agent tests: 572 (`Prod-Multi-Agent-System`) | 🧪 |
 
 ## 4. Live recovery proof: R5 harness (`apps/agent/scripts/live-recovery-test.ts`)
 | Case | What it proves | Status |
@@ -79,6 +80,7 @@ Integration branch: `int/r-sprint`. Agent-team work: `Prod-Multi-Agent-System`, 
 | L4 | Stale fencing token rejected after takeover | ✅ 8/8 |
 | L5 | Source GPU fails on the checkpoint due tick → no false durability | 🧪 (harness fixed; re-run pending) |
 | L6 | Nemotron unreachable → safety holds, all events CODE | ✅ 5/5 |
+| L3 in team mode on `dcos-dev` (09:16) | 17/18: full recovery passed; conversation check failed because Workload's finding was rejected in both rounds (`no_question_reason`) and Cooling covered |
 | L1, L3 in team mode | Same checks, plus Lead decided, peer answer consumed, 6 model calls per round at most | ✅ 12/12 and 18/18 on local DB |
 | SB, SBK | Scene B: all nodes crash, jobs wait, nodes return, checkpoint-backed jobs restart; SBK adds a SIGKILL during the wait | ✅ SBK 25/25; SB 20/21 (recovery passed, no peer answer after a Workload timeout) on local DB |
 | L7, L8 | Multi-process cases from `r/multi-agent` | Dropped, not merged |
@@ -116,8 +118,10 @@ Integration branch: `int/r-sprint`. Agent-team work: `Prod-Multi-Agent-System`, 
 | REAL NVIDIA GPU tile (live / REPLAY / collector offline) | ✅ |
 | Presenter controls (local only, never on Vercel): pump fault, XID 79, hot-r6 safety probe, reset | ✅ |
 | Polish pass (story order, larger type, accessibility WCAG AA, 390 px) | ✅ |
-| **UI v2:** previous look + left sidebar + separate pages (Cluster overview, Training jobs with animated progress, Recovery activity with the **Agent room** and incident explanations, Workflows, Benchmarks, Real GPU) + simple demo buttons | 🚧 `r/ui-v2` (awaiting owner review) |
-| Agent room: role seats, chat handoffs, alpha/beta owner chips, takeover dividers, agent-to-agent bubbles | 🚧 (EXAMPLE fixture in mock only; its alpha/beta design came from the dropped `r/multi-agent`, so live roles would be Cooling, Workload and Lead) |
+| **UI v2:** previous look + left sidebar + separate pages (Cluster overview, Training jobs with animated progress, Recovery activity with the **Agent room** and incident explanations, Workflows, Benchmarks, Real GPU) + simple demo buttons | ✅ merged into `Prod-Multi-Agent-System` |
+| Agent room: Cooling, Workload, Lead (NEMOTRON) and Supervisor (CODE) seats, built from `team_message` feed rows; unconsumed messages marked | 🧪 unit-tested; not yet watched against a live team run |
+| **Workflows tab team view:** agent stage (Cooling, Workload, Lead → code safety gate → Coordinator), transcript with CLAIM labels, budget, round picker, recovery timeline | ✅ watched live on `dcos-dev` (L3) and in RECORDED mode at 1440/390/320 px |
+| **RECORDED replay** (Run view → Recorded agent team): the two real L3 team rounds and verification, labeled RECORDED, "replay pacing, not recorded timing" | ✅ mock mode |
 | Public site https://datacenteros.vercel.app | ⏳ still the old mock build; live deploy at 08:30 |
 | Web tests 101–137 + Playwright e2e with axe accessibility checks | ✅ |
 

@@ -2,9 +2,10 @@ import { connect, createMockClient, type ActionDetail, type DbClient, type Agent
 import type { ActionStatus, EvaluationResult, Incident, JobState, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
 import { evaluateSafety } from '@dcos/physics';
 import { loadRecoveryExample } from './recovery-example';
+import { loadRecordedRun } from './recorded-run';
 import { createLocalPhysicsClient, type LocalFacilityConfig } from './local-physics';
 
-export type Preview = 'physics' | 'demo' | 'pump_degraded' | 'recovery';
+export type Preview = 'physics' | 'demo' | 'pump_degraded' | 'recovery' | 'recorded';
 export interface DashboardState {
   phase: 'loading' | 'ready' | 'error';
   snapshot: ObservedSnapshot | null;
@@ -135,6 +136,7 @@ export async function openDashboard(mode: 'mock' | 'live', preview: Preview, opt
   else {
     const mock = preview === 'physics' ? createLocalPhysicsClient(42, options.localConfig) : createMockClient({ snapshot: preview === 'pump_degraded' ? preview : 'demo', evaluateSafety });
     if (preview === 'recovery') await loadRecoveryExample(mock);
+    if (preview === 'recorded') await loadRecordedRun(mock);
     client = mock;
   }
   return new DashboardStore(client);

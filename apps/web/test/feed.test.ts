@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { AgentEventInput } from '@dcos/db-client';
-import { Feed, agentMessageLabel } from '../src/components/feed/Feed';
+import { Feed, teamMessageLabel } from '../src/components/feed/Feed';
 import { FEED_CAP, actorClass, sliceFeed } from '../src/components/feed/feed-view';
 
 let n = 0;
@@ -55,16 +55,20 @@ describe('feed filter and cap', () => {
   });
 });
 
-describe('agent-to-agent messages (v2 event log)', () => {
-  it('labels agent_message tool calls with the sender and receiver from the args, never from the actor', () => {
-    expect(agentMessageLabel('from=example-agent-alpha-1 to=example-agent-beta-2 topic=cross_zone_move zone="loop B"')).toBe('example-agent-alpha-1 → example-agent-beta-2');
-    expect(agentMessageLabel('topic=takeover')).toBe('agent ↔ agent');
+describe('agent-team messages (event log)', () => {
+  it('labels team_message tool calls with the route and kind from the args, never from the actor', () => {
+    expect(teamMessageLabel('question cooling->workload')).toBe('Cooling → Workload · question');
+    expect(teamMessageLabel('objection supervisor->workload ev=x')).toBe('Supervisor → Workload · objection');
+    expect(teamMessageLabel('outcome')).toBe('team round');
     const html = renderToStaticMarkup(createElement(Feed, { example: false, id: 'event-log', title: 'Event log', events: [
-      ev({ actor: 'code', tool_calls: [{ tool: 'agent_message', args_summary: 'from=a-1 to=b-2 topic=ack', result_summary: 'ok', actor: 'code' }, { tool: 'simulate_plan', args_summary: 'x', result_summary: 'y', actor: 'code' }] }),
+      ev({ actor: 'nemotron', summary: 'Workload → Cooling: job-c on r6', tool_calls: [{ tool: 'team_message', args_summary: 'answer workload->cooling', result_summary: 'consumed by cooling, lead', actor: 'nemotron' }, { tool: 'simulate_plan', args_summary: 'x', result_summary: 'y', actor: 'code' }] }),
+      ev({ actor: 'code', tool_calls: [{ tool: 'agent_message', args_summary: 'from=a-1 to=b-2 topic=ack', result_summary: 'ok', actor: 'code' }] }),
     ] }));
     expect(html).toContain('id="event-log"');
-    expect(html).toContain('tool-call actor-code tool-call-message');
-    expect(html).toContain('a-1 → b-2');
+    expect(html).toContain('tool-call actor-nemotron tool-call-message');
+    expect(html).toContain('Workload → Cooling · answer');
+    // The dropped `agent_message` tool gets no message styling.
     expect((html.match(/feed-agent-chip/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('a-1 → b-2');
   });
 });

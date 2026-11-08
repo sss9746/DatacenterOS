@@ -5,15 +5,15 @@ import { Panel, Badge, Empty } from '../ui/panel';
 import { duration } from '../../lib/utils';
 import { actorCounts, actorLabel, actorSummary } from '../workflows/workflow-view';
 import { FEED_CAP, FEED_FILTERS, actorClass, sliceFeed, type FeedFilter } from './feed-view';
+import { PARTY_LABEL, isTeamMessage, parseTeamArgs } from '../agent-room/team-message';
 import './feed.css';
 
-/** `agent_message` tool calls are one agent process talking to another; their args carry `from=… to=… topic=…`. */
-export const isAgentMessage = (call: { tool: string }): boolean => call.tool === 'agent_message';
-/** `from=agent-alpha-1 to=agent-beta-2 topic=x` → `agent-alpha-1 → agent-beta-2`; falls back to the generic label. */
-export function agentMessageLabel(argsSummary: string): string {
-  const from = /\bfrom=(\S+)/.exec(argsSummary)?.[1];
-  const to = /\bto=(\S+)/.exec(argsSummary)?.[1];
-  return from && to ? `${from} → ${to}` : 'agent ↔ agent';
+/** `team_message` tool calls are one agent-team member (Cooling, Workload, Lead, Supervisor) addressing another. */
+export { isTeamMessage } from '../agent-room/team-message';
+/** `question cooling->workload[ …]` → `Cooling → Workload · question`; a route-less team row → `team round`. */
+export function teamMessageLabel(argsSummary: string): string {
+  const parsed = parseTeamArgs(argsSummary);
+  return parsed ? `${PARTY_LABEL[parsed.from]} → ${PARTY_LABEL[parsed.to]} · ${parsed.kind}` : 'team round';
 }
 
 /**
@@ -58,8 +58,8 @@ function FeedEvent({ event, example }: { event: AgentEventInput; example: boolea
     <div className="feed-event-meta"><span><ActorPill actor={event.actor} example={example}/><Badge tone={event.stage === 'replan' ? 'warning' : 'neutral'}>{event.stage}</Badge></span><time>{duration(event.sim_time_ms)} sim</time></div>
     <p className="feed-workflow">{event.workflow_id ? <>Workflow <code>{event.workflow_id}</code></> : 'Run-wide (no workflow)'}</p>
     <p>{event.summary}</p>
-    {event.tool_calls.map((call, i) => <details className={`tool-call ${actorClass(call.actor)}${isAgentMessage(call) ? ' tool-call-message' : ''}`} key={`${event.agent_event_id}-${i}`}>
-      <summary><code>{call.tool}()</code>{isAgentMessage(call) && <span className="chip feed-agent-chip" title={call.args_summary}><MessagesSquare size={11} aria-hidden="true"/>{agentMessageLabel(call.args_summary)}</span>}<span>{call.actor ? actorLabel(call.actor, example) : 'Tool call · actor not recorded'}</span></summary>
+    {event.tool_calls.map((call, i) => <details className={`tool-call ${actorClass(call.actor)}${isTeamMessage(call) ? ' tool-call-message' : ''}`} key={`${event.agent_event_id}-${i}`}>
+      <summary><code>{call.tool}()</code>{isTeamMessage(call) && <span className="chip feed-agent-chip" title={call.args_summary}><MessagesSquare size={11} aria-hidden="true"/>{teamMessageLabel(call.args_summary)}</span>}<span>{call.actor ? actorLabel(call.actor, example) : 'Tool call · actor not recorded'}</span></summary>
       <div><code>{call.args_summary}</code><ArrowRight size={14} aria-hidden="true"/><p>{call.result_summary}</p></div>
     </details>)}
     {hasEvidence && <div className="evidence-ids">{event.incident_id && <span>{event.incident_id}</span>}{event.evidence_ids.map((id) => <code key={id}>{id}</code>)}</div>}

@@ -5,6 +5,7 @@
 
 import type { ActionDetail, AgentActor, AgentEventInput, AgentStage, ToolCallSummary, WorkflowRecord } from '@dcos/db-client';
 import type { ActionCommand, ActionStatus, Incident, ObservedSnapshot } from '@dcos/contracts';
+import { readOperatorJobs, readRecovery, readTeam, type OperatorJob, type RecoveryInfo } from '../team/team-view';
 
 // ------------------------------------------------------------------------------------------------ stage track
 
@@ -616,6 +617,12 @@ export interface WorkflowView {
   /** Show the handoff block: closed, escalated, or a verification result exists. */
   terminal: boolean;
   nextStep: { text: string; source: 'verification' | 'escalation_reason' } | null;
+  /** Persisted `state.recovery` (capacity wait), null when absent. */
+  recovery: RecoveryInfo | null;
+  /** Persisted `state.operator_jobs`: jobs the planner says need a person. */
+  operatorJobs: OperatorJob[];
+  /** A team trace (`state.team` / `state.team_rounds`) exists for this workflow. */
+  hasTeam: boolean;
 }
 
 const fmtSim = (ms: number) => {
@@ -624,8 +631,12 @@ const fmtSim = (ms: number) => {
 };
 export const formatSpan = fmtSim;
 
+/** The Compare step reads "Team round" when the agent team persisted a trace for this workflow (the step id stays `compare`). */
+export const hasTeamTrace = (state: Record<string, unknown>): boolean => readTeam(state) !== null;
+
 export function buildSteps(current: TrackStage | null, events: readonly AgentEventInput[], runLevelTriage: boolean, wf: WorkflowRecord, verification: VerificationRecord | null, blockedReason: string | null = null): TrackStep[] {
   const seen = new Set(events.map((e) => trackStageOf(e.stage)));
+  const team = hasTeamTrace(wf.state);
   const cur = current === null ? -1 : TRACK.findIndex((t) => t.id === current);
   return TRACK.map((t, i) => {
     let state: StepState;
@@ -638,7 +649,7 @@ export function buildSteps(current: TrackStage | null, events: readonly AgentEve
     else if (t.id === 'triage' && runLevelTriage) state = 'run_level';
     else state = i < cur ? 'no_event' : 'not_reached';
     const stateLabel = state === 'blocked' ? `blocked: ${blockedReason}` : STEP_LABEL[state];
-    return { id: t.id, label: t.label, state, stateLabel };
+    return { id: t.id, label: t.id === 'compare' && team ? 'Team round' : t.label, state, stateLabel };
   });
 }
 
@@ -652,7 +663,14 @@ function currentStep(wf: WorkflowRecord, events: readonly AgentEventInput[], ver
   return trackStageOf(wf.stage);
 }
 
-function statusOf(wf: WorkflowRecord, v: VerificationRecord | null, waiting: WaitInfo | null, escalationReason: string | null, replanReason: string | null): WorkflowStatus {
+/** Plain-English line for a persisted capacity wait (`state.recovery`, status waiting). Wall time only; no sim estimate. */
+export function recoveryWaitText(r: RecoveryInfo): string {
+  const jobs = r.jobIds.length ? r.jobIds.join(', ') : 'jobs not recorded';
+  const since = r.firstWaitUnixMs !== null ? ` since ${new Date(r.firstWaitUnixMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })} wall` : '';
+  return `Holding ${jobs} until capacity returns${since}${r.attempts !== null ? ` (check ${r.attempts})` : ''}: ${r.blockedReason ?? 'reason not recorded'}.`;
+}
+
+function statusOf(wf: WorkflowRecord, v: VerificationRecord | null, waiting: WaitInfo | null, escalationReason: string | null, replanReason: string | null, recovery: RecoveryInfo | null = null): WorkflowStatus {
   switch (wf.stage) {
     case 'escalated':
       return { kind: 'escalated', label: 'Escalated to operator', detail: escalationReason ?? (v && v.verified === false ? 'Verification did not confirm recovery; needs operator review.' : 'Escalation reason not recorded.') };
@@ -666,6 +684,7 @@ function statusOf(wf: WorkflowRecord, v: VerificationRecord | null, waiting: Wai
       return { kind: 'opened', label: 'Opened', detail: 'The workflow lease is claimed; no stage has been persisted yet.' };
     default:
       if (waiting) return { kind: 'waiting', label: 'Waiting', detail: waitText(waiting) };
+      if (recovery?.status === 'waiting') return { kind: 'waiting', label: 'Waiting for capacity', detail: recoveryWaitText(recovery) };
       if (wf.stage === 'verify') return { kind: 'in_progress', label: 'Verifying', detail: 'Verification is running; no result has been persisted yet.' };
       return { kind: 'in_progress', label: 'In progress', detail: `Persisted stage: ${wf.stage}.` };
   }
@@ -725,6 +744,7 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
       const groups = groupActions(actions);
       const blockedReason = blockedStepReason(groups);
       const resumed = resumeEvidence(events, wf.state);
+      const recovery = readRecovery(wf.state);
       return {
         workflow: wf,
         incidents: incidentIds.map((id) => {
@@ -733,7 +753,7 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
         }),
         steps: buildSteps(current, events, runLevelTriage, wf, verification, blockedReason),
         current,
-        status: statusOf(wf, verification, waiting, escalationReason, replan?.reason ?? null),
+        status: statusOf(wf, verification, waiting, escalationReason, replan?.reason ?? null, recovery),
         waiting,
         resumed,
         resumedWithoutDuplicate: resumedWithoutDuplicate(events, actions, resumed),
@@ -754,6 +774,9 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
         candidates: candidateRound(events, wf.state),
         terminal: terminal || verification !== null,
         nextStep,
+        recovery,
+        operatorJobs: readOperatorJobs(wf.state),
+        hasTeam: hasTeamTrace(wf.state),
       };
     });
 }

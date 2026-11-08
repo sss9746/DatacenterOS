@@ -1,0 +1,273 @@
+{
+ "source": "apps/agent/live-results/agent-team-2026-11-08/L3-team-scene-a/L3.json",
+ "note": "Copied verbatim from the live result team section (real Nemotron, local dcos-r-local). v1 traces: no per-call timing.",
+ "rounds": [
+  {
+   "workflow_id": "wf-inc-thermal-pump-a-b2",
+   "trace": {
+    "version": 1,
+    "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+    "snapshot_sim_ms": 602000,
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "calls_used": 5,
+    "wall_ms": 8973,
+    "outcome": "lead",
+    "messages": [
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m1",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "cooling",
+      "to": "lead",
+      "kind": "finding",
+      "reply_to": null,
+      "summary": "Pump-a degraded at 602s; loop-a capacity down to 9.6kW/24kW. Racks r2-r4 on loop-a at 70°C with ~15°C headroom; rack r6 on loop-b at 82°C with 2.8°C headroom. Cooling failure explains the thermal spike on loop-a racks; loop-b racks are nominal.",
+      "evidence_ids": [
+       "sig.602000.pump-a.equipment_alarm",
+       "sym-cooling_degraded-loop-a-b2",
+       "sym-cooling_degraded-pump-a-b2",
+       "tel.602000.pump-a.pump.power_w"
+      ],
+      "resource_ids": [
+       "pump-a",
+       "loop-a",
+       "rack-r2",
+       "rack-r3",
+       "rack-r4",
+       "rack-r6"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m2",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "cooling",
+      "to": "workload",
+      "kind": "question",
+      "reply_to": null,
+      "summary": "Which job is running on rack-r6, the rack with 82°C and 2.8°C headroom?",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": [
+       "workload",
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m3",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "workload",
+      "to": "lead",
+      "kind": "finding",
+      "reply_to": null,
+      "summary": "Risk assessment: job-a running with 16 GPUs across racks r2+r3 has no checkpoint fallback (latest checkpoint at sim_time 60000ms, 2000ms ago); job-b running on rack r4 has checkpoint ckpt-job-b-1 at 540000ms (62000ms ago) fully durable. Both jobs have candidates but rack thermal safety unconfirmed. Action: do not preempt; request Cooling validation for any rack placement.",
+      "evidence_ids": [],
+      "resource_ids": [
+       "job-a",
+       "job-b",
+       "job-c",
+       "ckpt-job-a-1",
+       "ckpt-job-b-1",
+       "rack-r1",
+       "rack-r2",
+       "rack-r3",
+       "rack-r4",
+       "rack-r5",
+       "rack-r7",
+       "rack-r8"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m4",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "workload",
+      "to": "cooling",
+      "kind": "question",
+      "reply_to": null,
+      "summary": "Can Cooling confirm rack-r1, rack-r5, rack-r7, rack-r8 thermal headroom is sufficient for the candidate placements of job-a and job-b?",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": [
+       "cooling",
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m5",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "workload",
+      "to": "cooling",
+      "kind": "answer",
+      "reply_to": "wf-inc-thermal-pump-a-b2:a1:e1:m2",
+      "summary": "Job-c is the only job running on rack-r6; it has checkpoint_supported=false and no durable work units, so no checkpoint recovery is available.",
+      "evidence_ids": [],
+      "resource_ids": [
+       "job-c",
+       "rack-r6"
+      ],
+      "consumed_by": [
+       "cooling",
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m6",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "cooling",
+      "to": "workload",
+      "kind": "answer",
+      "reply_to": "wf-inc-thermal-pump-a-b2:a1:e1:m4",
+      "summary": "rack-r1, r5, r7, r8 all have min thermal headroom 46.3°C or 46.2°C, well above nominal GPU operating temps; loop-b is nominal with 40kW capacity observed at 40kW. Job placements on those racks are thermally safe.",
+      "evidence_ids": [
+       "sig.602000.pump-a.equipment_alarm",
+       "sym-cooling_degraded-loop-a-b2",
+       "sym-cooling_degraded-pump-a-b2",
+       "tel.602000.pump-a.pump.power_w"
+      ],
+      "resource_ids": [
+       "loop-b",
+       "rack-r1",
+       "rack-r5",
+       "rack-r7",
+       "rack-r8"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a1:e1:m7",
+      "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+      "from": "lead",
+      "to": "supervisor",
+      "kind": "decision",
+      "reply_to": null,
+      "summary": "job-a:ckpt+move:r1+r5 (approval), job-b:keep",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": []
+     }
+    ],
+    "covers": [],
+    "missing_roles": []
+   }
+  },
+  {
+   "workflow_id": "wf-inc-thermal-pump-a-b2",
+   "trace": {
+    "version": 1,
+    "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+    "snapshot_sim_ms": 649000,
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "calls_used": 4,
+    "wall_ms": 12058,
+    "outcome": "lead",
+    "messages": [
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a2:e3:m1",
+      "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+      "from": "cooling",
+      "to": "lead",
+      "kind": "finding",
+      "reply_to": null,
+      "summary": "Cooling degradation on pump-a and loop-a drives rack-r2/3/4 to 70°C+ with 14.6°C headroom; pump-a at 600W/24kW nominal. rack-r6 also at 82°C with 2.8°C headroom. Thermal limits approached on loop-a racks; rack-r6 near thermal shutdown.",
+      "evidence_ids": [
+       "sig.602000.pump-a.equipment_alarm",
+       "sym-cooling_degraded-pump-a-b2",
+       "sym-cooling_degraded-loop-a-b2",
+       "tel.649000.pump-a.pump.power_w"
+      ],
+      "resource_ids": [
+       "pump-a",
+       "loop-a",
+       "rack-r2",
+       "rack-r3",
+       "rack-r4",
+       "rack-r6"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a2:e3:m2",
+      "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+      "from": "cooling",
+      "to": "workload",
+      "kind": "question",
+      "reply_to": null,
+      "summary": "Which job is running on rack-r6, the rack at 82°C with 2.8°C headroom?",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": []
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a2:e3:m3",
+      "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+      "from": "supervisor",
+      "to": "workload",
+      "kind": "objection",
+      "reply_to": null,
+      "summary": "finding rejected: 0 unknown evidence id(s), 1 unknown resource id(s)",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": []
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a2:e3:m4",
+      "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+      "from": "cooling",
+      "to": "lead",
+      "kind": "cover",
+      "reply_to": null,
+      "summary": "Workload reports job-a (16 GPUs) and job-b (8 GPUs) running on loop-a racks rack-r2/3/4 where pump-a degraded limits capacity to 9.6kW; job-c on rack-r6 at 82°C with 2.8°C headroom. Cooling cannot sustain thermal headroom for job-a/b rack placement.",
+      "evidence_ids": [
+       "sig.618000.gpu-r1-n1-0.xid_error",
+       "sym-gpu_xid-gpu-r1-n1-0-b2",
+       "tel.649000.gpu-r1-n1-0.DCGM_FI_DEV_GPU_TEMP_CELSIUS",
+       "sig.602000.pump-a.equipment_alarm",
+       "sym-cooling_degraded-pump-a-b2",
+       "sym-cooling_degraded-loop-a-b2",
+       "tel.649000.pump-a.pump.power_w"
+      ],
+      "resource_ids": [
+       "pump-a",
+       "loop-a",
+       "rack-r2",
+       "rack-r3",
+       "rack-r4",
+       "rack-r6",
+       "gpu-r1-n1-0"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-thermal-pump-a-b2:a2:e3:m5",
+      "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+      "from": "lead",
+      "to": "supervisor",
+      "kind": "decision",
+      "reply_to": null,
+      "summary": "job-a:ckpt-reuse+move:r5+r7, job-b:keep",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": []
+     }
+    ],
+    "covers": [
+     {
+      "failed_role": "workload",
+      "covered_by": "cooling"
+     }
+    ],
+    "missing_roles": []
+   }
+  }
+ ]
+}

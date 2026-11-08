@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { ArrowUpRight, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useDashboard } from '../data/use-dashboard';
 import { asMock, errorMessage, type Preview } from '../data/dashboard';
+import { RECORDED_META } from '../data/recorded-run';
 import { Sidebar } from '../components/shell/Sidebar';
 import { TopBar } from '../components/shell/TopBar';
 import { PageHeader } from '../components/shell/PageHeader';
@@ -76,13 +77,14 @@ export function App() {
   const pumpOfRack = (rack: number): PumpId => { const id = snapshot ? loopOfRack(coolingLoops(snapshot), rack)?.pumpId : undefined; return id && isPumpId(id) ? id : rack >= 2 && rack <= 4 ? 'pump-a' : 'pump-b'; };
   const selectGpu = (id: string) => { setSelected(id); const rack = Number(/gpu-r(\d+)-/.exec(id)?.[1]); if (rack >= 1 && rack <= 8) setSelectedPumpId(pumpOfRack(rack)); };
   const example = mode === 'mock' && preview === 'recovery';
+  const recorded = mode === 'mock' && preview === 'recorded' ? RECORDED_META : null;
   const Page = PAGES[route];
   const openDemo = () => { setDemoOpen((open) => !open); if (!demoOpen) requestAnimationFrame(() => document.getElementById('presenter')?.scrollIntoView({ block: 'end' })); };
   return <>
     <a className="skip-link" href="#main">Skip to content</a>
     <TopBar mode={mode} dbName={dbName} localPhysics={localPhysics} snapshot={snapshot} error={error} stale={stale} canAdmin={canAdmin} pending={pending}
       preview={preview} onPreview={setPreview} speed={speed} onSpeed={(next) => void changeRun('speed', next)} onTogglePause={() => void changeRun('pause')}
-      demoOpen={demoOpen} onToggleDemo={openDemo}/>
+      demoOpen={demoOpen} onToggleDemo={openDemo} recorded={recorded}/>
     <Sidebar route={route}/>
     <main id="main" className="main">
       <PageHeader route={current}/>
@@ -91,7 +93,8 @@ export function App() {
       {!snapshot && !error && <div className="loading-surface" role="status"><span>Loading the cluster’s public snapshot…</span><div/><div/><div/></div>}
       {snapshot && store && <>
         {example && <p className="data-warning">Recovery example: incidents and tool calls are scripted illustrations. They are not a live diagnosis, executed plan, or benchmark.</p>}
-        <Page state={state} store={store} snapshot={snapshot} mode={mode} dbName={dbName} canAdmin={canAdmin} localPhysics={localPhysics} example={example} now={now} runWorkflows={state.workflows.filter((row) => row.run_id === snapshot.run_id)} runPlans={state.plans.filter((row) => row.run_id === snapshot.run_id)} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onError={setControlError} navigate={navigate}/>
+        {recorded && <p className="data-warning">Recorded agent team: the workflow’s team rounds and verification are copied from a saved real Nemotron run ({recorded.date}, {recorded.db}). Cluster telemetry, jobs and the clock are the mock fixture, not the recording. {recorded.timing === 'replay' ? 'Replay pacing, not recorded timing.' : ''}</p>}
+        <Page state={state} store={store} snapshot={snapshot} mode={mode} dbName={dbName} canAdmin={canAdmin} localPhysics={localPhysics} example={example} recorded={recorded} now={now} runWorkflows={state.workflows.filter((row) => row.run_id === snapshot.run_id)} runPlans={state.plans.filter((row) => row.run_id === snapshot.run_id)} selectedGpuId={selected} selectedPumpId={selectedPumpId} onSelectGpu={selectGpu} onSelectPump={setSelectedPumpId} onError={setControlError} navigate={navigate}/>
       </>}
       <div className="main-spacer" aria-hidden="true"/>
       <footer className="footer"><span>DataCenterOS <span className="separator">/</span> A GPU cluster digital twin</span><span>Simulated, configurable thresholds: throttle 85 °C · shutdown 92 °C</span><a href="https://github.com/sss9746/DatacenterOS/blob/main/plans/CONTRACTS.md" target="_blank" rel="noreferrer">Model contracts<ArrowUpRight size={13} aria-hidden="true"/></a></footer>

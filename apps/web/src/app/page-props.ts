@@ -24,6 +24,12 @@ export interface PageProps {
   localPhysics: boolean;
   /** Mock + scripted recovery example: every incident/event/workflow is an EXAMPLE fixture and must be labelled so. */
   example: boolean;
+  /**
+   * Mock + RECORDED replay of a saved real agent-team run (`data/recorded-run.ts`): the workflow's `state.team` /
+   * `state.team_rounds` are real Nemotron traces; the cluster telemetry around them is the mock fixture. Null otherwise.
+   * `timing: 'replay'` means v1 traces with no per-message timing: label it "replay pacing, not recorded timing".
+   */
+  recorded: { model: string | null; date: string; db: string; timing: 'replay' | 'recorded' } | null;
   /** Wall clock (ms), ticks once per second. Use for staleness and lease expiry, never for sim time. */
   now: number;
   /** `state.workflows` / `state.plans` filtered to `snapshot.run_id`. */

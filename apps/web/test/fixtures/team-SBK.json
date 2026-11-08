@@ -1,0 +1,146 @@
+{
+ "source": "apps/agent/live-results/agent-team-2026-11-08/SBK-team-scene-b-kill/SBK.json",
+ "note": "Copied verbatim from the live result team section (real Nemotron, local dcos-r-local). v1 traces: no per-call timing.",
+ "rounds": [
+  {
+   "workflow_id": "wf-inc-compute-node-r1-n1-b2",
+   "trace": {
+    "version": 1,
+    "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+    "snapshot_sim_ms": 705000,
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "calls_used": 5,
+    "wall_ms": 14393,
+    "outcome": "lead",
+    "messages": [
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m1",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "workload",
+      "to": "lead",
+      "kind": "finding",
+      "reply_to": null,
+      "summary": "All 6 host nodes and their 8×GPUs per node report unreachable in inc-compute-node-*. Each node has 9 symptoms; 5 nodes r5‑r8 still unreachable; job‑a requires 16 GPUs and has checkpoint ckpt‑job‑a‑1 at 86400/86400, job‑b requires 8 GPUs and has checkpoint ckpt‑job‑b‑1 at 40000/40000; candidate placements for both jobs exist on rack‑r1 (and racks r2‑r4 for job‑a) but thermal headroom for destinati…",
+      "evidence_ids": [
+       "sig.613000.node-r1-n1.node_unreachable",
+       "sig.613000.node-r5-n1.node_unreachable",
+       "sig.703000.node-r1-n1.resource_recovered"
+      ],
+      "resource_ids": [
+       "node-r1-n1",
+       "node-r5-n1",
+       "job-a",
+       "job-b",
+       "ckpt-job-a-1",
+       "ckpt-job-b-1"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m2",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "workload",
+      "to": "cooling",
+      "kind": "question",
+      "reply_to": null,
+      "summary": "Cooling: what is the thermal headroom in rack-r1 and rack-r2 (the destination racks for the best candidate placements of job‑a and job‑b)?",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": [
+       "cooling",
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m3",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "cooling",
+      "to": "lead",
+      "kind": "finding",
+      "reply_to": null,
+      "summary": "Cooling observation: rack-r6 avg temp 50.5 °C and max 50.7 °C on loop-b, min headroom 34.3 °C, below the safety margin of other racks (46.3 °C). Risk of thermal throttling or shutdown. Other racks operate normally with 38.5 °C avg and 46.3 °C headroom. Loop-b serves rack-r6 and rack-r7–r8.",
+      "evidence_ids": [],
+      "resource_ids": [
+       "rack-r6",
+       "loop-b"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m4",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "cooling",
+      "to": "workload",
+      "kind": "question",
+      "reply_to": null,
+      "summary": "Workload: which job sits on rack-r6 that worries you most?",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": [
+       "workload",
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m5",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "workload",
+      "to": "cooling",
+      "kind": "answer",
+      "reply_to": "wf-inc-compute-node-r1-n1-b2:a2:e2:m4",
+      "summary": "Job-a occupies node-r6-n1 in rack-r6 with 16 GPUs; its checkpoint ckpt-job-a-1 saved 86400 work units at sim_time 60000, well before the current 705000 ms. If job‑a cannot resume on rack‑r6, it would lose all progress. Job‑b has no node assignment and its checkpoint ckpt-job-b-1 covers 40000 units, also at risk if reassigned away from its original rack.",
+      "evidence_ids": [
+       "sig.613000.node-r6-n1.node_unreachable"
+      ],
+      "resource_ids": [
+       "node-r6-n1",
+       "job-a",
+       "job-b",
+       "ckpt-job-a-1",
+       "ckpt-job-b-1"
+      ],
+      "consumed_by": [
+       "cooling",
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m6",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "cooling",
+      "to": "workload",
+      "kind": "answer",
+      "reply_to": "wf-inc-compute-node-r1-n1-b2:a2:e2:m2",
+      "summary": "rack-r1 avg_temp 38.5 °C, min_headroom 46.3 °C; rack-r2 avg_temp 38.5 °C, min_headroom 46.3 °C",
+      "evidence_ids": [],
+      "resource_ids": [
+       "rack-r1",
+       "rack-r2"
+      ],
+      "consumed_by": [
+       "lead"
+      ]
+     },
+     {
+      "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m7",
+      "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+      "from": "lead",
+      "to": "supervisor",
+      "kind": "decision",
+      "reply_to": null,
+      "summary": "job-a:restart:r1+r2, job-b:restart:r3",
+      "evidence_ids": [],
+      "resource_ids": [],
+      "consumed_by": []
+     }
+    ],
+    "covers": [],
+    "missing_roles": []
+   }
+  }
+ ]
+}

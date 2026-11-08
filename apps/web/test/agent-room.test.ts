@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentEventInput, ToolCallSummary, WorkflowRecord } from '@dcos/db-client';
 import type { Incident } from '@dcos/contracts';
-import { seatOf } from '../src/components/agent-room/seat-of';
-import { boundSummary, buildRoomView, dividerText, parseAgentMessage, processLabel, processName, processOfEvent, resumeAnchorIndex, resumeDividerText, zoneOfWorker, AGENTS_THREAD_ID, type Bubble, type Divider } from '../src/components/agent-room/room-view';
+import { SEAT_COUNTS, SEATS, seatInfo, seatOf } from '../src/components/agent-room/seat-of';
+import { boundSummary, buildRoomView, dividerText, processName, processOfEvent, resumeAnchorIndex, resumeDividerText, AGENTS_THREAD_ID, type Bubble, type Divider } from '../src/components/agent-room/room-view';
+import { parseTeamArgs, parseTeamMessage, stripTeamHead, teamMessageOf } from '../src/components/agent-room/team-message';
 
 const call = (tool: string, actor: ToolCallSummary['actor'] = 'code'): ToolCallSummary => ({ tool, args_summary: 'a', result_summary: 'r', actor });
 let seq = 0;
@@ -191,45 +192,81 @@ describe('agent processes', () => {
   });
 });
 
-describe('cross-agent messages and zones', () => {
-  const now = 1_700_000_100_000;
-  const msg = (args: string, result = 'hello'): ToolCallSummary => ({ tool: 'agent_message', args_summary: args, result_summary: result, actor: 'code' });
-  it('parses from/to/topic tokens in any order and rejects malformed calls', () => {
-    expect(parseAgentMessage(msg('topic=ack to=agent-beta-2 from=agent-alpha-1'))).toEqual({ from: 'agent-alpha-1', to: 'agent-beta-2', topic: 'ack', zone: null });
-    expect(parseAgentMessage(msg('from=agent-alpha-1 to=all topic=takeover'))).toMatchObject({ to: 'all', topic: 'takeover' });
-    expect(parseAgentMessage(msg('from=agent-alpha-1 to=agent-beta-2 topic=cross_zone_move zone="loop B"'))).toMatchObject({ topic: 'cross_zone_move', zone: 'loop B' });
-    expect(parseAgentMessage(msg('from=agent-alpha-1 to=agent-beta-2 topic=gossip'))).toBeNull();
-    expect(parseAgentMessage(msg('from=agent-alpha-1 topic=ack'))).toBeNull();
-    expect(parseAgentMessage({ tool: 'get_action_status', args_summary: 'from=a to=b topic=ack', result_summary: '' })).toBeNull();
+describe('agent-team seats (team_message)', () => {
+  const team = (args: string, actor: ToolCallSummary['actor'], result = 'consumed by lead'): ToolCallSummary => ({ tool: 'team_message', args_summary: args, result_summary: result, actor });
+  it('puts each team role on its own Nemotron seat, from the parsed route', () => {
+    expect(seatOf(ev({ actor: 'nemotron', stage: 'plan', summary: 'Cooling → Lead: pump-a degraded', tool_calls: [team('finding cooling->lead', 'nemotron')] }))).toBe('cooling');
+    expect(seatOf(ev({ actor: 'nemotron', stage: 'plan', summary: 'Workload → Cooling: job-c on r6', tool_calls: [team('answer workload->cooling', 'nemotron')] }))).toBe('workload');
+    expect(seatOf(ev({ actor: 'nemotron', stage: 'plan', summary: 'Lead → Supervisor: job-a:ckpt', tool_calls: [team('decision lead->supervisor', 'nemotron', 'not consumed')] }))).toBe('lead');
+    expect(seatOf(ev({ actor: 'nemotron', stage: 'replan', summary: 'Cooling covering for Workload: …', tool_calls: [team('cover cooling->lead ev=sig.1', 'nemotron')] }))).toBe('cooling');
   });
-  it('derives zones from worker ids or the message token, never otherwise', () => {
-    expect(zoneOfWorker('agent-alpha@loopA')).toBe('loop A');
-    expect(zoneOfWorker('agent-loop-b-7')).toBe('loop B');
-    expect(zoneOfWorker('agent-alpha-12345')).toBeNull();
-    expect(processName('agent-alpha-3@loopA')).toBe('agent-alpha');
-    expect(processLabel('agent-alpha', 'loop A')).toBe('agent-alpha · loop A');
-    expect(processLabel('agent-alpha', null)).toBe('agent-alpha');
-    expect(processLabel(null, 'loop A')).toBeNull();
+  it('puts supervisor rows on the Supervisor seat, never on the Simulator', () => {
+    expect(seatOf(ev({ actor: 'code', stage: 'plan', summary: 'Supervisor → Workload: finding rejected', tool_calls: [team('objection supervisor->workload', 'code', 'not consumed')] }))).toBe('supervisor');
+    // Route-less code team rows (missing advice / deterministic outcome) are Supervisor bookkeeping too.
+    expect(seatOf(ev({ actor: 'code', stage: 'plan', tool_calls: [team('missing_roles', 'code', 'Workload')] }))).toBe('supervisor');
+    expect(seatOf(ev({ actor: 'code', stage: 'plan', tool_calls: [team('outcome', 'code', 'deterministic')] }))).toBe('supervisor');
+    // A code-actor row naming a Nemotron route is still code: Supervisor, never the Cooling seat.
+    expect(seatOf(ev({ actor: 'code', stage: 'plan', tool_calls: [team('finding cooling->lead', 'code')] }))).toBe('supervisor');
+    // A plain code plan event still goes to the Simulator.
+    expect(seatOf(ev({ actor: 'code', stage: 'plan' }))).toBe('simulator');
   });
-  it('renders message bubbles in their own thread and in the shared Agents lane, with a takeover divider and resolved sender/receiver threads', () => {
-    const events = [
-      ev({ workflow_id: 'wf-1', sim_time_ms: 100, stage: 'plan', tool_calls: [msg('from=agent-alpha-1 to=agent-beta-2 topic=cross_zone_move zone="loop B"', 'ok to use r8?')] }),
-      ev({ workflow_id: 'wf-2', sim_time_ms: 110, stage: 'plan', tool_calls: [msg('from=agent-beta-2 to=agent-alpha-1 topic=ack', 'yes')] }),
-      ev({ workflow_id: 'wf-2', sim_time_ms: 120, stage: 'execute', tool_calls: [msg('from=agent-beta-2 to=all topic=takeover', 'took over wf-2')] }),
-      ev({ workflow_id: 'wf-2', sim_time_ms: 130, stage: 'execute', tool_calls: [{ tool: 'agent_message', args_summary: 'garbage', result_summary: 'x' }] }),
-    ];
-    const wfs = [wf({ workflow_id: 'wf-1', lease_owner: 'agent-alpha-1', lease_expires_unix_ms: now + 1 }), wf({ workflow_id: 'wf-2', incident_ids: ['inc-2'], lease_owner: 'agent-beta-2', lease_expires_unix_ms: now + 1 })];
-    const view = buildRoomView({ events, workflows: wfs, incidents: [], nowUnixMs: now, example: false });
-    expect(view.threads.map((t) => t.id)).toEqual(['wf-1', 'wf-2', AGENTS_THREAD_ID]);
-    const first = view.threads[0]!.items[0] as Bubble;
-    expect(first.message).toMatchObject({ fromLabel: 'agent-alpha', toLabel: 'agent-beta', topic: 'cross_zone_move', text: 'ok to use r8?', fromThreadId: 'wf-1', toThreadId: 'wf-2' });
-    expect(first.zone).toBe('loop B');
-    const lane = view.threads[2]!;
-    expect(lane.items.map((i) => i.kind)).toEqual(['bubble', 'bubble', 'divider', 'bubble']);
-    expect((lane.items[2] as Divider).text).toBe('agent-beta → all · takeover');
-    expect((lane.items[3] as Bubble).message?.toThreadId).toBeNull();
-    const malformed = view.threads[1]!.items.filter((i): i is Bubble => i.kind === 'bubble').at(-1)!;
-    expect(malformed.message).toBeNull();
-    expect(view.counts.processes).toBe(2);
+  it('keeps a team row without an actor unattributed, and never lets a route override the actor', () => {
+    expect(seatOf(ev({ actor: undefined, stage: 'plan', tool_calls: [team('finding cooling->lead', 'nemotron')] }))).toBe('unattributed');
+    expect(seatOf(ev({ actor: undefined, stage: 'plan', tool_calls: [team('objection supervisor->workload', 'code')] }))).toBe('unattributed');
+    // A Nemotron-actor row naming the Supervisor route falls back to the ordinary Nemotron rules.
+    expect(seatOf(ev({ actor: 'nemotron', stage: 'plan', tool_calls: [team('objection supervisor->workload', 'nemotron')] }))).toBe('planner');
+  });
+  it('lists five Nemotron and five code seats with the right actors', () => {
+    expect(SEAT_COUNTS).toEqual({ nemotron: 5, code: 5 });
+    expect((['cooling', 'workload', 'lead'] as const).map((s) => seatInfo(s).actor)).toEqual(['nemotron', 'nemotron', 'nemotron']);
+    expect(seatInfo('supervisor').actor).toBe('code');
+    expect(SEATS.map((s) => s.id)).toEqual(['triage', 'planner', 'cooling', 'workload', 'lead', 'simulator', 'safety', 'supervisor', 'coordinator', 'verifier']);
   });
 });
+
+describe('team_message args', () => {
+  it('parses `<kind> <from>-><to>`, with or without trailing tokens', () => {
+    expect(parseTeamArgs('question cooling->workload')).toEqual({ kind: 'question', from: 'cooling', to: 'workload', extra: null });
+    expect(parseTeamArgs('finding workload->lead ev=sig.602000.pump-a.equipment_alarm,tel.1 round=a1:e1')).toEqual({ kind: 'finding', from: 'workload', to: 'lead', extra: 'ev=sig.602000.pump-a.equipment_alarm,tel.1 round=a1:e1' });
+    expect(parseTeamArgs('  decision lead->supervisor  ')).toMatchObject({ kind: 'decision', from: 'lead', to: 'supervisor', extra: null });
+  });
+  it('rejects malformed args and other tools', () => {
+    for (const bad of ['', 'missing_roles', 'outcome', 'gossip cooling->lead', 'finding cooling->planner', 'finding cooling-lead', 'finding cooling->lead->workload', 'from=a to=b topic=ack', 'findingcooling->lead']) expect(parseTeamArgs(bad)).toBeNull();
+    expect(parseTeamMessage({ tool: 'agent_message', args_summary: 'question cooling->workload' })).toBeNull();
+    expect(parseTeamMessage({ tool: 'team_message', args_summary: 'question cooling->workload' })).toMatchObject({ from: 'cooling' });
+    expect(teamMessageOf([{ tool: 'team_message', args_summary: 'outcome' }, { tool: 'team_message', args_summary: 'answer workload->cooling' }])).toMatchObject({ kind: 'answer' });
+  });
+  it('strips only the agent-written route head from the summary', () => {
+    expect(stripTeamHead('Cooling → Workload: which job is on r6?')).toBe('which job is on r6?');
+    expect(stripTeamHead('Cooling covering for Workload: job-a on loop A')).toBe('job-a on loop A');
+    expect(stripTeamHead('new plan p-1: job-a → move')).toBe('new plan p-1: job-a → move');
+  });
+});
+
+describe('team messages in the room', () => {
+  const now = 1_700_000_100_000;
+  const team = (args: string, actor: ToolCallSummary['actor'], result: string): ToolCallSummary => ({ tool: 'team_message', args_summary: args, result_summary: result, actor });
+  it('renders team messages as cross-agent bubbles in their thread and in the Team lane, with consumption from the persisted result', () => {
+    const events = [
+      ev({ workflow_id: 'wf-1', sim_time_ms: 100, actor: 'nemotron', summary: 'Cooling → Workload: Which job is on rack-r6?', tool_calls: [team('question cooling->workload', 'nemotron', 'consumed by workload, lead')] }),
+      ev({ workflow_id: 'wf-1', sim_time_ms: 110, actor: 'code', summary: 'Supervisor → Workload: finding rejected: 1 unknown resource id(s)', tool_calls: [team('objection supervisor->workload', 'code', 'not consumed')] }),
+      ev({ workflow_id: 'wf-1', sim_time_ms: 120, actor: 'nemotron', summary: 'new plan p-2', tool_calls: [call('propose_plan', 'nemotron')] }),
+      ev({ workflow_id: 'wf-1', sim_time_ms: 130, actor: 'nemotron', summary: 'Lead → Supervisor: x', tool_calls: [team('garbage', 'nemotron', 'x')] }),
+    ];
+    const view = buildRoomView({ events, workflows: [wf({ lease_expires_unix_ms: now + 1 })], incidents: [], nowUnixMs: now, example: false });
+    expect(view.threads.map((t) => t.id)).toEqual(['wf-1', AGENTS_THREAD_ID]);
+    const [q, obj, plan, malformed] = view.threads[0]!.items as Bubble[];
+    expect(q!.seat).toBe('cooling');
+    expect(q!.message).toMatchObject({ kind: 'question', fromLabel: 'Cooling', toLabel: 'Workload', fromSeat: 'cooling', toSeat: 'workload', text: 'Which job is on rack-r6?', consumption: 'consumed by workload, lead', notConsumed: false });
+    expect(obj!.seat).toBe('supervisor');
+    expect(obj!.message).toMatchObject({ kind: 'objection', fromSeat: 'supervisor', notConsumed: true });
+    expect(plan!.message).toBeNull();
+    expect(malformed!.message).toBeNull();
+    expect(view.threads[1]!.items.map((i) => (i as Bubble).id)).toEqual([q!.id, obj!.id]);
+    expect(view.threads[1]!.items.every((i) => i.kind === 'bubble')).toBe(true);
+    expect(view.seatStates.cooling).toBe('done');
+    expect(view.seatStates.supervisor).toBe('done');
+    expect(view.seatStates.simulator).toBe('idle');
+  });
+});
+

@@ -1,5 +1,9 @@
 # DataCenterOS · Design direction (redesign, HackUTD 2026)
 
+> **Note (2026-11-08):** this file is from the earlier `r/redesign` branch. The shipped UI (`r/ui-v2`) is a dark
+> console with a sidebar, so the cream-paper tokens (§1), type (§2), layout (§4) and component looks (§5) below do not
+> describe the code; `src/styles.css` does. Only **§3 Motion** and **§7 Non-negotiables** still apply.
+
 **Direction in one line:** a warm, paper-and-ink operations room. Cream paper, forest-green ink, sage rules, and one
 vivid orange that only ever means *heat, failure, or the agent acted*. Dense and scannable like a tool, with a few
 dramatic, data-driven moments (a GPU dies, a handoff travels between agents) that make judges look up.

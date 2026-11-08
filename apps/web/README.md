@@ -1,6 +1,6 @@
 # P4 dashboard
 
-React + Vite + TypeScript, Tailwind 4 and shadcn-compatible UI primitives. The default local view runs the real `@dcos/physics` GPU model inside the browser and projects it through the `@dcos/db-client` mock subscription API. Fixture views remain available for UI examples. The current upstream `connect()` is a deliberate rejection stub; live operation is **not yet verified**.
+React + Vite + TypeScript, Tailwind 4 and shadcn-compatible UI primitives. The default local view runs the real `@dcos/physics` GPU model inside the browser and projects it through the `@dcos/db-client` mock subscription API. Fixture views remain available for UI examples. `VITE_DATA_MODE=live` connects to SpacetimeDB through `connect()` in `@dcos/db-client`. The Workflows tab reads the agent team trace (`state.team`, `state.team_rounds`); with no agent connected, choose Run view → Recorded agent team to replay a saved real Nemotron run, labeled RECORDED.
 
 ## Run from the repository root
 

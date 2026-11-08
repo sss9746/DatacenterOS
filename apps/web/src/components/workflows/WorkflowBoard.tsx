@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import type { ActionDetail, AgentActor, AgentEventInput, Evidence, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import type { Incident, ObservedSnapshot } from '@dcos/contracts';
 import { CheckCircle2, CircleDashed, Code2, RotateCcw, ShieldAlert, Sparkles, UserRound } from 'lucide-react';
@@ -37,6 +37,8 @@ export interface WorkflowBoardProps {
   nowUnixMs?: number;
   /** Run-wide evidence window (`getEvidence`): incident links give the Detect step its resources and symptoms. */
   evidence?: Evidence | null;
+  /** Rendered for the selected workflow between the selector and the decision trace (the Workflows page puts the agent team here). */
+  renderSelected?: (view: WorkflowView) => ReactNode;
 }
 
 const STATUS_TONE: Record<StatusKind, string> = {
@@ -51,7 +53,7 @@ const STATUS_TONE: Record<StatusKind, string> = {
 };
 
 /** Per-workflow progress: one card per persisted workflow, driven by DB rows, agent events and the action ledger. */
-export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs, evidence = null }: WorkflowBoardProps) {
+export function WorkflowBoard({ workflows, events, actionDetails, incidents, snapshot, example, mode, plans = [], nowUnixMs, evidence = null, renderSelected }: WorkflowBoardProps) {
   const views = useMemo(() => buildWorkflowViews({ workflows, events, actionDetails, incidents, snapshot }), [workflows, events, actionDetails, incidents, snapshot]);
   const source = example ? 'Scripted example' : mode === 'live' ? 'Live DB' : 'Mock data';
   const simNow = snapshot?.clock.sim_time_ms ?? null;
@@ -64,6 +66,7 @@ export function WorkflowBoard({ workflows, events, actionDetails, incidents, sna
       ? <Empty title="No workflow opened">{mode === 'mock' ? 'No agent is running in mock mode, so the orchestrator has not opened a workflow. Choose the recovery example to see scripted workflows.' : 'The orchestrator has not opened a workflow yet. One appears per incident group once the agent claims it.'}</Empty>
       : <>
         {views.length > 1 && <div className="dt-selector" role="group" aria-label="Choose a workflow to trace">{views.map((v) => <button key={v.workflow.workflow_id} type="button" className="dt-select" aria-pressed={selected?.workflow.workflow_id === v.workflow.workflow_id} onClick={() => setSelectedId(v.workflow.workflow_id)}><span className="dt-select-title">{cardTitle(v)}</span><Badge tone={STATUS_TONE[v.status.kind]}>{v.status.label}</Badge></button>)}</div>}
+        {selected && renderSelected?.(selected)}
         {selected && <section className="dt-panel" aria-labelledby={`dt-${selected.workflow.workflow_id}-heading`}>
           <div className="dt-panel-head"><h3 id={`dt-${selected.workflow.workflow_id}-heading`}>Decision trace · {cardTitle(selected)}</h3><Badge tone={STATUS_TONE[selected.status.kind]}>{selected.status.label}</Badge>{example && <Badge tone="example">Example</Badge>}<code className="wf-key" title="Workflow id">{selected.workflow.workflow_id}</code></div>
           <p className="dt-panel-note">How this decision was made, step by step: what was detected, every option the planner weighed, their predicted cost, the safety check on each, who chose what and why, what ran, and whether the verifier confirmed it. Missing data reads “not recorded”.</p>
@@ -117,6 +120,7 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
   const age = view.lastEventSimMs !== null && simNow !== null ? ` (${formatSpan(simNow - view.lastEventSimMs)} before current sim time)` : '';
   const v = view.verification;
   const needsHuman = v?.verified === false || (v?.unresolved.length ?? 0) > 0 || view.status.kind === 'escalated' || view.status.kind === 'operator_review';
+  const operatorJobs = view.operatorJobs ?? [];
   return <article className={`wf-card wf-kind-${view.status.kind}`} aria-labelledby={headingId}>
     <header className="wf-card-head">
       <h3 id={headingId}>{cardTitle(view)}</h3>
@@ -128,6 +132,7 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
       {owner && <span className="chip wf-owner" title={owner.title}>{owner.text}</span>}
       {!owner && <span className="chip wf-owner wf-owner-none">no owner</span>}
       {view.attempt !== null && view.attempt > 1 && <span className="chip wf-attempt" title={view.replan?.reason ? `Replanned: ${view.replan.reason}` : 'Replanned'}>plan attempt {view.attempt}</span>}
+      {operatorJobs.length > 0 && <span className="chip wf-chip-human" title={operatorJobs.map((j) => `${j.jobId}: ${j.reason ?? 'reason not recorded'}`).join('; ')}><UserRound size={12} aria-hidden="true"/>{operatorJobs.length === 1 ? `${operatorJobs[0]!.jobId} needs an operator` : `${operatorJobs.length} jobs need an operator`}</span>}
       {view.blockedReason && <span className="chip wf-chip-blocked" title={view.blockedReason}><ShieldAlert size={12} aria-hidden="true"/>1 action blocked by safety</span>}
     </p>
     <p className={`wf-status wf-status-${view.status.kind}`}><strong>{view.status.label}.</strong> {view.status.detail}</p>

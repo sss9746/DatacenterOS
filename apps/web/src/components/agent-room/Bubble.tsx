@@ -1,11 +1,14 @@
 import { ArrowRight } from 'lucide-react';
 import { Badge } from '../ui/panel';
 import { seatInfo } from './seat-of';
-import { processLabel, type Bubble as BubbleModel, type Divider as DividerModel, type Topic } from './room-view';
+import type { Bubble as BubbleModel, Divider as DividerModel } from './room-view';
+import type { TeamKind } from './team-message';
 import { duration } from '../../lib/utils';
 
 const actorTone = (actor: string | undefined): 'nemotron' | 'code' | 'unknown' => actor === 'nemotron' ? 'nemotron' : actor === 'code' ? 'code' : 'unknown';
-const topicTone = (topic: Topic): string => topic === 'conflict' ? 'blocked' : topic === 'takeover' ? 'warning' : 'neutral';
+const kindTone = (kind: TeamKind): string => kind === 'objection' ? 'blocked' : kind === 'cover' ? 'warning' : kind === 'decision' ? 'agent' : 'neutral';
+/** Model-written content that code did not check: shown as a claim, never as a fact. */
+const isClaim = (kind: TeamKind): boolean => kind === 'finding' || kind === 'answer' || kind === 'cover';
 
 /**
  * One persisted event as a chat bubble. Default state: one header line (who · process · actor), a body clamped to two
@@ -16,14 +19,14 @@ export function Bubble({ bubble, fresh, handoffFresh, showExample, showHandoff =
   const tone = actorTone(seat.actor ?? undefined);
   // Seat handoffs belong to the home thread; the shared Agents lane mixes workflows, so it does not draw them.
   const target = showHandoff && bubble.handoffTo ? seatInfo(bubble.handoffTo) : null;
-  const process = processLabel(bubble.process, bubble.zone);
+  const process = bubble.process;
   const actorBadge = <Badge tone={tone}>{seat.actor === 'nemotron' ? 'NEMOTRON' : seat.actor === 'code' ? 'CODE' : 'UNATTRIBUTED'}</Badge>;
   const m = bubble.message;
   const tools = bubble.toolCalls.length;
   const moreLabel = tools ? `more · ${tools} tool${tools === 1 ? '' : 's'}` : 'more';
   return (
-    <li className={`ar-msg ar-msg-${tone}${fresh ? ' is-new' : ''}${bubble.blocked ? ' is-blocked' : ''}${m ? ` ar-msg-x ar-topic-${m.topic}` : ''}`} data-seat={bubble.seat} data-thread={bubble.threadId}>
-      <span className="ar-msg-avatar" aria-hidden="true">{m ? '⇄' : seat.initial}</span>
+    <li className={`ar-msg ar-msg-${tone}${fresh ? ' is-new' : ''}${bubble.blocked ? ' is-blocked' : ''}${m ? ` ar-msg-x ar-kind-${m.kind}${m.notConsumed ? ' is-unconsumed' : ''}` : ''}`} data-seat={bubble.seat} data-thread={bubble.threadId}>
+      <span className="ar-msg-avatar" aria-hidden="true">{seat.initial}</span>
       <div className="ar-bubble">
         <div className="ar-msg-meta">
           {m ? (
@@ -32,7 +35,9 @@ export function Bubble({ bubble, fresh, handoffFresh, showExample, showHandoff =
             <strong className="ar-msg-seat">{seat.name}</strong>
           )}
           {!m && process && <span className="ar-msg-process">{process}</span>}
-          {m && <Badge tone={topicTone(m.topic)}>{m.topic.replaceAll('_', ' ')}</Badge>}
+          {m && <Badge tone={kindTone(m.kind)}>{m.kind}</Badge>}
+          {m && isClaim(m.kind) && <Badge tone="neutral" title="Model-written finding; deterministic safety still decides">CLAIM</Badge>}
+          {m?.notConsumed && <span className="ar-msg-unread">not consumed</span>}
           {actorBadge}
           {showExample && bubble.example && <Badge tone="example">EXAMPLE</Badge>}
           {bubble.blocked && <Badge tone="blocked">BLOCKED</Badge>}
@@ -41,7 +46,7 @@ export function Bubble({ bubble, fresh, handoffFresh, showExample, showHandoff =
         <details className="ar-more">
           <summary>{moreLabel}</summary>
           <p className="ar-msg-detail">
-            {m ? <>sent from the {seat.name} seat{process ? ` · ${process}` : ''} · </> : null}
+            {m ? <>team message from the {seat.name} seat{process ? ` · ${process}` : ''}{m.consumption ? ` · ${m.consumption}` : ''} · </> : null}
             <span className="ar-msg-stage">{bubble.stage} · t+{duration(bubble.simTimeMs)}</span>
           </p>
           {tools > 0 && (

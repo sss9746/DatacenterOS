@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentEventInput, WorkflowRecord } from '@dcos/db-client';
 import type { Incident } from '@dcos/contracts';
 import { Badge, Panel } from '../ui/panel';
-import { SEATS, UNATTRIBUTED } from './seat-of';
+import { SEAT_COUNTS, SEATS, UNATTRIBUTED } from './seat-of';
 import { AGENTS_THREAD_ID, buildRoomView, RUN_THREAD_ID, type Bubble as BubbleModel, type Thread } from './room-view';
 import { Seat } from './Seat';
 import { Bubble, Divider } from './Bubble';
@@ -13,7 +13,7 @@ const TRAVEL_MS = 1400;
 const TRAVEL_MIN_ROOM_PX = 600;
 const BOTTOM_SLACK_PX = 24;
 
-interface Travel { id: string; x0: number; x1: number; y: number }
+interface Travel { id: string; x: number; y: number; length: number; angle: number }
 
 const isLane = (id: string) => id === RUN_THREAD_ID || id === AGENTS_THREAD_ID;
 
@@ -44,25 +44,25 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
   }, [itemCount, active?.id]);
   const onScroll = () => { const el = logRef.current; if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_SLACK_PX; };
 
-  // Cross-agent message travel: a dot runs from the sender's thread tab to the receiver's, once per new message, wide rooms only.
-  const tabsRef = useRef<HTMLDivElement>(null);
+  // Team message travel: a dot runs from the sender's seat to the receiver's, once per new message, wide rooms only.
+  const seatsRef = useRef<HTMLUListElement>(null);
   const travelledRef = useRef(new Set<string>());
   const [travel, setTravel] = useState<Travel | null>(null);
   const messages = useMemo(() => view.threads.find((t) => t.id === AGENTS_THREAD_ID)?.items.filter((i): i is BubbleModel => i.kind === 'bubble') ?? [], [view]);
   useEffect(() => {
-    const row = tabsRef.current;
+    const row = seatsRef.current;
     if (!row) return;
     const room = row.closest<HTMLElement>('#agent-room');
     if (!room || room.clientWidth < TRAVEL_MIN_ROOM_PX) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const next = messages.find((b) => !travelledRef.current.has(b.id) && (seen.get(b.id) ?? 0) > 0 && b.message?.fromThreadId && b.message.toThreadId && b.message.fromThreadId !== b.message.toThreadId);
+    const next = messages.find((b) => !travelledRef.current.has(b.id) && (seen.get(b.id) ?? 0) > 0 && b.message !== null && b.message.fromSeat !== b.message.toSeat);
     if (!next?.message) return;
     travelledRef.current.add(next.id);
-    const centre = (id: string | null) => { const el = row.querySelector<HTMLElement>(`[data-thread-tab="${id}"]`); return el ? el.offsetLeft - row.scrollLeft + el.offsetWidth / 2 : null; };
-    const x0 = centre(next.message.fromThreadId);
-    const x1 = centre(next.message.toThreadId);
-    if (x0 === null || x1 === null) return;
-    setTravel({ id: next.id, x0, x1, y: row.clientHeight - 6 });
+    const centre = (seat: string) => { const el = row.querySelector<HTMLElement>(`[data-seat-id="${seat}"]`); return el ? { x: el.offsetLeft + el.offsetWidth / 2, y: el.offsetTop + el.offsetHeight / 2 } : null; };
+    const a = centre(next.message.fromSeat);
+    const b = centre(next.message.toSeat);
+    if (!a || !b) return;
+    setTravel({ id: next.id, x: a.x, y: a.y, length: Math.hypot(b.x - a.x, b.y - a.y), angle: Math.atan2(b.y - a.y, b.x - a.x) });
     const timer = window.setTimeout(() => setTravel(null), TRAVEL_MS + 100);
     return () => window.clearTimeout(timer);
   }, [messages, seen]);
@@ -74,7 +74,7 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
 
   const detail = (
     <div className="ar-head-right">
-      <span className="ar-head-line">2 Nemotron seats · 4 code seats{view.counts.processes >= 2 && ` · ${view.counts.processes} agent processes`}</span>
+      <span className="ar-head-line">{SEAT_COUNTS.nemotron} Nemotron seats · {SEAT_COUNTS.code} code seats{view.counts.processes >= 2 && ` · ${view.counts.processes} agent processes`}</span>
       <span className="ar-head-badges">
         {mode === 'live' ? <Badge tone="neutral">LIVE DB</Badge> : <Badge tone="mock">MOCK</Badge>}
         {example && <Badge tone="example">EXAMPLE</Badge>}
@@ -84,12 +84,17 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
 
   return (
     <Panel id="agent-room" title="Agent room" detail={detail} className="agent-room">
-      <ul className="ar-seats" aria-label="Specialist seats">
+      <ul ref={seatsRef} className="ar-seats" aria-label="Specialist seats">
         {seats.map((s) => <Seat key={s.id} info={s} state={view.seatStates[s.id]} count={counts.get(s.id) ?? 0}/>)}
+        {travel && (
+          <li key={travel.id} className="ar-travel" aria-hidden="true" style={{ top: travel.y - 4, left: travel.x, width: travel.length, transform: `rotate(${travel.angle}rad)`, ['--ar-dir' as string]: 1, ['--ar-span' as string]: `${travel.length}px` }}>
+            <i className="ar-travel-line"/><i className="ar-travel-dot"/>
+          </li>
+        )}
       </ul>
 
       {view.threads.length > 1 && (
-        <div ref={tabsRef} className="ar-tabs" role="tablist" aria-label="Incident threads">
+        <div className="ar-tabs" role="tablist" aria-label="Incident threads">
           {view.threads.map((t) => {
             const selected = t.id === active?.id;
             const n = t.items.filter((i) => i.kind === 'bubble').length;
@@ -111,11 +116,6 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
               </button>
             );
           })}
-          {travel && (
-            <span key={travel.id} className="ar-travel" aria-hidden="true" style={{ top: travel.y, left: Math.min(travel.x0, travel.x1), width: Math.abs(travel.x1 - travel.x0), ['--ar-dir' as string]: travel.x1 >= travel.x0 ? 1 : -1, ['--ar-span' as string]: `${Math.abs(travel.x1 - travel.x0)}px` }}>
-              <i className="ar-travel-line"/><i className="ar-travel-dot" style={{ left: travel.x1 >= travel.x0 ? 0 : 'auto', right: travel.x1 >= travel.x0 ? 'auto' : 0 }}/>
-            </span>
-          )}
         </div>
       )}
 

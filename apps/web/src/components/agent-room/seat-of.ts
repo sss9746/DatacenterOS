@@ -1,17 +1,25 @@
 // Pure mapping from a persisted agent event to the specialist seat that "spoke" it. Attribution comes from the
-// persisted `actor` field only; an event without one is always Unattributed, never guessed as Nemotron.
+// persisted `actor` field only; an event without one is always Unattributed, never guessed as Nemotron. Agent-team
+// rows (`team_message`) sit on the seat named by the code-written route (`<kind> <from>-><to>`), and only when the
+// persisted actor agrees: Cooling, Workload and Lead are Nemotron; the Supervisor is code routing, never the Simulator.
 
 import type { AgentActor, AgentEventInput } from '@dcos/db-client';
+import { isTeamMessage, teamMessageOf } from './team-message';
 
-export type Seat = 'triage' | 'planner' | 'simulator' | 'safety' | 'coordinator' | 'verifier' | 'unattributed';
+export type Seat = 'triage' | 'planner' | 'cooling' | 'workload' | 'lead' | 'simulator' | 'safety' | 'supervisor' | 'coordinator' | 'verifier' | 'unattributed';
 
 export interface SeatInfo { id: Seat; name: string; role: string; actor: AgentActor | null; initial: string }
 
+/** Nemotron seats first, then code seats; the room lays them out as two rows of five on wide screens. */
 export const SEATS: readonly SeatInfo[] = [
   { id: 'triage', name: 'Triage', role: 'triage · diagnose', actor: 'nemotron', initial: 'T' },
   { id: 'planner', name: 'Planner', role: 'plan · replan', actor: 'nemotron', initial: 'P' },
+  { id: 'cooling', name: 'Cooling', role: 'team: cooling findings', actor: 'nemotron', initial: 'Co' },
+  { id: 'workload', name: 'Workload', role: 'team: workload findings', actor: 'nemotron', initial: 'W' },
+  { id: 'lead', name: 'Recovery Lead', role: 'team: chooses options', actor: 'nemotron', initial: 'L' },
   { id: 'simulator', name: 'Simulator', role: 'simulate_plan', actor: 'code', initial: 'S' },
   { id: 'safety', name: 'Safety', role: 'evaluate_safety', actor: 'code', initial: 'G' },
+  { id: 'supervisor', name: 'Supervisor', role: 'team: routing · checks', actor: 'code', initial: 'Su' },
   { id: 'coordinator', name: 'Coordinator', role: 'ledger · actions', actor: 'code', initial: 'C' },
   { id: 'verifier', name: 'Verifier', role: 'verify · handoff', actor: 'code', initial: 'V' },
 ];
@@ -29,7 +37,22 @@ const SIMULATOR_TOOLS = new Set(['simulate_plan', 'get_resource_dependencies', '
 const COORDINATOR_TOOLS = new Set(['request_action', 'claim_action', 'start_action', 'cancel_action', 'get_action_status']);
 const BLOCKED_RE = /\bBLOCKED\b/;
 
+/** Seat counts per actor, for the room's heading line. */
+export const SEAT_COUNTS = { nemotron: SEATS.filter((s) => s.actor === 'nemotron').length, code: SEATS.filter((s) => s.actor === 'code').length };
+
+/** Team seat for a `team_message` event, or null when the event is not a team row (or its actor disagrees with the route). */
+export function teamSeatOf(event: AgentEventInput): Seat | null {
+  if (!event.tool_calls.some(isTeamMessage)) return null;
+  // Every code-actor team row is Supervisor routing: its own messages and the route-less `missing_roles` / `outcome` rows.
+  if (event.actor === 'code') return 'supervisor';
+  const route = teamMessageOf(event.tool_calls);
+  return event.actor === 'nemotron' && route && route.from !== 'supervisor' ? route.from : null;
+}
+
 export function seatOf(event: AgentEventInput): Seat {
+  if (!event.actor) return 'unattributed';
+  const team = teamSeatOf(event);
+  if (team) return team;
   const tools = new Set(event.tool_calls.map((t) => t.tool));
   const has = (names: Set<string>) => [...tools].some((t) => names.has(t));
   if (event.actor === 'nemotron') {

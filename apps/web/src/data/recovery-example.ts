@@ -126,12 +126,13 @@ export async function loadRecoveryExample(client: MockDbClient) {
   ];
   await cool.stage('replan', { previous_plan_id: plan1, superseded: true, plan_id: plan2, attempt: 2, kept_keys: [ckpt.command_key], reason: 'destination gpu-r7-n1-0 reported XID 79 and the move was rejected', candidates: candidates2 });
   await publish(coolWf, cooling.incident_id, 'replan', 'code', `replanning ${plan1}: destination gpu-r7-n1-0 reported XID 79.`);
-  // Scripted cross-agent exchange: the cooling owner checks a loop-B placement with the second worker before listing it.
-  await publish(coolWf, cooling.incident_id, 'replan', 'code', 'message to example-agent-beta-2: rack r8 is on loop B, your zone; any objection to listing it as a job-b fallback?', [
-    call('agent_message', 'from=example-agent-alpha-1 to=example-agent-beta-2 topic=cross_zone_move zone="loop B"', 'r8 sits on loop B; listing it as a fallback for job-b unless you object.'),
+  // Scripted agent-team exchange, in the shape of apps/agent/src/team/protocol.ts `teamFeedEvents` (tool `team_message`,
+  // args `<kind> <from>-><to>`, result = who consumed it). Scripted text: no model ran.
+  await publish(coolWf, cooling.incident_id, 'plan', 'nemotron', 'Cooling → Workload: rack r8 is on loop B with thermal headroom; is any job there that a job-b move would disturb?', [
+    call('team_message', 'question cooling->workload', 'consumed by workload, lead', 'nemotron'),
   ]);
-  await publish(coolWf, cooling.incident_id, 'replan', 'code', 'message from example-agent-beta-2: no objection, r8 has thermal headroom.', [
-    call('agent_message', 'from=example-agent-beta-2 to=example-agent-alpha-1 topic=ack zone="loop B"', 'no objection: r8 has headroom and no incident of its own.'),
+  await publish(coolWf, cooling.incident_id, 'plan', 'nemotron', 'Workload → Cooling: no job runs on r8 and it has no incident of its own; a move there would need operator approval.', [
+    call('team_message', 'answer workload->cooling', 'consumed by cooling, lead', 'nemotron'),
   ]);
   await publish(coolWf, cooling.incident_id, 'replan', 'nemotron', 'keep the job-a checkpoint; cap job-b at 500 W instead of moving it (scripted choice).', [
     call('choose_options', '{"jobs":1}', 'job-b:cap', 'nemotron'),
@@ -202,8 +203,8 @@ export async function loadRecoveryExample(client: MockDbClient) {
   await gpuWf.lapse('example-agent-alpha-1');
   await gpuWf.claim('example-agent-beta-2');
   await publish(xidWf, xid.incident_id, 'execute', 'code', 'resumed after agent restart: cordon_gpu gpu-r7-n1-0 already succeeded (skipped), nothing left to run.', [call('get_action_status', cordon.command_key, 'succeeded → skip')]);
-  await publish(xidWf, xid.incident_id, 'execute', 'code', 'message to all: example-agent-beta-2 took over the XID workflow after example-agent-alpha-1 stopped heartbeating.', [
-    call('agent_message', 'from=example-agent-beta-2 to=all topic=takeover', 'took over wf-example-xid after the example-agent-alpha-1 lease lapsed; ledger reconciled, nothing re-run.'),
+  await publish(xidWf, xid.incident_id, 'execute', 'code', 'example-agent-beta-2 took over wf-example-xid after the example-agent-alpha-1 lease lapsed; ledger reconciled, nothing re-run.', [
+    call('get_action_status', cordon.command_key, 'succeeded → nothing to re-run'),
   ]);
   const resumedAt = (await client.getObservedSnapshot()).clock.sim_time_ms;
   await gpuWf.stage('verify', { resumed: { by_worker: 'example-agent-beta-2', at_sim_time_ms: resumedAt, action: 'resumed_verify', previous_owner: 'example-agent-alpha-1' }, resume_count: 1 });
