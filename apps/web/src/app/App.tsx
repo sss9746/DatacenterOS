@@ -89,7 +89,7 @@ export function App() {
       {example && <p className="data-warning"><strong>Recovery example:</strong> incidents and tool calls are scripted illustrations. They are not a live diagnosis, executed plan, or benchmark.</p>}
       <div className="hero-grid">
         <div id="overview" className="hero-cluster">
-          <SimulationView snapshot={snapshot} selected={selected} onSelect={selectGpu} onSelectPump={setSelectedPumpId} telemetry={state.evidence?.telemetry}/>{/* TODO(integration): add actionDetails={state.actionDetails} history={state.jobHistory} once slice C lands the optional props */}
+          <SimulationView snapshot={snapshot} selected={selected} onSelect={selectGpu} onSelectPump={setSelectedPumpId} telemetry={state.evidence?.telemetry} actionDetails={state.actionDetails} history={state.jobHistory}/>
           <Jobs snapshot={snapshot} losses={state.losses} history={state.jobHistory} details={state.actionDetails}/>
           <details className="sim-more"><summary>Detailed cooling measurements</summary><Cooling snapshot={snapshot}/></details>
         </div>
