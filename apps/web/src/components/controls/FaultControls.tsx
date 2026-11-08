@@ -23,6 +23,8 @@ export interface FaultControlsProps {
   onSelectPump: (id: PumpId) => void;
   /** Called after a reset is confirmed (and, live, after `createRun` succeeded). */
   onReset: () => void;
+  /** Embedded under the Demo controls drawer, which owns "Advance 30 sim-s" and "Reset run": hide this form's copies. */
+  hideRunActions?: boolean;
 }
 
 interface Submitted { fault: FaultInjection; submittedAtSimMs: number }
@@ -38,7 +40,7 @@ const describeFault = (fault: FaultInjection) => fault.kind === 'cooling_pump_de
   ? `${fault.target_resource_id} loses ${percent(fault.severity)} capacity`
   : `${fault.target_resource_id} inaccessible (Xid 79)`;
 
-export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, onSelectGpu, onSelectPump, onReset }: FaultControlsProps) {
+export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, onSelectGpu, onSelectPump, onReset, hideRunActions = false }: FaultControlsProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const local = asLocalPhysics(store.client);
   const mode = controlsMode(store.client.mode, Boolean(local), canAdmin);
@@ -131,11 +133,11 @@ export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, 
         return <li key={fault.fault_id}><span>{describeFault(fault)}</span><span className={`presenter-chip presenter-chip-${schedule}`}>{schedule === 'pending' ? `Accepted · pending until sim ${duration(fault.start_sim_time_ms)}` : schedule === 'start_reached' ? `Accepted · start time reached (sim ${duration(fault.start_sim_time_ms)})` : 'Accepted · fixture effect'}</span></li>;
       })}</ul>
     </div>}
-    <div className="presenter-actions">
+    {!hideRunActions && <div className="presenter-actions">
       {local && <Button variant="secondary" disabled={disabled || Boolean(snapshot?.clock.paused)} onClick={() => void advance()}><FastForward size={15} aria-hidden="true"/>Advance 30 sim-s</Button>}
       <Button variant="ghost" disabled={!canAdmin || busy} aria-expanded={confirmReset} onClick={() => setConfirmReset(true)}><RotateCcw size={14} aria-hidden="true"/>Reset run</Button>
-    </div>
-    {confirmReset && <div className="reset-confirm presenter-reset" role="group" aria-label="Confirm reset">
+    </div>}
+    {!hideRunActions && confirmReset && <div className="reset-confirm presenter-reset" role="group" aria-label="Confirm reset">
       <p>Reset {mode === 'live' ? 'run-demo-1 for every connected viewer' : 'this local preview'}?{mode === 'live' ? ' Stop the agent first.' : ''}</p>
       <Button variant="destructive" disabled={busy || !canAdmin} onClick={() => void reset()}>Confirm reset</Button>
       <Button variant="ghost" onClick={() => setConfirmReset(false)}>Cancel</Button>
