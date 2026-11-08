@@ -64,6 +64,17 @@ Verified before handoff:
 
 Screenshots are local ignored QA artifacts (`apps/web/.impeccable/review/`), not committed data. No live gate or benchmark run is certified. No Vercel URL or Devpost registration/submission has been produced by this work.
 
+### Known UI follow-ups from the independent review
+
+These remain P4 work and should not hold up P2's backend implementation:
+
+- At 320px width, cooling metadata forces horizontal overflow (355px document width). The tested 390px and desktop layouts fit. Fix pump-reading wrapping and shrinking before claiming 320px support.
+- Some operational metadata is 9–10px; prioritize larger work/durability/evidence text and touch-friendly inspection.
+- Section navigation permanently highlights Overview; make its selected state follow the active section and improve intermediate-width icon labels.
+- Reset completion loses keyboard focus; restore focus and announce completion. Add concise announcements for critical incidents and blocked/completed actions before live accessibility verification.
+
+The Impeccable source detector reported zero findings, while its browser scan surfaced small-text instances and manual review found the items above. Zero axe/source-detector findings do not mean these usability follow-ups are resolved. The connection-mode/status issue was corrected and independently rechecked, including 1000px and 320px visibility.
+
 ## Remaining P4 work after P2/P1 land
 
 Verify live Gate 1–3 demonstrations, add typed operation/history rendering when available, bind the evaluation adapter to P1's runner/P3's policy, execute at least ten scenarios × three policies, verify populated benchmark provenance, deploy to Vercel, and complete pitch/video/Devpost evidence. Keep progress commits on `P4` and let the integrator merge to `main`.
