@@ -16,8 +16,8 @@ import { Ledger } from '../components/ledger/Ledger';
 import { DEFAULT_XID_GPU_ID, type PumpId } from '../components/controls/fault-form';
 import { Scoreboard } from '../components/scoreboard/Scoreboard';
 import { AgentRoom } from '../components/agent-room/AgentRoom';
-import { DemoControls } from './placeholders'; // TODO(integration): swap to ../components/controls/DemoControls when slice D lands
-import { loadRehearsalBatch } from '../data/rehearsal-batch';
+import { DemoControls } from '../components/controls/DemoControls';
+import { loadRealBatch, loadRehearsalBatch } from '../data/rehearsal-batch';
 import { Badge, Eyebrow } from '../components/ui/panel';
 import { Button } from '../components/ui/button';
 import { duration } from '../lib/utils';
