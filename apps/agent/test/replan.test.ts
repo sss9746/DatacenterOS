@@ -140,6 +140,10 @@ describe('replan on XID 79 at a planned destination (mid-checkpoint)', () => {
     expect(newDest).not.toContain(XID_GPU);
     expect(newDest.some((g) => g.startsWith('gpu-r8-'))).toBe(false);
     for (const c of out.new_plan.commands) expect(c.command_key.endsWith(':2')).toBe(true);
+    // the completed checkpoint is fresh, so the new plan reuses it instead of taking another
+    for (const o of [jobA.chosen, ...jobA.alternatives]) expect(o.commands.map((c) => c.operation)).not.toContain('checkpoint');
+    expect(out.new_plan.commands.filter((c) => c.job_id === 'job-a' && c.operation === 'checkpoint')).toEqual([]);
+    expect(jobA.chosen.label).toContain('reusing fresh checkpoint');
     expect(out.new_plan.commands.map((c) => c.command_key)).not.toContain(ckptKey);
     expect(out.kept_keys).toContain(ckptKey);
     expect(out.cancelled_keys).toEqual([]);

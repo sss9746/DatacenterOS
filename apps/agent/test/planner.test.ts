@@ -279,3 +279,64 @@ describe('safety enforcement and fallbacks', () => {
     expect(jobPlan(r, 'job-b').chosen.option_id).not.toBe('job-b:ckpt+move:r1');
   });
 });
+
+describe('reservedGpuIds and fresh checkpoint reuse', () => {
+  const allOptions = (r: PlanResult, jobId: string) => [jobPlan(r, jobId).chosen, ...jobPlan(r, jobId).alternatives];
+  const destsOf = (r: PlanResult, jobId: string): string[] =>
+    allOptions(r, jobId).flatMap((o) => o.commands.flatMap((c) => (c.operation === 'migrate_restart' ? (c.arguments.destination_gpu_ids as string[]) : [])));
+  const withFreshCheckpoint = async (ageMs: number) => {
+    const snap = loadPumpDegradedSnapshot();
+    snap.checkpoints.push({ ...snap.checkpoints[0]!, checkpoint_id: 'ckpt-job-a-fresh', job_id: 'job-a', complete_sim_time_ms: snap.clock.sim_time_ms - ageMs });
+    db = new FakeDb({ snapshot: snap, physics });
+    await setup([[PUMP, ['pump-a', 'loop-a', 'rack-r2', 'rack-r3', 'rack-r4']]]);
+  };
+
+  it('never offers a reserved GPU in any option, and still offers moves elsewhere', async () => {
+    const base = await run(new FakeLlm([pickTop()]));
+    const reserved = [...new Set(destsOf(base, 'job-a').filter((g) => g.startsWith('gpu-r1-')))];
+    expect(reserved.length).toBeGreaterThan(0);
+    const r = await planIncidents(
+      { db, physics, llm: new FakeLlm([pickTop()]), workflowId: WF, runId: RUN_ID, reservedGpuIds: reserved },
+      { incidents: [PUMP] },
+    );
+    const dests = destsOf(r, 'job-a');
+    expect(dests.length).toBeGreaterThan(0);
+    for (const g of reserved) expect(dests).not.toContain(g);
+    expect(JSON.stringify(r.commands)).not.toContain(reserved[0]!);
+  });
+
+  it('reuses a fresh checkpoint: no new checkpoint step, label says so, migrate depends on nothing', async () => {
+    await withFreshCheckpoint(5_000);
+    const r = await run(new FakeLlm([pickTop()]));
+    const opts = allOptions(r, 'job-a');
+    for (const o of opts) expect(o.commands.map((c) => c.operation)).not.toContain('checkpoint');
+    const moves = opts.filter((o) => o.commands.some((c) => c.operation === 'migrate_restart'));
+    expect(moves.length).toBeGreaterThan(0);
+    for (const o of moves) {
+      expect(o.label).toContain('(reusing fresh checkpoint ckpt-job-a-fresh)');
+      expect(o.commands[0]!.depends_on_command_keys).toEqual([]);
+    }
+    expect(opts.some((o) => o.option_id === 'job-a:ckpt-reuse+pause')).toBe(true);
+    for (const c of r.commands) expect(validatePayload('ActionCommand', c).ok).toBe(true);
+    expect(validatePayload('PlanCandidate', r.plan).ok).toBe(true);
+  });
+
+  it('freshCheckpointMaxAgeS controls the threshold', async () => {
+    await withFreshCheckpoint(30_000);
+    const strict = await planIncidents(
+      { db, physics, llm: new FakeLlm([pickTop()]), workflowId: WF, runId: RUN_ID, freshCheckpointMaxAgeS: 10 },
+      { incidents: [PUMP] },
+    );
+    expect(allOptions(strict, 'job-a').some((o) => o.commands.some((c) => c.operation === 'checkpoint'))).toBe(true);
+    const dflt = await run(new FakeLlm([pickTop()]));
+    expect(allOptions(dflt, 'job-a').some((o) => o.commands.some((c) => c.operation === 'checkpoint'))).toBe(false);
+  });
+
+  it('is unchanged when neither option is given and the checkpoint is stale', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    const ids = allOptions(r, 'job-a').map((o) => o.option_id);
+    expect(ids.some((i) => i.startsWith('job-a:ckpt+move:'))).toBe(true);
+    expect(ids).toContain('job-a:ckpt+pause');
+    expect(ids.some((i) => i.includes('ckpt-reuse'))).toBe(false);
+  });
+});

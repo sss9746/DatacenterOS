@@ -7,7 +7,7 @@
 //      code rejects any choice that is not an eligible option and falls back to rank 1
 //   5. the result is persisted as a PlanCandidate proposal (db.submitPlan). Nothing is executed here.
 
-import { validatePayload, type ActionCommand, type Incident, type PlanCandidate, type SafetyDecision } from '@dcos/contracts';
+import { validatePayload, type ActionCommand, type Checkpoint, type Incident, type PlanCandidate, type SafetyDecision } from '@dcos/contracts';
 import { z } from 'zod';
 import { summarizeToolCall } from './events.js';
 import type { DbPort, Evidence, LlmChatResponse, LlmPort, PhysicsPort, PlanMetrics, ToolCallSummary } from './ports.js';
@@ -54,8 +54,13 @@ export interface PlannerDeps {
   workflowId: string;
   runId: string;
   attempt?: number;
+  /** GPUs held by still-running actions: treated as occupied, so no option may target them. */
+  reservedGpuIds?: string[];
+  /** A completed checkpoint younger than this (sim seconds) is reused instead of taking a new one. Default 60. */
+  freshCheckpointMaxAgeS?: number;
 }
 
+export const FRESH_CHECKPOINT_MAX_AGE_S = 60;
 export const PLANNER_HORIZON_S = 600;
 export const PLANNER_HORIZON_ASSUMPTION = `planner horizon ${PLANNER_HORIZON_S} s`;
 /** Migrate options per job (best placement candidates first). */
@@ -169,10 +174,22 @@ function jobRunsHot(ix: SnapshotIndex, gpuIds: string[]): boolean {
   });
 }
 
+/** Latest complete, accessible checkpoint of the job if it is younger than `maxAgeS` sim seconds. */
+export function freshCheckpointOf(ix: SnapshotIndex, jobId: string, maxAgeS: number): Checkpoint | null {
+  let best: Checkpoint | null = null;
+  for (const c of ix.snap.checkpoints) {
+    if (c.job_id !== jobId || c.status !== 'complete' || !c.accessible || c.complete_sim_time_ms === null) continue;
+    const newer = best === null || c.complete_sim_time_ms > best.complete_sim_time_ms!;
+    const tieWins = best !== null && c.complete_sim_time_ms === best.complete_sim_time_ms && c.checkpoint_id > best.checkpoint_id;
+    if (newer || tieWins) best = c;
+  }
+  return best !== null && (ix.snap.clock.sim_time_ms - best.complete_sim_time_ms!) / 1000 < maxAgeS ? best : null;
+}
+
 export function enumerateOptions(
   ix: SnapshotIndex,
   job: AffectedJob,
-  ctx: { runId: string; workflowId: string; attempt: number; planId: string },
+  ctx: { runId: string; workflowId: string; attempt: number; planId: string; freshCheckpointMaxAgeS?: number },
 ): DraftOption[] {
   const spec = ix.jobSpec.get(job.job_id);
   const state = ix.jobState.get(job.job_id);
@@ -191,7 +208,9 @@ export function enumerateOptions(
       commands: [build({ operation: 'power_cap', arguments: { power_limit_w: POWER_CAP_W } })],
     });
   }
-  const ckpt = spec.checkpoint_supported ? build({ operation: 'checkpoint' }) : null;
+  const fresh = spec.checkpoint_supported ? freshCheckpointOf(ix, job.job_id, ctx.freshCheckpointMaxAgeS ?? FRESH_CHECKPOINT_MAX_AGE_S) : null;
+  const ckpt = spec.checkpoint_supported && !fresh ? build({ operation: 'checkpoint' }) : null;
+  const reuse = fresh ? ` (reusing fresh checkpoint ${fresh.checkpoint_id})` : '';
   if (ckpt) out.push({ option_id: id('ckpt'), label: `${job.job_id} checkpoint`, job_id: job.job_id, commands: [ckpt] });
 
   if (spec.preemptible) {
@@ -203,8 +222,8 @@ export function enumerateOptions(
         depends_on_command_keys: ckpt ? [ckpt.command_key] : [],
       });
       out.push({
-        option_id: id(`${ckpt ? 'ckpt+' : ''}move:${racks}`),
-        label: `${job.job_id} ${ckpt ? 'checkpoint then ' : ''}move to ${racks}`,
+        option_id: id(`${ckpt ? 'ckpt+' : fresh ? 'ckpt-reuse+' : ''}move:${racks}`),
+        label: `${job.job_id} ${ckpt ? 'checkpoint then ' : ''}move to ${racks}${reuse}`,
         job_id: job.job_id,
         commands: ckpt ? [ckpt, move] : [move],
       });
@@ -212,8 +231,8 @@ export function enumerateOptions(
   }
   const pause = build({ operation: 'pause_job', depends_on_command_keys: ckpt ? [ckpt.command_key] : [] });
   out.push({
-    option_id: id(ckpt ? 'ckpt+pause' : 'pause'),
-    label: `${job.job_id} ${ckpt ? 'checkpoint then ' : ''}pause`,
+    option_id: id(ckpt ? 'ckpt+pause' : fresh ? 'ckpt-reuse+pause' : 'pause'),
+    label: `${job.job_id} ${ckpt ? 'checkpoint then ' : ''}pause${reuse}`,
     job_id: job.job_id,
     commands: ckpt ? [ckpt, pause] : [pause],
   });
@@ -468,7 +487,9 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   const incidentIds = incidents.map((i) => i.incident_id) as [string, ...string[]];
 
   const snap = await db.getObservedSnapshot();
-  const ix = indexSnapshot(snap);
+  const base = indexSnapshot(snap);
+  const reserved = deps.reservedGpuIds ?? [];
+  const ix: SnapshotIndex = reserved.length > 0 ? { ...base, allocatedGpus: new Set([...base.allocatedGpus, ...reserved]) } : base;
   const epoch = snap.clock.decision_epoch;
   const planId = `plan-${workflowId}-a${attempt}-e${epoch}`;
   let evidence: Evidence | null = null;
@@ -481,7 +502,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   const toolCalls: ToolCallSummary[] = [];
   const ranked = new Map<string, RankedOption[]>();
   for (const job of findAffectedJobs(ix, incidents, evidence)) {
-    const drafts = enumerateOptions(ix, job, { runId, workflowId, attempt, planId });
+    const drafts = enumerateOptions(ix, job, { runId, workflowId, attempt, planId, freshCheckpointMaxAgeS: deps.freshCheckpointMaxAgeS });
     ranked.set(job.job_id, rankOptions(ix, job.job_id, drafts.map((d) => scoreOption(physics, ix, d, toolCalls))));
   }
 
