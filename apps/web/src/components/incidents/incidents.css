@@ -1,0 +1,53 @@
+/* Recovery page: Agent room (left) + Incidents and recovered evidence (right). Tokens come from styles.css. */
+.recovery-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 20px; margin-bottom: 24px; align-items: start; }
+.recovery-side { display: grid; gap: 20px; min-width: 0; }
+@media (max-width: 1200px) { .recovery-grid { grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr); gap: 16px; } .recovery-side { gap: 16px; } }
+@media (max-width: 930px) { .recovery-grid { grid-template-columns: 1fr; } }
+
+.inc-head { display: inline-flex; gap: 6px; align-items: center; }
+
+/* ---- incident cards */
+.incident-list { display: flex; flex-direction: column; }
+.incident { padding: 16px 20px 14px; border-top: 1px solid var(--line); }
+.incident-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.incident-top h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; color: var(--foreground); min-width: 0; }
+.incident-top h3 svg { flex: none; color: var(--warning); }
+.incident-badges { display: inline-flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.incident-severity .badge { text-transform: capitalize; }
+
+.incident-lines { margin: 12px 0 0; display: grid; gap: 8px; }
+.incident-line { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.incident-line dt { font-size: 11px; font-weight: 500; color: var(--muted); line-height: 1.6; }
+.incident-line dd { margin: 0; font-size: 13px; line-height: 1.6; color: var(--foreground); overflow-wrap: anywhere; }
+.incident-line dd .badge { margin-left: 6px; vertical-align: 1px; }
+
+/* badge tones used here until the shell adds them */
+.incident .badge-nemotron { color: #14291f; background: var(--agent); }
+.incident .badge-code { color: #c1cbd5; background: #293440; border: 1px solid var(--line); }
+.incident .badge-example, .inc-head .badge-example, #recovered-evidence .badge-example { color: #f5d49e; background: #3d3326; }
+
+.incident-evidence { margin-top: 10px; }
+.incident-evidence > summary { list-style: none; cursor: pointer; display: inline-block; font-size: 11px; font-weight: 500; color: var(--muted); padding: 2px 0; border-bottom: 1px dotted var(--line); }
+.incident-evidence > summary::-webkit-details-marker { display: none; }
+.incident-evidence > summary:hover, .incident-evidence[open] > summary { color: var(--foreground); }
+.incident-evidence dl { margin: 8px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
+.incident-evidence dt { font-weight: 500; }
+.incident-evidence dd { margin: 0; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+.incident-evidence code { font-size: 11px; color: #c3d3df; background: var(--surface-raised); padding: 1px 5px; border-radius: 4px; }
+
+/* ---- recovered facts */
+.fact-list { list-style: none; margin: 0; padding: 4px 20px 18px; display: flex; flex-direction: column; gap: 8px; }
+.fact { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 13px; line-height: 1.55; color: var(--foreground); }
+.fact svg { margin-top: 4px; color: var(--muted); }
+.fact-agent svg { color: var(--agent); }
+.fact-warning svg { color: var(--warning); }
+.fact-danger svg { color: var(--danger); }
+.fact-danger span { color: #ffd2cc; }
+
+@media (max-width: 680px) {
+  .incident { padding: 14px 16px 12px; }
+  .incident-line { grid-template-columns: 1fr; gap: 2px; }
+  .incident-top { flex-direction: column; gap: 8px; }
+  .incident-badges { justify-content: flex-start; }
+  .fact-list { padding: 4px 16px 16px; }
+}
