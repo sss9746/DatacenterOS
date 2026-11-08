@@ -1,0 +1,41 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "nemotron-fixed12",
+  "run_id": "nemotron-fixed12-sc08-non-preemptible-affected-s108",
+  "scenario_id": "sc08-non-preemptible-affected",
+  "seed": 108,
+  "policy": "threshold",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 526,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "threshold.job-c.escalate.not_preemptible.after.none",
+      "action_id": "threshold.job-c.escalate.not_preemptible.after.none",
+      "operation": "escalate",
+      "job_id": "job-c",
+      "target_resource_id": "job-c",
+      "issued_sim_time_ms": 673000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 674000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 675000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    }
+  ]
+}

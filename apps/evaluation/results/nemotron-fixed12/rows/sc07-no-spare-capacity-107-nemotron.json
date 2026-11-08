@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "nemotron-fixed12-sc07-no-spare-capacity-s107",
+  "scenario_id": "sc07-no-spare-capacity",
+  "seed": 107,
+  "policy": "nemotron",
+  "lost_work_units": 0,
+  "job_completion_delay_s": 219.244,
+  "gpu_busy_waste_s": 3506.1,
+  "unnecessary_preemptions": 0,
+  "unsafe_actions_executed": 0,
+  "unsafe_actions_blocked": 0,
+  "successful_recoveries": 0,
+  "failed_recoveries": 0,
+  "agent_crash_resumes": 0,
+  "provenance": {
+    "batch_id": "nemotron-fixed12",
+    "code_revision": "a280ffa149231803c1c61a2316fbf018525664aa",
+    "physics_profile_version": "dcos-gpu-physics@0.1.0",
+    "policy_version": "nemotron-policy(nim;event-driven)@a280ffa14923",
+    "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "prompt_version": "prompts-c4d654bd3d51",
+    "model_enabled": true,
+    "model_requests": 15,
+    "live_model_responses": 10,
+    "cache_hits": 5,
+    "fallback_decisions": 1,
+    "decision_wall_time_ms": 60218.803,
+    "horizon_sim_s": 600,
+    "latency_model": "zero_simulated_decision_latency",
+    "unfinished_job_ids": [
+      "job-a",
+      "job-b",
+      "job-c"
+    ],
+    "failed_job_ids": [],
+    "trace_sha256": "418e5b5135e578716e0b5767a4e88e46131b5f5d8b3d452546f8d2f633abfa35"
+  }
+}

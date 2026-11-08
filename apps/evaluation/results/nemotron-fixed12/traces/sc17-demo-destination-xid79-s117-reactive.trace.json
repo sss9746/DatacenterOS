@@ -1,0 +1,83 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "nemotron-fixed12",
+  "run_id": "nemotron-fixed12-sc17-demo-destination-xid79-s117",
+  "scenario_id": "sc17-demo-destination-xid79",
+  "seed": 117,
+  "policy": "reactive",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 555,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "reactive.gpu-r1-n1-0.cordon_gpu.xid79",
+      "action_id": "reactive.gpu-r1-n1-0.cordon_gpu.xid79",
+      "operation": "cordon_gpu",
+      "job_id": null,
+      "target_resource_id": "gpu-r1-n1-0",
+      "issued_sim_time_ms": 690000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 691000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 692000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "reactive.job-a.migrate_restart.v1",
+      "action_id": "reactive.job-a.migrate_restart.v1",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 1153000,
+      "safety": {
+        "decision": "deny",
+        "violations": [
+          "DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT"
+        ]
+      },
+      "disposition": "blocked",
+      "requested_sim_time_ms": null,
+      "outcome": null,
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "reactive.job-b.migrate_restart.v1",
+      "action_id": "reactive.job-b.migrate_restart.v1",
+      "operation": "migrate_restart",
+      "job_id": "job-b",
+      "target_resource_id": "job-b",
+      "issued_sim_time_ms": 1153000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 1154000,
+      "outcome": null,
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": "unresolved",
+      "unsafe_executed": []
+    }
+  ]
+}
