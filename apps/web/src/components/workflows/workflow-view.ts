@@ -308,7 +308,16 @@ export function unresolvedInfra(snapshot: ObservedSnapshot | null, commands: rea
 const RECONCILE_RE = /→\s*(skip|wait|claim_start|resubmit_same_key|blocked|reclaim_after_timeout|needs_operator)\s*$/;
 const RESUME_SUMMARY_RE = /^(?:Example:\s*)?(?:resumed after agent restart|continuing \S+ from stage \S+ after agent restart)/i;
 
-export interface ResumeEvidence { source: 'workflow_state' | 'reconcile_tool_calls' | 'event_summary'; event_id: string; sim_time_ms: number; detail: string }
+export interface ResumeEvidence {
+  source: 'workflow_state' | 'reconcile_tool_calls' | 'event_summary';
+  event_id: string;
+  sim_time_ms: number;
+  detail: string;
+  /** Persisted `state.resume_count`; null when not recorded (older rows, event-derived evidence). */
+  count: number | null;
+  /** Persisted `state.resumed.previous_owner`; null when not recorded. */
+  previous_owner: string | null;
+}
 
 /**
  * "Resumed" only with evidence. The agent persists no resume field, so the strongest signal is the resume path's
@@ -317,20 +326,23 @@ export interface ResumeEvidence { source: 'workflow_state' | 'reconcile_tool_cal
  * the agent also re-claims after an error retry.
  */
 export function resumeEvidence(events: readonly AgentEventInput[], state: Record<string, unknown> = {}): ResumeEvidence | null {
-  // Primary: the persisted marker `state.resumed = { by_worker, at_sim_time_ms, action }` written by the resume path.
+  // Primary: the persisted marker `state.resumed = { by_worker, at_sim_time_ms, action, previous_owner }` plus
+  // `state.resume_count`, written by the resume path.
   const marker = state.resumed;
   if (isRecord(marker) && num(marker.at_sim_time_ms) !== null) {
-    const parts = [str(marker.by_worker) ? `by ${marker.by_worker as string}` : null, str(marker.action)].filter((x): x is string => x !== null);
-    return { source: 'workflow_state', event_id: 'workflow.state.resumed', sim_time_ms: marker.at_sim_time_ms as number, detail: parts.join(' · ') || 'resume recorded' };
+    const previous_owner = str(marker.previous_owner);
+    const parts = [str(marker.by_worker) ? `by ${marker.by_worker as string}` : null, str(marker.action), previous_owner ? `took over from ${previous_owner}` : null].filter((x): x is string => x !== null);
+    const count = num(state.resume_count) ?? num(marker.resume_count);
+    return { source: 'workflow_state', event_id: 'workflow.state.resumed', sim_time_ms: marker.at_sim_time_ms as number, detail: parts.join(' · ') || 'resume recorded', count, previous_owner };
   }
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     const calls = e.tool_calls.filter((t) => t.tool === 'get_action_status' && RECONCILE_RE.test(t.result_summary));
-    if (calls.length) return { source: 'reconcile_tool_calls', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: calls.map((t) => `${t.args_summary}: ${t.result_summary}`).join('; ') };
+    if (calls.length) return { source: 'reconcile_tool_calls', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: calls.map((t) => `${t.args_summary}: ${t.result_summary}`).join('; '), count: null, previous_owner: null };
   }
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
-    if (RESUME_SUMMARY_RE.test(e.summary)) return { source: 'event_summary', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: e.summary };
+    if (RESUME_SUMMARY_RE.test(e.summary)) return { source: 'event_summary', event_id: e.agent_event_id, sim_time_ms: e.sim_time_ms, detail: e.summary, count: null, previous_owner: null };
   }
   return null;
 }
@@ -345,8 +357,22 @@ export interface CandidateOption extends Projection {
   blocked: boolean;
   /** true/false only when an option-id choice was published (choose_options); null = choice not identifiable. */
   chosen: boolean | null;
+  /** Present only for options read from the persisted `workflow.state.candidates[]`. */
+  persisted?: PersistedCandidateFields;
+}
+export interface PersistedCandidateFields {
+  job_id: string;
+  option: string;
+  deficit_wu: number | null;
+  gpu_waste_s: number | null;
+  violations: string[];
+  reason: string | null;
+  snapshot_epoch: number | null;
+  as_of_sim_time_ms: number | null;
 }
 export interface CandidateRound {
+  /** `workflow_state` = options from `state.candidates[]`; `events` = parsed from plan-event tool calls (older rows). */
+  source: 'workflow_state' | 'events';
   event_ids: string[];
   sim_time_ms: number;
   options: CandidateOption[];
@@ -420,6 +446,7 @@ export function latestCandidateRound(events: readonly AgentEventInput[]): Candid
   const chosenIds = choice && choice.option_ids.length ? new Set(choice.option_ids) : null;
   const options = [...byId.values()].map((o) => ({ ...o, chosen: chosenIds ? chosenIds.has(o.option_id) : null }));
   return {
+    source: 'events',
     event_ids: round.map((e) => e.agent_event_id),
     sim_time_ms: events[end]!.sim_time_ms,
     options,
@@ -427,6 +454,80 @@ export function latestCandidateRound(events: readonly AgentEventInput[]): Candid
     choice,
     narrative: round.filter((e) => e.stage === 'plan' || e.stage === 'replan').map((e) => ({ summary: e.summary, actor: e.actor ?? null })),
     pending: events[end]!.stage === 'replan',
+  };
+}
+
+const MAX_PERSISTED_PER_JOB = 6;
+const actorOf = (v: unknown): AgentActor | null => (v === 'nemotron' || v === 'code' ? v : null);
+/** `safety` may be a verdict string ("allowed" / "denied: …"), a boolean, or `{ allowed }`; anything else is "not recorded". */
+function persistedSafety(v: unknown, violations: string[]): { safety: string | null; blocked: boolean } {
+  if (typeof v === 'string' && v.trim()) return { safety: v, blocked: /^(denied|blocked|rejected|unsafe)/i.test(v) };
+  const allowed = typeof v === 'boolean' ? v : isRecord(v) ? bool(v.allowed) : null;
+  if (allowed !== null) return { safety: allowed ? 'allowed' : `denied${violations.length ? `: ${violations.join(', ')}` : ''}`, blocked: !allowed };
+  return { safety: null, blocked: violations.length > 0 };
+}
+
+/**
+ * Options persisted by the agent in `workflow.state.candidates[]` (chosen first, at most 6 per job), including the
+ * rejected ones. Returns null when the row has none, so the caller falls back to the plan-event round.
+ */
+export function persistedCandidateOptions(state: Record<string, unknown>): CandidateOption[] | null {
+  const rows = records(state.candidates).filter((r) => str(r.job_id) && str(r.option));
+  if (!rows.length) return null;
+  const perJob = new Map<string, number>();
+  const out: CandidateOption[] = [];
+  for (const r of rows) {
+    const job_id = r.job_id as string;
+    const option = r.option as string;
+    const seen = perJob.get(job_id) ?? 0;
+    if (seen >= MAX_PERSISTED_PER_JOB) continue;
+    perJob.set(job_id, seen + 1);
+    const violations = strList(r.violations);
+    const { safety, blocked } = persistedSafety(r.safety, violations);
+    out.push({
+      option_id: option.startsWith(`${job_id}:`) ? option : `${job_id}:${option}`,
+      simulated: str(r.commands_summary) ?? '',
+      reported: '',
+      lost_wu: num(r.predicted_lost_work_units),
+      delay_s: null,
+      actor: actorOf(r.decided_by),
+      safety,
+      blocked,
+      chosen: bool(r.chosen),
+      persisted: {
+        job_id, option,
+        deficit_wu: num(r.predicted_work_deficit_units),
+        gpu_waste_s: num(r.predicted_gpu_busy_waste_s),
+        violations,
+        reason: str(r.reason),
+        snapshot_epoch: num(r.snapshot_epoch),
+        as_of_sim_time_ms: num(r.as_of_sim_time_ms),
+      },
+    });
+  }
+  // Stable: chosen options first within each job, jobs in first-appearance order.
+  const jobs = [...perJob.keys()];
+  return jobs.flatMap((j) => {
+    const mine = out.filter((o) => o.persisted!.job_id === j);
+    return [...mine.filter((o) => o.chosen === true), ...mine.filter((o) => o.chosen !== true)];
+  });
+}
+
+/** Persisted candidates when the row has them (narrative still from events); otherwise the plan-event round. */
+export function candidateRound(events: readonly AgentEventInput[], state: Record<string, unknown> = {}): CandidateRound | null {
+  const fromEvents = latestCandidateRound(events);
+  const persisted = persistedCandidateOptions(state);
+  if (!persisted) return fromEvents;
+  const asOf = persisted.map((o) => o.persisted!.as_of_sim_time_ms).filter((x): x is number => x !== null);
+  return {
+    source: 'workflow_state',
+    event_ids: fromEvents?.event_ids ?? [],
+    sim_time_ms: asOf.length ? Math.max(...asOf) : fromEvents?.sim_time_ms ?? 0,
+    options: persisted,
+    combined: fromEvents?.combined ?? null,
+    choice: fromEvents?.choice ?? null,
+    narrative: fromEvents?.narrative ?? [],
+    pending: fromEvents?.pending ?? false,
   };
 }
 
@@ -588,7 +689,7 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
         outcomes: outcomes(actions, input.snapshot),
         affectedJobs: [...new Set(commands.map((c) => c.job_id).filter((j): j is string => !!j))],
         infra: unresolvedInfra(input.snapshot, commands),
-        candidates: latestCandidateRound(events),
+        candidates: candidateRound(events, wf.state),
         terminal: terminal || verification !== null,
         nextStep,
       };

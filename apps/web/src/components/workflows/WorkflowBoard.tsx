@@ -11,6 +11,7 @@ import {
   formatSpan,
   operationLabel,
   type ActionLine,
+  type CandidateOption,
   type CandidateRound,
   type InfraLine,
   type StatusKind,
@@ -74,7 +75,7 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
     <header className="wf-card-head">
       <h3 id={headingId}><code>{wf.workflow_id}</code></h3>
       <Badge tone={STATUS_TONE[view.status.kind]}>{view.status.label}</Badge>
-      {view.resumed && <Badge tone="agent"><RotateCcw size={11} aria-hidden="true"/>Resumed</Badge>}
+      {view.resumed && <Badge tone="agent"><RotateCcw size={11} aria-hidden="true"/>Resumed{view.resumed.count !== null && view.resumed.count > 1 ? ` ×${view.resumed.count}` : ''}</Badge>}
       {example && <Badge tone="warning">Example</Badge>}
     </header>
     <ul className="wf-incidents" aria-label="Incidents in this workflow">
@@ -123,28 +124,46 @@ function Candidates({ round, example, plan, planId }: { round: CandidateRound | 
   return <details className="wf-section">
     <summary>Candidates{round ? ` · ${round.options.length} ${round.options.length === 1 ? 'option' : 'options'}` : ' · none published'}</summary>
     <div className="wf-section-body">
-      <p className="wf-muted">Shown for comparison only; nothing here executes a candidate. Projections are the agent’s own simulate_plan results as reported in its events.</p>
+      <p className="wf-muted">Shown for comparison only; nothing here executes a candidate. {round?.source === 'workflow_state' ? 'Predictions are the values the agent persisted for each option in the workflow state.' : 'Projections are the agent’s own simulate_plan results as reported in its events.'}</p>
       {!round ? <p>No plan or replan event has been published for this workflow.</p> : <>
         {round.pending && <p className="wf-note">Replanning: the new plan event has not been published yet.</p>}
         {round.narrative.map((n, i) => <p key={i} className="wf-narrative"><ActorBadge actor={n.actor} example={example}/><span className="wf-wrap">{n.summary}</span></p>)}
-        {round.choice
+        {round.source === 'events' && (round.choice
           ? <p className="wf-narrative"><ActorBadge actor={round.choice.actor} example={example}/><span className="wf-wrap">choose_options: {round.choice.reported}</span></p>
-          : <p className="wf-muted">No option-level choice was published; the chosen option cannot be identified by id. The plan summary above names it.</p>}
+          : <p className="wf-muted">No option-level choice was published; the chosen option cannot be identified by id. The plan summary above names it.</p>)}
         {round.options.length > 0 && <ul className="wf-options">{round.options.map((o) => <li key={o.option_id} className={o.chosen ? 'wf-option-chosen' : ''}>
-          <div className="wf-option-head"><code>{o.option_id}</code>{o.chosen === true && <Badge tone="agent">Chosen</Badge>}{o.chosen === false && <Badge>Alternative</Badge>}{o.blocked && <Badge tone="danger">Blocked by safety</Badge>}</div>
-          <dl>
-            <div><dt>Predicted lost work</dt><dd>{o.lost_wu === null ? 'not reported' : `${o.lost_wu} wu`}</dd></div>
-            <div><dt>Predicted delay</dt><dd>{o.delay_s === null ? 'not reported' : `${o.delay_s} s`}</dd></div>
-            <div><dt>Safety</dt><dd>{o.safety ?? 'not published'}</dd></div>
-          </dl>
-          {o.simulated && <p className="wf-muted wf-wrap">Simulated: {o.simulated} · <ActorBadge actor={o.actor} example={example}/></p>}
+          <div className="wf-option-head"><code>{o.option_id}</code>{o.chosen === true && <Badge tone="agent">Chosen</Badge>}{o.chosen === false && <Badge>{o.persisted ? 'Rejected' : 'Alternative'}</Badge>}{o.blocked && <Badge tone="danger">Blocked by safety</Badge>}</div>
+          {o.persisted ? <PersistedOption o={o} example={example}/> : <>
+            <dl>
+              <div><dt>Predicted lost work</dt><dd>{o.lost_wu === null ? 'not reported' : `${o.lost_wu} wu`}</dd></div>
+              <div><dt>Predicted delay</dt><dd>{o.delay_s === null ? 'not reported' : `${o.delay_s} s`}</dd></div>
+              <div><dt>Safety</dt><dd>{o.safety ?? 'not published'}</dd></div>
+            </dl>
+            {o.simulated && <p className="wf-muted wf-wrap">Simulated: {o.simulated} · <ActorBadge actor={o.actor} example={example}/></p>}
+          </>}
         </li>)}</ul>}
         {round.combined && <p className="wf-narrative"><ActorBadge actor={round.combined.actor} example={example}/><span className="wf-wrap">Selected commands together: {round.combined.reported}{round.combined.simulated ? ` (${round.combined.simulated})` : ''}</span></p>}
       </>}
       <SelectedPlan plan={plan} planId={planId}/>
-      <p className="wf-muted">Rejected options are not persisted by the agent; alternatives above come only from its published event tool calls.</p>
+      {round?.source !== 'workflow_state' && <p className="wf-muted">This row has no persisted candidates (written before the agent saved them); alternatives above come only from its published event tool calls.</p>}
     </div>
   </details>;
+}
+
+const reported = (v: number | null, unit: string): string => (v === null ? 'not reported' : `${v} ${unit}`);
+function PersistedOption({ o, example }: { o: CandidateOption; example: boolean }) {
+  const p = o.persisted!;
+  return <>
+    <dl>
+      <div><dt>Predicted lost work</dt><dd>{reported(o.lost_wu, 'wu')}</dd></div>
+      <div><dt>Predicted work deficit</dt><dd>{reported(p.deficit_wu, 'wu')}</dd></div>
+      <div><dt>Predicted GPU busy waste</dt><dd>{reported(p.gpu_waste_s, 's')}</dd></div>
+      <div><dt>Safety</dt><dd>{o.safety ?? 'not recorded'}{p.violations.length && !o.safety?.includes(p.violations[0]!) ? ` · ${p.violations.join(', ')}` : ''}</dd></div>
+    </dl>
+    {o.simulated && <p className="wf-muted wf-wrap">Commands: {o.simulated}</p>}
+    <p className="wf-narrative"><ActorBadge actor={o.actor} example={example}/><span className="wf-wrap">{p.reason ?? 'no reason recorded'}</span></p>
+    <p className="wf-muted">{p.as_of_sim_time_ms !== null ? `As of sim ${duration(p.as_of_sim_time_ms)}` : 'Sim time not recorded'}{p.snapshot_epoch !== null ? ` · snapshot epoch ${p.snapshot_epoch}` : ''}</p>
+  </>;
 }
 
 function ActionList({ title, lines, empty }: { title: string; lines: ActionLine[]; empty?: string }) {

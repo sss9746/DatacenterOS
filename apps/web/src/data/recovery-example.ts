@@ -145,7 +145,7 @@ export async function loadRecoveryExample(client: MockDbClient) {
   await gpuWf.claim('example-agent-2');
   await publish(xidWf, xid.incident_id, 'execute', 'code', 'resumed after agent restart: cordon_gpu gpu-r7-n1-0 already succeeded (skipped), nothing left to run.', [call('get_action_status', cordon.command_key, 'succeeded → skip')]);
   const resumedAt = (await client.getObservedSnapshot()).clock.sim_time_ms;
-  await gpuWf.stage('verify', { resumed: { by_worker: 'example-agent-2', at_sim_time_ms: resumedAt, action: 'resumed_verify' } });
+  await gpuWf.stage('verify', { resumed: { by_worker: 'example-agent-2', at_sim_time_ms: resumedAt, action: 'resumed_verify', previous_owner: 'example-agent-1' }, resume_count: 1 });
   const note = 'gpu-r7-n1-0 still cordoned (not repaired), no jobs on it';
   await client.verifyAction(cordon.command_key, { verified: true, note: `Example: ${note}`, gpu_id: 'gpu-r7-n1-0', availability: 'cordoned', repaired: false });
   await publish(xidWf, xid.incident_id, 'verify', 'code', 'verified: 1/1 checks passed.', [call('verify_action', cordon.command_key, 'verified')]);

@@ -6,7 +6,9 @@ import {
   actorCounts,
   actorSummary,
   buildWorkflowViews,
+  candidateRound,
   latestCandidateRound,
+  persistedCandidateOptions,
   readVerification,
   resumeEvidence,
   trackStageOf,
@@ -194,7 +196,7 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(cool.attempt).toBe(2);
     expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:cap')?.chosen).toBe(true);
     expect(xid.status.kind).toBe('verified');
-    expect(xid.resumed?.source).toBe('workflow_state');
+    expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-1', count: 1 });
     expect(xid.workflow.lease_owner).toBe('example-agent-2');
     expect(xid.infra.relatedGpus.map((g) => g.resource_id)).toEqual(['gpu-r7-n1-0']);
     expect(events.every((e) => e.summary.startsWith('Example:'))).toBe(true);
@@ -229,6 +231,56 @@ describe('R3 handoff and persisted resume marker', () => {
     expect(r).toMatchObject({ source: 'workflow_state', sim_time_ms: 42_000 });
     expect(r?.detail).toContain('agent-2');
     expect(resumeEvidence([], { resumed: { by_worker: 'agent-2' } })).toBeNull();
+  });
+  it('reads previous_owner and resume_count from the persisted marker', () => {
+    const r = resumeEvidence([], { resumed: { by_worker: 'agent-2', at_sim_time_ms: 1, action: 'resumed_execute', previous_owner: 'agent-1' }, resume_count: 2 });
+    expect(r).toMatchObject({ count: 2, previous_owner: 'agent-1' });
+    expect(r?.detail).toContain('took over from agent-1');
+    expect(resumeEvidence([], { resumed: { at_sim_time_ms: 1 } })).toMatchObject({ count: null, previous_owner: null });
+  });
+});
+
+describe('persisted candidates (workflow.state.candidates)', () => {
+  const cand = (patch: Record<string, unknown>) => ({
+    job_id: 'job-a', option: 'ckpt', commands_summary: 'checkpoint job-a', predicted_lost_work_units: 0, predicted_work_deficit_units: 2,
+    predicted_gpu_busy_waste_s: 30, safety: 'allowed', violations: [], chosen: false, reason: 'r', decided_by: 'nemotron', snapshot_epoch: 7, as_of_sim_time_ms: 5000, ...patch,
+  });
+  it('reads chosen and rejected options with their persisted fields, chosen first per job', () => {
+    const opts = persistedCandidateOptions({ candidates: [
+      cand({ option: 'move:r6', safety: 'denied: DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT', violations: ['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'], decided_by: 'code', predicted_lost_work_units: null }),
+      cand({ chosen: true }),
+      cand({ job_id: 'job-b', option: 'job-b:cap', chosen: true }),
+    ] })!;
+    expect(opts.map((o) => [o.option_id, o.chosen, o.blocked, o.actor])).toEqual([
+      ['job-a:ckpt', true, false, 'nemotron'], ['job-a:move:r6', false, true, 'code'], ['job-b:cap', true, false, 'nemotron'],
+    ]);
+    expect(opts[0]).toMatchObject({ lost_wu: 0, persisted: { deficit_wu: 2, gpu_waste_s: 30, snapshot_epoch: 7, as_of_sim_time_ms: 5000, reason: 'r' } });
+    expect(opts[1]!.lost_wu).toBeNull();
+  });
+  it('caps at 6 per job and ignores malformed rows', () => {
+    const many = Array.from({ length: 8 }, (_, i) => cand({ option: `o${i}` }));
+    expect(persistedCandidateOptions({ candidates: [...many, { option: 'no-job' }, 'junk'] })).toHaveLength(6);
+    expect(persistedCandidateOptions({ candidates: [] })).toBeNull();
+    expect(persistedCandidateOptions({})).toBeNull();
+  });
+  it('accepts boolean safety', () => {
+    const [o] = persistedCandidateOptions({ candidates: [cand({ safety: false, violations: ['DEST_GPU_BUSY'] })] })!;
+    expect(o).toMatchObject({ blocked: true, safety: 'denied: DEST_GPU_BUSY' });
+  });
+  it('prefers persisted candidates and falls back to the plan-event round for older rows', () => {
+    const events = [ev({ stage: 'plan', summary: 'plan summary', tool_calls: [
+      { tool: 'simulate_plan', args_summary: 'x', result_summary: 'lost 1 wu', actor: 'code' },
+      { tool: 'evaluate_safety', args_summary: '{"option_id":"job-a:keep"}', result_summary: 'allowed', actor: 'code' },
+    ] })];
+    const persisted = candidateRound(events, { candidates: [cand({ chosen: true })] })!;
+    expect(persisted.source).toBe('workflow_state');
+    expect(persisted.options.map((o) => o.option_id)).toEqual(['job-a:ckpt']);
+    expect(persisted.narrative[0]?.summary).toBe('plan summary');
+    expect(persisted.sim_time_ms).toBe(5000);
+    const older = candidateRound(events, {})!;
+    expect(older.source).toBe('events');
+    expect(older.options.map((o) => o.option_id)).toEqual(['job-a:keep']);
+    expect(view(wf({ state: { candidates: [cand({})] } }), events).candidates?.source).toBe('workflow_state');
   });
 });
 
