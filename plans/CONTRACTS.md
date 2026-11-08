@@ -161,6 +161,26 @@ The browser can read public tables without a token. **Tokens are handed out by P
 - `VITE_STDB_URI`, `VITE_STDB_DB`, `VITE_DATA_MODE` (`mock | live`)
 - `VITE_ADMIN_TOKEN` (presenter laptop's local build only; **never on Vercel**)
 
+### 0.11 Decisions from P3 build questions (v1.1.1, additive)
+1. **`ActionCommand.arguments` by operation:**
+   - `checkpoint {}`
+   - `migrate_restart { destination_gpu_ids: string[] }`
+   - `power_cap { power_limit_w: number }`
+   - `pause_job {}`
+   - `cordon_gpu {}` / `uncordon_gpu {}` (the GPU is `target_resource_id`)
+   - `keep_running {}`
+   - `escalate { reason: string }`
+2. **`payload_hash`** = sha256 of the command's canonical JSON (keys sorted), **excluding `requested_sim_time_ms`**. The same key with a different hash is rejected as `COMMAND_KEY_COLLISION`.
+3. **Safety deny on `request_action`:**
+   - It **persists** the action with `status: "failed"` and `reason_code: "SAFETY_REJECTED"`, puts the violations in `result.violations`, appends an `action_event`, and **returns** that status. It doesn't throw, because the UI shows it as BLOCKED.
+   - Bad payloads, key collisions, stale fencing tokens and held leases are rejected (they throw) and nothing is persisted.
+4. **`gpu-real-0`** sits on node `node-real-0` (resource kind `node`, `profile: "brev_real"`, no rack, never allocatable).
+5. **Thermal bit:** `clocks_event_reasons & 0x20` (DCGM SW thermal slowdown) means throttling because of temperature. A power cap sets `0x04` (SW power cap).
+6. **`getEvidence([], windowSimMs)`** returns evidence for the whole run over that window.
+7. **db-client also exports** `getWorkflow(id)`, `listOpenWorkflows()` and `listIncidents()`. Until `@dcos/db-client` ships, `AgentEventInput`, `WorkflowRecord`, `WorkflowLease` and `SymptomRecord` live in `apps/agent/src/ports.ts`; P2's client must match those shapes.
+8. **`@dcos/physics` exports `PlanMetrics`** (same shape as §0.6), and P3 switches its import when P1 ships.
+9. **`cooling_current`** has one row per pump **and** one per loop.
+
 ---
 
 # Design kit contracts (Kaushik, v1.1.0 with §0 adaptations)
