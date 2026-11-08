@@ -30,10 +30,12 @@ function sample(): RunArtifact {
     timeline: [{ wall_unix_ms: 1_700_000_000_500, sim_time_ms: 601_000, event: 'agent generation 1 spawned', detail: { pid: 123 } }],
     last_snapshot_summary: { note: `uses ${TOKEN}` },
     ledger: [],
+    team: null,
+    provenance: null,
     error: null,
   };
   return {
-    meta: { harness: 'live-recovery-test', commit: 'abc1234', branch: 'r/r5', db: 'dcos-dev', run_id: 'run-demo-1', seed: 42, speed: 2, preset_id: 'gpu_demo_8', model: 'nvidia/nemotron', llm_mode: 'live_nim', reset_performed: true, started_unix_ms: 1_700_000_000_000, node: 'v22', platform: 'win32 host' },
+    meta: { harness: 'live-recovery-test', commit: 'abc1234', branch: 'r/r5', db: 'dcos-dev', run_id: 'run-demo-1', seed: 42, speed: 2, preset_id: 'gpu_demo_8', model: 'nvidia/nemotron', llm_mode: 'live_nim', team_mode: 'single', reset_performed: true, started_unix_ms: 1_700_000_000_000, node: 'v22', platform: 'win32 host' },
     cases: [c],
     passed: false,
   };
@@ -58,6 +60,24 @@ describe('live harness report', () => {
     expect(md).toContain('complete 1 → 2');
     expect(md).toContain('FAIL  checkpoint completed exactly once');
     expect(md).toContain('gen1 pid 123 (SIGKILL)');
+  });
+
+  it('records the team mode, and reports fallback rounds and provenance when present', () => {
+    expect(renderMarkdown(sample())).toContain('**Team mode:** single');
+    const r = sample();
+    r.meta = { ...r.meta, team_mode: 'multi' };
+    r.cases[0]!.team = { lead_rounds: 1, fallback_rounds: 2, malformed_workflows: [], rounds: [] };
+    r.cases[0]!.provenance = {
+      configured_model: 'nvidia/nemotron',
+      llm_mode: 'live_nim',
+      events: { codeEvents: 3, nemotronEvents: 1, fallbackNotices: 1, unattributed: 0 },
+      log: { nemotron_ok: 1, nemotron_failed: 2, endpoint_failovers: 0 },
+      team: { models: ['nvidia/nemotron'], lead_rounds: 1, fallback_rounds: 2 },
+    };
+    const md = renderMarkdown(r);
+    expect(md).toContain('**Team mode:** multi');
+    expect(md).toContain('Lead decided 1, fell back to deterministic code 2');
+    expect(md).toContain('nemotron_failed=2');
   });
 
   it('labels a deterministic rehearsal as not a Nemotron claim', () => {

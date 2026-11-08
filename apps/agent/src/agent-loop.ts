@@ -14,13 +14,13 @@
 // nothing new could appear, so a steady-state cluster does not burn Nemotron calls. A circuit breaker
 // stops calling the LLM for a while after LlmUnavailableError; every module then runs deterministically.
 
-import type { Incident, PlanCandidate } from '@dcos/contracts';
+import type { Incident, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
 import { createCoordinator, DEFAULT_LEASE_MS, type Coordinator, type ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
 import { LlmUnavailableError } from './llm.js';
-import { mergeCandidates, planIncidents, type PlanResult } from './planner.js';
+import { mergeCandidates, planIncidents, type OptionChooser, type PlanResult } from './planner.js';
 import { isDbError, type AgentStage, type DbPort, type Evidence, type LlmPort, type PhysicsPort, type ToolCallSummary, type WorkflowRecord } from './ports.js';
-import { createReplanWatcher, runReplan, type ReplanOutcome, type ReplanWatcher } from './replan.js';
+import { createReplanWatcher, planResourceIds, planStaleReason, runReplan, type ReplanOutcome, type ReplanWatcher } from './replan.js';
 import {
   LEASE_HELD_BY_LIVE_WORKER,
   outcomesFromLedger,
@@ -30,7 +30,8 @@ import {
   type ResumeHandoff,
   type ResumeReport,
 } from './resume.js';
-import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, runTriage, SYMPTOM_BUCKET_MS } from './triage.js';
+import { teamFeedEvents } from './team/protocol.js';
+import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, incidentIdentity, runTriage, SYMPTOM_BUCKET_MS, type Candidate } from './triage.js';
 import { buildOperatorHandoff, verifyRecovery, type VerificationReport } from './verify.js';
 
 // ---------------------------------------------------------------------------------------------- types
@@ -64,6 +65,10 @@ export interface AgentLoopDeps {
   maxWorkflowRetries?: number;
   /** First retry delay after such a throw; doubles per retry (default 2000 wall ms). */
   retryBackoffMs?: number;
+  /** Team mode (DCOS_AGENT_TEAM_MODE=multi): the agent team replaces the single planner choice. Unset = single mode. */
+  chooser?: OptionChooser;
+  /** Team mode: new-incident watch poll while a workflow executes (default 2000 wall ms). */
+  incidentWatchMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -107,6 +112,9 @@ export const DEFAULT_MAX_REPLANS = 3;
 export const DEFAULT_LLM_COOLDOWN_MS = 60_000;
 export const DEFAULT_MAX_WORKFLOW_RETRIES = 3;
 export const DEFAULT_RETRY_BACKOFF_MS = 2_000;
+export const DEFAULT_INCIDENT_WATCH_MS = 2_000;
+/** Symptoms a plan can produce on the resources it acts on (load moved onto a GPU, telemetry gap during a restart). */
+const PLAN_SIDE_EFFECT_KINDS: ReadonlySet<string> = new Set(['thermal_throttle', 'near_throttle', 'stale_telemetry']);
 /** Retry a lease-held workflow this long after its lease expiry (clock skew margin). */
 const LEASE_EXPIRY_MARGIN_MS = 1_000;
 const STOP_WAIT_MS = 5_000;
@@ -244,6 +252,14 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   const now = () => clock.unixMs();
   const maxWorkflowRetries = deps.maxWorkflowRetries ?? DEFAULT_MAX_WORKFLOW_RETRIES;
   const retryBackoffMs = deps.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+  /** Snapshot the latest team round was built on: the baseline of the post-round freshness check. */
+  let roundBaseline: ObservedSnapshot | null = null;
+  const chooser: OptionChooser | undefined =
+    deps.chooser &&
+    ((input) => {
+      roundBaseline = input.ix.snap;
+      return deps.chooser!(input);
+    });
 
   let inflight: Promise<LoopTickReport> | null = null;
   let started = false;
@@ -337,16 +353,99 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   }
 
   async function plan(wfId: string, incidents: Incident[], attempt: number, coord: Coordinator): Promise<PlanResult> {
-    const r = await planIncidents({ db, physics, llm: llm ?? NO_LLM, workflowId: wfId, runId, attempt }, { incidents });
+    const r = await planIncidents({ db, physics, llm: llm ?? NO_LLM, workflowId: wfId, runId, attempt, ...(chooser ? { chooser } : {}) }, { incidents });
     // R3b: candidates ride along in the persisted state; updateStage merges, so they survive execute/verify/done.
-    await coord.updateStage('plan', {
+    const saved = await coord.updateStage('plan', {
       plan_id: r.plan.plan_id,
       attempt,
       incident_ids: [...r.plan.incident_ids],
       candidates: mergeCandidates(coord.state().candidates, r.candidates ?? []),
+      ...(r.team ? { team: r.team } : {}),
     });
+    if (saved) await publishTeam(wfId, r);
     await publishPlan(wfId, r);
     return r;
+  }
+
+  /** The team conversation, in order. Call only after `state.team` is written: the feed never shows an unsaved round. */
+  async function publishTeam(wfId: string, r: PlanResult): Promise<void> {
+    if (!r.team) return;
+    for (const ev of teamFeedEvents(r.team, r.plan.incident_ids[0])) {
+      await safeEmit(ev.stage, { workflowId: wfId, incidentId: ev.incidentId, summary: ev.summary, actor: ev.actor, toolCalls: ev.toolCalls });
+    }
+  }
+
+  /** §0.2: the replan watcher only starts after planning, so check what changed while the team was deliberating. */
+  async function staleAfterRound(wfId: string, r: PlanResult): Promise<DriveStart['pendingReplan'] | null> {
+    if (!r.team || !roundBaseline) return null;
+    const fresh = await db.getObservedSnapshot().catch(() => null);
+    const why = fresh && planStaleReason(r, roundBaseline, fresh);
+    if (!why) return null;
+    return { execution: { workflow_id: wfId, plan_id: r.plan.plan_id, outcomes: [], aborted: true }, reason: `changed during the team round: ${why}` };
+  }
+
+  /**
+   * Team mode §0.4: while a workflow executes, re-run the pre-check so a new fault elsewhere is folded in by the normal
+   * replan instead of waiting for the next tick. Each candidate fires once, keyed on its time-independent identity (a
+   * snapshot-derived candidate's `-b<bucket>` suffix rolls over). Candidates already handled, or that only show side
+   * effects on the resources this workflow's plans act on, never fire, so the watch cannot burn the replan limit.
+   */
+  function startIncidentWatch(first: PlanResult) {
+    const own = planResourceIds(first);
+    const fired = new Set<string>();
+    const causedByPlan = (c: Candidate): boolean => c.symptoms.every((s) => PLAN_SIDE_EFFECT_KINDS.has(s.kind) && own.has(s.resource_id));
+    let why: string | null = null;
+    let active = true;
+    let generation = 0;
+    let reading: Promise<void> | null = null;
+
+    const read = async (gen: number): Promise<void> => {
+      const gate = await precheck();
+      if (gen !== generation || !gate.needed) return;
+      const known = new Set([...gate.handled].map(incidentIdentity));
+      const news = gate.candidates.filter((c) => !known.has(incidentIdentity(c.candidate_id)) && !fired.has(incidentIdentity(c.candidate_id)) && !causedByPlan(c));
+      if (news.length === 0) return;
+      for (const c of news) fired.add(incidentIdentity(c.candidate_id));
+      why = `new incident during execution: ${news.map((c) => c.candidate_id).join(', ')}`;
+    };
+    /** At most one read in flight; nothing to read while paused or once raised. */
+    const poll = (): Promise<void> => {
+      if (!active || why !== null) return Promise.resolve();
+      reading ??= read(generation)
+        .catch((e: unknown) => log(`incident watch read failed: ${errMsg(e)}`))
+        .finally(() => {
+          reading = null;
+        });
+      return reading;
+    };
+    const timer = setInterval(() => void poll(), deps.incidentWatchMs ?? DEFAULT_INCIDENT_WATCH_MS);
+    (timer as { unref?: () => void }).unref?.();
+
+    return {
+      raised: (): boolean => why !== null,
+      reason: (): string | null => why,
+      /** One read that starts after everything so far: a fault during the last command is seen before verify. */
+      async settled(): Promise<boolean> {
+        await reading;
+        await poll();
+        return why !== null;
+      },
+      /** A replan is taking over: its triage folds in what was raised; reads already in flight are discarded. */
+      pause(): void {
+        active = false;
+        generation += 1;
+        why = null;
+      },
+      resume(next: PlanResult): void {
+        for (const id of planResourceIds(next)) own.add(id);
+        active = true;
+      },
+      stop(): void {
+        active = false;
+        generation += 1;
+        clearInterval(timer);
+      },
+    };
   }
 
   /**
@@ -418,6 +517,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     coord.startHeartbeat();
     report.workflow_id = wfId;
     let watcher: ReplanWatcher | null = null;
+    let incidentWatch: ReturnType<typeof startIncidentWatch> | null = null;
     try {
       await setIncidentState(ids, 'investigating');
       let attempt = start.attempt;
@@ -430,8 +530,10 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       }
       watcher = createReplanWatcher({ db }, current);
       const w = watcher;
+      incidentWatch = chooser ? startIncidentWatch(current) : null;
+      const newFault = incidentWatch;
       let exec: ExecutionResult;
-      let pending = start.pendingReplan ?? null;
+      let pending = start.pendingReplan ?? (await staleAfterRound(wfId, current));
       for (;;) {
         let reason: string;
         if (pending) {
@@ -440,24 +542,25 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
           pending = null;
         } else {
           stageRef.stage = 'execute';
-          exec = await coord.execute(wfId, current, { shouldAbort: () => stopping || w.shouldAbort() });
+          exec = await coord.execute(wfId, current, { shouldAbort: () => stopping || w.shouldAbort() || newFault?.raised() === true });
           report.executions.push(exec);
-          if (!exec.aborted) break;
+          if (!exec.aborted && (stopping || !(await newFault?.settled()))) break;
           if (!coord.isOwner()) {
             report.status = 'lost_ownership';
             return;
           }
-          if (!w.shouldAbort()) {
+          if (!w.shouldAbort() && !newFault?.raised()) {
             report.status = 'stopped'; // graceful stop: the persisted execute state is resumed on next boot
             return;
           }
-          reason = w.reason() ?? 'material change to the active plan';
+          reason = w.reason() ?? newFault?.reason() ?? 'material change to the active plan';
         }
         if (attempt - 1 >= maxReplans) {
           return escalate(wfId, coord, workflowIncidents(coord, current), 'replan', `replan limit (${maxReplans}) reached: ${reason}`, report);
         }
         attempt += 1;
         stageRef.stage = 'replan';
+        newFault?.pause();
         const out = await runReplan(
           {
             db,
@@ -471,6 +574,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
             now,
             // Persist through the lease owner: version + fencing token stay coherent, no re-claim needed.
             persist: (stage, patch) => coord.updateStage(stage, patch),
+            ...(chooser ? { chooser } : {}),
           },
           { previous: current, execution: exec, attempt, reason },
         );
@@ -484,10 +588,16 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         current = out.new_plan;
         report.plans.push(current);
         // R3b: the new plan's candidates replace this workflow's older entries for the same jobs.
-        await coord.updateStage('replan', { candidates: mergeCandidates(coord.state().candidates, current.candidates ?? []) });
+        const saved = await coord.updateStage('replan', {
+          candidates: mergeCandidates(coord.state().candidates, current.candidates ?? []),
+          ...(current.team ? { team: current.team } : {}),
+        });
+        if (saved) await publishTeam(wfId, current);
         await publishPlan(wfId, current, out);
         if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
         w.reset(current);
+        newFault?.resume(current);
+        pending = await staleAfterRound(wfId, current); // goes through the replan-limit check above like any other replan
       }
       stageRef.stage = 'verify';
       await coord.updateStage('verify', {});
@@ -500,6 +610,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       await safeEmit('verify', { workflowId: wfId, incidentId: current.plan.incident_ids[0], actor: 'code', summary: `handoff: ${v.handoff}` });
       await setIncidentState(workflowIncidents(coord, current), v.escalate ? 'escalated' : 'monitoring');
     } finally {
+      incidentWatch?.stop();
       watcher?.dispose();
       coord.stopHeartbeat();
     }
@@ -701,7 +812,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   // ------------------------------------------------------------------ tick
 
   /** Cheap deterministic gate: could triage produce an incident nobody handles? Returns a fingerprint or null. */
-  async function precheck(): Promise<{ needed: boolean; fingerprint: string; openWorkflows: WorkflowRecord[] }> {
+  async function precheck(): Promise<{ needed: boolean; fingerprint: string; openWorkflows: WorkflowRecord[]; candidates: Candidate[]; handled: Set<string> }> {
     const [obs, evidence, incidents, openWorkflows] = await Promise.all([
       db.getObservedSnapshot(),
       db.getEvidence([], DEFAULT_TRIAGE_WINDOW_MS),
@@ -714,7 +825,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const fingerprint = candidates.map((c) => c.candidate_id).sort().join('|');
     const unhandledOpen = incidents.some((i) => i.state === 'open' && !handled.has(i.incident_id));
     const needed = unhandledOpen || (candidates.some((c) => !handled.has(c.candidate_id)) && fingerprint !== lastSkippedFingerprint);
-    return { needed, fingerprint, openWorkflows };
+    return { needed, fingerprint, openWorkflows, candidates, handled };
   }
 
   async function tick(): Promise<LoopTickReport> {
@@ -730,7 +841,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       const gate = await precheck();
       if (!gate.needed) return report;
 
-      const triage = await runTriage({ db, llm, now }, { log });
+      const triage = await runTriage({ db, llm: chooser ? null : llm, now }, { log });
       report.incidents = triage.incidents;
       const handled = handledIds(await db.listOpenWorkflows(), await db.listIncidents());
       const fresh = triage.incidents.filter((i) => i.state === 'open' && !handled.has(i.incident_id));

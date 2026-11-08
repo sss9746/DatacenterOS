@@ -5,7 +5,7 @@
 
 import type { Incident, IncidentLink, JobState, ObservedSnapshot } from '@dcos/contracts';
 import type { ActionDetail, AgentEventInput, DbClient, WorkflowRecord } from '@dcos/db-client';
-import { OPEN_STATUSES } from './asserts.js';
+import { newTeamStore, OPEN_STATUSES, recordRecoverySamples, recordTeamRounds, type ObservedRound, type RecoverySample } from './asserts.js';
 import { waitFor, type WaitResult } from './wait.js';
 
 export interface LiveState {
@@ -31,6 +31,12 @@ export interface Observer {
   workflow(id: string): Promise<WorkflowRecord | null>;
   /** Keep this workflow in `read().workflows` even after it closes (done/escalated). */
   trackWorkflow(id: string): void;
+  /** Every distinct team round seen so far (`state.team` itself holds only the latest). */
+  teamRounds(): ObservedRound[];
+  /** Workflows whose `state.team` did not have the frozen shape. */
+  teamMalformed(): string[];
+  /** `state.recovery` history, one entry per change of status, attempts, first wait or owner. */
+  recoverySamples(): RecoverySample[];
   simNow(): number;
   close(): void;
 }
@@ -75,7 +81,14 @@ export function ledgerRow(d: ActionDetail): Record<string, unknown> {
   };
 }
 
-export function createObserver(client: DbClient): Observer {
+export interface ObserverOptions {
+  /** Keep every workflow readable after it closes, so a short-lived one cannot vanish before its handoff is read. */
+  trackAll?: boolean;
+}
+
+export function createObserver(client: DbClient, opts: ObserverOptions = {}): Observer {
+  const team = newTeamStore();
+  const recovery: RecoverySample[] = [];
   let details: ActionDetail[] = [];
   let jobs: JobState[] = [];
   let incidents: Incident[] = [];
@@ -112,11 +125,14 @@ export function createObserver(client: DbClient): Observer {
   const tracked = new Set<string>();
   const read = async (): Promise<LiveState> => {
     const [snapshot, open] = await Promise.all([client.getObservedSnapshot(), client.listOpenWorkflows()]);
+    if (opts.trackAll) for (const w of open) tracked.add(w.workflow_id);
     const missing = [...tracked].filter((id) => !open.some((w) => w.workflow_id === id));
     const closed = (await Promise.all(missing.map((id) => client.getWorkflow(id)))).filter((w): w is WorkflowRecord => w !== null);
     const workflows = [...open, ...closed];
     if (snapshot.clock.sim_time_ms > simNow) simNow = snapshot.clock.sim_time_ms;
     last = { snapshot, details, jobs, incidents, events, workflows, wallUnixMs: Date.now() };
+    recordTeamRounds(team, workflows);
+    recordRecoverySamples(recovery, workflows, last.wallUnixMs);
     return last;
   };
 
@@ -140,6 +156,9 @@ export function createObserver(client: DbClient): Observer {
     links: async () => (await client.getEvidence([], 1)).links,
     workflow: (id) => client.getWorkflow(id),
     trackWorkflow: (id) => void tracked.add(id),
+    teamRounds: () => [...team.rounds.values()],
+    teamMalformed: () => [...team.malformed],
+    recoverySamples: () => [...recovery],
     simNow: () => simNow,
     close: () => unsubs.forEach((u) => u()),
   };

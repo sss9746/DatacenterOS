@@ -29,6 +29,14 @@ describe('loadConfig', () => {
     expect(loadConfig({ LLM_RETRIES: '0' }, {}).LLM_RETRIES).toBe(0);
   });
 
+  it('DCOS_AGENT_TEAM_MODE defaults to single and only accepts single or multi', () => {
+    expect(loadConfig({}, {}).DCOS_AGENT_TEAM_MODE).toBe('single');
+    expect(loadConfig({ DCOS_AGENT_TEAM_MODE: '' }, {}).DCOS_AGENT_TEAM_MODE).toBe('single');
+    expect(loadConfig({ DCOS_AGENT_TEAM_MODE: 'MULTI' }, {}).DCOS_AGENT_TEAM_MODE).toBe('multi');
+    expect(loadConfig({}, { DCOS_AGENT_TEAM_MODE: 'multi' }).DCOS_AGENT_TEAM_MODE).toBe('multi');
+    expect(() => loadConfig({ DCOS_AGENT_TEAM_MODE: 'swarm' }, {})).toThrow(/DCOS_AGENT_TEAM_MODE/);
+  });
+
   it('lets process env override .env.local and treats empty strings as unset', () => {
     const c = loadConfig(
       { NIM_MODEL: 'env-model', NIM_API_KEY: '' },

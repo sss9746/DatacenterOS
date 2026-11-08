@@ -2,7 +2,7 @@
 // (ObservedSnapshot pieces, ActionDetail[], WorkflowRecord[], Incident links) and returns a Check.
 // Nothing here touches the network, the clock or the filesystem, so test/live/asserts.test.ts covers it.
 
-import type { ActionStatus, Checkpoint, Incident, IncidentLink, JobGpuAllocation, JobState } from '@dcos/contracts';
+import type { ActionStatus, Checkpoint, Incident, IncidentLink, JobGpuAllocation, JobState, ObservedSnapshot } from '@dcos/contracts';
 import type { ActionDetail, AgentEventInput, WorkflowRecord } from '@dcos/db-client';
 
 export interface Check {
@@ -449,6 +449,345 @@ export function checkFallbackAttributed(events: readonly AgentEventInput[], opts
   const r = fallbackAttribution(events);
   const ok = events.length > 0 && r.unattributed === 0 && r.codeEvents > 0 && (!opts.expectNoNemotron || r.nemotronEvents === 0);
   return check('fallback events attributed to actor code', ok, `events=${events.length} code=${r.codeEvents} nemotron=${r.nemotronEvents} fallback_notices=${r.fallbackNotices} unattributed=${r.unattributed}`, { ...r, events: events.length });
+}
+
+// ------------------------------------------------------------------------------------ team mode
+//
+// Local structural views of what the agent persists (the frozen interface, section 4). The team module is built
+// separately and is deliberately not imported here: the harness judges the persisted JSON, not the agent's types.
+
+export const TEAM_MAX_CALLS = 6;
+const TEAM_ROLES: ReadonlySet<string> = new Set(['cooling', 'workload', 'lead']);
+const SPECIALIST_ROLES: ReadonlySet<string> = new Set(['cooling', 'workload']);
+
+export interface TeamMessageView {
+  id: string;
+  from: string;
+  to: string;
+  kind: string;
+  summary: string;
+  consumed_by: string[];
+}
+
+export interface TeamTraceView {
+  round_id: string;
+  snapshot_sim_ms: number;
+  model: string | null;
+  calls_used: number;
+  wall_ms: number;
+  outcome: 'lead' | 'deterministic';
+  messages: TeamMessageView[];
+  covers: { failed_role: string; covered_by: string }[];
+  missing_roles: string[];
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+const isTeamMessage = (m: unknown): boolean =>
+  isRecord(m) && typeof m.id === 'string' && typeof m.from === 'string' && typeof m.to === 'string' && typeof m.kind === 'string' && typeof m.summary === 'string' && isStringArray(m.consumed_by);
+
+const isCover = (c: unknown): boolean => isRecord(c) && typeof c.failed_role === 'string' && typeof c.covered_by === 'string';
+
+/** A persisted `state.team` as a trace, or null when it does not have the frozen shape. All original fields are kept. */
+export function parseTeamTrace(raw: unknown): TeamTraceView | null {
+  if (!isRecord(raw) || raw.version !== 1) return null;
+  const ok =
+    typeof raw.round_id === 'string' &&
+    typeof raw.snapshot_sim_ms === 'number' &&
+    (raw.model === null || typeof raw.model === 'string') &&
+    typeof raw.calls_used === 'number' &&
+    typeof raw.wall_ms === 'number' &&
+    (raw.outcome === 'lead' || raw.outcome === 'deterministic') &&
+    Array.isArray(raw.messages) &&
+    raw.messages.every(isTeamMessage) &&
+    Array.isArray(raw.covers) &&
+    raw.covers.every(isCover) &&
+    isStringArray(raw.missing_roles);
+  return ok ? (raw as unknown as TeamTraceView) : null;
+}
+
+export interface ObservedRound {
+  workflow_id: string;
+  trace: TeamTraceView;
+}
+
+/** `state.team` holds only the latest round, so the observer accumulates every round it sees across reads. */
+export interface TeamStore {
+  rounds: Map<string, ObservedRound>;
+  /** Workflows whose `state.team` was present but did not have the frozen shape. */
+  malformed: Set<string>;
+}
+
+export const newTeamStore = (): TeamStore => ({ rounds: new Map(), malformed: new Set() });
+
+export function recordTeamRounds(store: TeamStore, workflows: readonly WorkflowRecord[]): void {
+  for (const wf of workflows) {
+    const raw = (wf.state as { team?: unknown }).team;
+    if (raw === undefined || raw === null) continue;
+    const trace = parseTeamTrace(raw);
+    if (!trace) {
+      store.malformed.add(wf.workflow_id);
+      continue;
+    }
+    store.rounds.set(`${wf.workflow_id}|${trace.round_id}`, { workflow_id: wf.workflow_id, trace });
+  }
+}
+
+export interface TeamCheckOptions {
+  /** False when no model can decide (--no-llm, missing credentials, L6's forced outage): a `lead` outcome is then a false claim. */
+  expectLead: boolean;
+  malformed?: readonly string[];
+}
+
+/** Applied under --team-mode multi only. A fallback never satisfies the Lead check; it is named in the detail instead. */
+export function checkTeamRounds(rounds: readonly ObservedRound[], opts: TeamCheckOptions): Check[] {
+  const malformed = opts.malformed ?? [];
+  const malformedNote = malformed.length ? `; malformed state.team on ${malformed.join(', ')}` : '';
+  if (rounds.length === 0) {
+    if (!opts.expectLead) return [check('team: no Lead claim without a model', malformed.length === 0, `no team round recorded${malformedNote}`, { rounds: 0, malformed })];
+    return [check('team: round recorded', false, `no valid workflow.state.team observed${malformedNote}`, { rounds: 0, malformed })];
+  }
+
+  const lead = rounds.filter((r) => r.trace.outcome === 'lead');
+  const fallback = rounds.filter((r) => r.trace.outcome === 'deterministic');
+  const fallbackIds = fallback.map((r) => r.trace.round_id);
+  const missing = [...new Set(fallback.flatMap((r) => r.trace.missing_roles))].sort();
+  const fallbackNote = fallback.length ? `; FALLBACK to deterministic code in ${fallback.length} round(s) [${fallbackIds.join(', ')}]${missing.length ? `, missing roles: ${missing.join(',')}` : ''}` : '';
+  const counts = { rounds: rounds.length, lead_rounds: lead.length, fallback_rounds: fallback.length, fallback_round_ids: fallbackIds, missing_roles: missing };
+
+  const out: Check[] = [];
+  if (opts.expectLead) {
+    out.push(check('team: Lead decided', lead.length > 0, `${lead.length}/${rounds.length} round(s) decided by the Lead${fallbackNote}${malformedNote}`, counts));
+    const answers = rounds.flatMap((r) => r.trace.messages.filter((m) => m.kind === 'answer' && SPECIALIST_ROLES.has(m.from)).map((m) => ({ round_id: r.trace.round_id, ...m })));
+    const consumed = answers.filter((m) => m.consumed_by.length > 0);
+    out.push(check('team: specialist answer consumed by a role', consumed.length > 0, consumed.length ? consumed.map((m) => `${m.id} ${m.from} -> [${m.consumed_by.join(',')}]`).join('; ') : `${answers.length} specialist answer(s), none reached a role's model input`, { answers: answers.length, consumed: consumed.map((m) => m.id) }));
+  } else {
+    out.push(check('team: no Lead claim without a model', lead.length === 0, `${fallback.length}/${rounds.length} round(s) deterministic, ${lead.length} claim the Lead${malformedNote}`, counts));
+  }
+
+  const over = rounds.filter((r) => !(r.trace.calls_used >= 0 && r.trace.calls_used <= TEAM_MAX_CALLS));
+  out.push(check(`team: at most ${TEAM_MAX_CALLS} model calls per round`, over.length === 0, over.length ? over.map((r) => `${r.trace.round_id}: ${r.trace.calls_used} calls`).join('; ') : `max ${Math.max(...rounds.map((r) => r.trace.calls_used))} calls across ${rounds.length} round(s)`, { calls: rounds.map((r) => ({ round_id: r.trace.round_id, calls_used: r.trace.calls_used })) }));
+
+  const coverProblems: string[] = [];
+  const covers: string[] = [];
+  for (const r of rounds) {
+    for (const c of r.trace.covers) {
+      covers.push(`${c.covered_by} covered ${c.failed_role}`);
+      if (!TEAM_ROLES.has(c.failed_role) || !TEAM_ROLES.has(c.covered_by) || c.failed_role === c.covered_by) coverProblems.push(`${r.trace.round_id}: invalid cover ${c.covered_by} for ${c.failed_role}`);
+    }
+    if (r.trace.covers.length === 0 && r.trace.messages.some((m) => m.kind === 'cover')) coverProblems.push(`${r.trace.round_id}: cover message without a recorded cover`);
+  }
+  out.push(check('team: covers recorded with their roles', coverProblems.length === 0, coverProblems.length ? coverProblems.join('; ') : covers.length ? covers.join('; ') : 'no cover occurred', { covers }));
+  return out;
+}
+
+// ------------------------------------------------------------------------------------ model provenance
+
+export interface LlmLogStats {
+  nemotron_ok: number;
+  nemotron_failed: number;
+  endpoint_failovers: number;
+}
+
+export const newLlmLogStats = (): LlmLogStats => ({ nemotron_ok: 0, nemotron_failed: 0, endpoint_failovers: 0 });
+
+/** Counts the agent's own log lines (`nemotron ok`, `nemotron failed`, `nim endpoint_failed`). */
+export function tallyLlmLogLine(stats: LlmLogStats, line: string): void {
+  if (/\bnemotron ok\b/.test(line)) stats.nemotron_ok += 1;
+  else if (/\bnemotron failed\b/.test(line)) stats.nemotron_failed += 1;
+  else if (/\bnim endpoint_failed\b/.test(line)) stats.endpoint_failovers += 1;
+}
+
+export interface Provenance {
+  /** What the harness configured; the fields below are what the run actually did. */
+  configured_model: string;
+  llm_mode: string;
+  events: FallbackAttribution;
+  log: LlmLogStats;
+  team: { models: string[]; lead_rounds: number; fallback_rounds: number };
+}
+
+export function buildProvenance(configuredModel: string, llmMode: string, events: readonly AgentEventInput[], log: LlmLogStats, rounds: readonly ObservedRound[]): Provenance {
+  return {
+    configured_model: configuredModel,
+    llm_mode: llmMode,
+    events: fallbackAttribution(events),
+    log: { ...log },
+    team: {
+      models: [...new Set(rounds.map((r) => r.trace.model).filter((m): m is string => m !== null))].sort(),
+      lead_rounds: rounds.filter((r) => r.trace.outcome === 'lead').length,
+      fallback_rounds: rounds.filter((r) => r.trace.outcome === 'deterministic').length,
+    },
+  };
+}
+
+export const describeProvenance = (p: Provenance): string =>
+  `configured ${p.configured_model} (${p.llm_mode}); events nemotron=${p.events.nemotronEvents} code=${p.events.codeEvents} fallback_notices=${p.events.fallbackNotices}; log nemotron_ok=${p.log.nemotron_ok} nemotron_failed=${p.log.nemotron_failed} endpoint_failovers=${p.log.endpoint_failovers}; team models=[${p.team.models.join(',')}] lead=${p.team.lead_rounds} fallback=${p.team.fallback_rounds}`;
+
+/** Scene B: every event names who decided, so model and code work cannot be confused in the evidence. */
+export function checkProvenanceReported(p: Provenance): Check {
+  const total = p.events.codeEvents + p.events.nemotronEvents + p.events.unattributed;
+  return check('model/fallback provenance reported', total > 0 && p.events.unattributed === 0, describeProvenance(p), { ...p });
+}
+
+// ------------------------------------------------------------------------------------ Scene B
+
+export interface RecoveryView {
+  status: 'waiting' | 'resumed' | 'expired';
+  job_ids: string[];
+  blocked_reason: string;
+  first_wait_unix_ms: number;
+  attempts: number;
+  fingerprint: string;
+}
+
+export function parseRecovery(raw: unknown): RecoveryView | null {
+  if (!isRecord(raw)) return null;
+  const ok =
+    (raw.status === 'waiting' || raw.status === 'resumed' || raw.status === 'expired') &&
+    isStringArray(raw.job_ids) &&
+    typeof raw.blocked_reason === 'string' &&
+    typeof raw.first_wait_unix_ms === 'number' &&
+    typeof raw.attempts === 'number' &&
+    typeof raw.fingerprint === 'string';
+  return ok ? (raw as unknown as RecoveryView) : null;
+}
+
+export const recoveryOf = (wf: WorkflowRecord): RecoveryView | null => parseRecovery((wf.state as { recovery?: unknown }).recovery);
+
+export interface RecoverySample {
+  workflow_id: string;
+  lease_owner: string | null;
+  attempt: number;
+  wall_unix_ms: number;
+  recovery: RecoveryView;
+}
+
+const MAX_RECOVERY_SAMPLES = 400;
+
+/** Append one sample per workflow whenever its recovery state or owner changes (bounded). */
+export function recordRecoverySamples(samples: RecoverySample[], workflows: readonly WorkflowRecord[], wallUnixMs: number): void {
+  for (const wf of workflows) {
+    const recovery = recoveryOf(wf);
+    if (!recovery) continue;
+    const prev = samples.filter((s) => s.workflow_id === wf.workflow_id).at(-1);
+    if (prev && prev.lease_owner === wf.lease_owner && prev.recovery.status === recovery.status && prev.recovery.first_wait_unix_ms === recovery.first_wait_unix_ms && prev.recovery.attempts === recovery.attempts) continue;
+    if (samples.length >= MAX_RECOVERY_SAMPLES) samples.shift();
+    samples.push({ workflow_id: wf.workflow_id, lease_owner: wf.lease_owner, attempt: wf.attempt, wall_unix_ms: wallUnixMs, recovery });
+  }
+}
+
+/** Union of job ids currently waiting across every workflow. */
+export function waitingJobIds(workflows: readonly WorkflowRecord[]): string[] {
+  return [...new Set(workflows.flatMap((w) => {
+    const r = recoveryOf(w);
+    return r?.status === 'waiting' ? r.job_ids : [];
+  }))].sort();
+}
+
+export function checkRecoveryWaiting(workflows: readonly WorkflowRecord[], expected: readonly string[], excluded: readonly string[]): Check {
+  const waiting = waitingJobIds(workflows);
+  const missing = expected.filter((j) => !waiting.includes(j));
+  const wrong = excluded.filter((j) => waiting.includes(j));
+  return check('recovery waiting for the checkpoint-backed jobs', missing.length === 0 && wrong.length === 0, `waiting=[${waiting.join(',')}]${missing.length ? ` missing=[${missing.join(',')}]` : ''}${wrong.length ? ` must_not_wait=[${wrong.join(',')}]` : ''}`, { waiting, missing, wrongly_waiting: wrong });
+}
+
+export interface NodeOutageView {
+  allDown: boolean;
+  allUp: boolean;
+  unreachable: string[];
+}
+
+/** Observed node state only. `allUp` also requires every GPU on those nodes to be reachable again. */
+export function nodeOutage(snapshot: Pick<ObservedSnapshot, 'nodes' | 'gpus'>, nodeIds: readonly string[]): NodeOutageView {
+  const rows = nodeIds.map((id) => snapshot.nodes.find((n) => n.resource_id === id));
+  const unreachable = rows.filter((n) => n?.availability === 'unreachable').map((n) => n!.resource_id);
+  const ids = new Set(nodeIds);
+  const gpusDown = snapshot.gpus.some((g) => ids.has(g.node_id) && g.availability === 'unreachable');
+  return {
+    allDown: rows.length > 0 && rows.every((n) => n?.availability === 'unreachable'),
+    allUp: rows.length > 0 && rows.every((n) => n?.availability === 'ready') && !gpusDown,
+    unreachable,
+  };
+}
+
+/**
+ * No migrate_restart may be requested inside [startSimMs, endSimMs). `endSimMs` is the true fault end, not when the
+ * harness happened to observe the return, so polling lag cannot turn a legitimate restart into a violation.
+ */
+export function checkNoRestartDuringOutage(details: readonly ActionDetail[], startSimMs: number, endSimMs: number): Check {
+  const bad = details.filter((d) => d.command.operation === 'migrate_restart' && d.command.requested_sim_time_ms >= startSimMs && d.command.requested_sim_time_ms < endSimMs);
+  return check('no migrate_restart requested during the outage', bad.length === 0, bad.length ? bad.map((d) => `${d.command.command_key}@${d.command.requested_sim_time_ms}=${d.status.status}`).join(', ') : `none in sim [${startSimMs}, ${endSimMs})`, { start_sim_ms: startSimMs, end_sim_ms: endSimMs, violations: bad.map((d) => d.command.command_key) });
+}
+
+export interface CheckpointBaseline {
+  job_id: string;
+  checkpoint_id: string;
+  durable_work_units: number;
+}
+
+/** The completed, accessible checkpoint a job could restart from, or null. */
+export function checkpointBaseline(job: JobState | null, checkpoints: readonly Checkpoint[]): CheckpointBaseline | null {
+  if (!job?.latest_checkpoint_id) return null;
+  const row = checkpoints.find((c) => c.checkpoint_id === job.latest_checkpoint_id);
+  if (!row || row.status !== 'complete' || !row.accessible) return null;
+  return { job_id: job.job_id, checkpoint_id: row.checkpoint_id, durable_work_units: job.durable_work_units };
+}
+
+export function checkRestartFromCheckpoint(details: readonly ActionDetail[], job: JobState | null, checkpoints: readonly Checkpoint[], baseline: CheckpointBaseline, sinceSimMs: number): Check {
+  const name = `${baseline.job_id} restarted from its completed checkpoint`;
+  if (!job) return check(name, false, 'job state missing');
+  const moved = finalMigrate(details.filter((d) => d.command.requested_sim_time_ms >= sinceSimMs), baseline.job_id);
+  const problems: string[] = [];
+  if (!moved) problems.push('no running/succeeded migrate_restart after the nodes returned');
+  else {
+    if (moved.status !== 'succeeded') problems.push(`migrate ${moved.status}`);
+    if (!sameGpuSet(job.allocated_gpu_ids, moved.gpu_ids)) problems.push('job is not on the migrate destination');
+  }
+  if (job.status !== 'running' && job.status !== 'checkpointing' && job.status !== 'completed') problems.push(`job is ${job.status}`);
+  const ck = checkpoints.find((c) => c.checkpoint_id === job.latest_checkpoint_id);
+  if (!ck || ck.status !== 'complete' || !ck.accessible) problems.push(`latest checkpoint ${job.latest_checkpoint_id ?? 'none'} is not complete and accessible`);
+  if (job.durable_work_units < baseline.durable_work_units) problems.push(`durable work fell to ${job.durable_work_units}`);
+  if (job.progress_work_units < baseline.durable_work_units) problems.push(`progress ${job.progress_work_units} is below the checkpoint's ${baseline.durable_work_units}`);
+  return check(name, problems.length === 0, problems.length ? problems.join('; ') : `${moved!.command_key} -> [${moved!.gpu_ids.join(',')}], checkpoint ${job.latest_checkpoint_id}, progress ${job.progress_work_units} >= ${baseline.durable_work_units}`, { job_id: baseline.job_id, baseline_checkpoint: baseline.checkpoint_id, latest_checkpoint: job.latest_checkpoint_id, command_key: moved?.command_key ?? null, problems });
+}
+
+export const checkWorkAdvanced = (jobId: string, before: number, after: number): Check =>
+  check(`${jobId} work advancing after restart`, after > before, `progress ${before} -> ${after}`, { before, after });
+
+/** Exactly one placement per job since the outage began: a duplicate restart after a crash would show up as two. */
+export function checkSinglePlacement(details: readonly ActionDetail[], jobIds: readonly string[], sinceSimMs: number): Check {
+  const counts = Object.fromEntries(jobIds.map((id) => [id, details.filter((d) => d.command.operation === 'migrate_restart' && d.command.job_id === id && d.command.requested_sim_time_ms >= sinceSimMs && (d.status.status === 'running' || d.status.status === 'succeeded')).map((d) => d.command.command_key)]));
+  const bad = Object.entries(counts).filter(([, keys]) => keys.length !== 1);
+  return check('exactly one placement per restarted job', bad.length === 0, Object.entries(counts).map(([id, keys]) => `${id}: ${keys.length} [${keys.join(',')}]`).join('; '), { placements: counts });
+}
+
+/** A job excluded from automatic restart must have no restart request at all since the outage, and stay failed. */
+export function checkNotRestarted(details: readonly ActionDetail[], job: JobState | null, jobId: string, sinceSimMs: number): Check {
+  const rows = details.filter((d) => d.command.operation === 'migrate_restart' && d.command.job_id === jobId && d.command.requested_sim_time_ms >= sinceSimMs);
+  const ok = rows.length === 0 && job?.status === 'failed' && job.allocated_gpu_ids.length === 0;
+  return check(`${jobId} not restarted`, ok, `${rows.length} restart request(s) [${rows.map((d) => `${d.command.command_key}=${d.status.status}`).join(',')}]; job ${job?.status ?? 'missing'} on [${job?.allocated_gpu_ids.join(',') ?? ''}]`, { requests: rows.map((d) => d.command.command_key), status: job?.status ?? null });
+}
+
+/** The job is named in a persisted operator handoff, or in an `escalate` action targeting it. */
+export function checkJobInOperatorHandoff(workflows: readonly WorkflowRecord[], details: readonly ActionDetail[], jobId: string): Check {
+  const named = new RegExp(`(?<![\\w-])${jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`);
+  const handoffs = workflows.filter((w) => {
+    const h = handoffOf(w);
+    return h !== null && named.test(h.kind === 'verification' ? JSON.stringify(h.verification) : h.reason);
+  }).map((w) => w.workflow_id);
+  const escalations = details.filter((d) => d.command.operation === 'escalate' && (d.command.job_id === jobId || d.command.target_resource_id === jobId)).map((d) => d.command.command_key);
+  return check(`${jobId} handed off to an operator`, handoffs.length + escalations.length > 0, `handoffs=[${handoffs.join(',')}] escalations=[${escalations.join(',')}]`, { handoffs, escalations });
+}
+
+/** SBK: the fresh process kept the original wait start, so the 120 s deadline really survives the restart. */
+export function checkFirstWaitPreserved(before: RecoverySample, samples: readonly RecoverySample[]): Check {
+  const name = `first_wait_unix_ms preserved for ${before.workflow_id}`;
+  const after = samples.filter((s) => s.workflow_id === before.workflow_id && s.lease_owner !== null && s.lease_owner !== before.lease_owner);
+  if (after.length === 0) return check(name, false, `no recovery state observed from a new owner (old owner ${before.lease_owner})`, { first_wait_unix_ms: before.recovery.first_wait_unix_ms });
+  const changed = after.filter((s) => s.recovery.first_wait_unix_ms !== before.recovery.first_wait_unix_ms);
+  return check(name, changed.length === 0, changed.length ? `changed to ${changed.map((s) => s.recovery.first_wait_unix_ms).join(',')}` : `${before.recovery.first_wait_unix_ms} across ${after.length} sample(s) from the new owner`, { first_wait_unix_ms: before.recovery.first_wait_unix_ms, new_owner_samples: after.length });
 }
 
 // ------------------------------------------------------------------------------------ misc

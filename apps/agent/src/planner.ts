@@ -25,8 +25,21 @@ import { buildCommand, commandKey, type PartialCommand } from './tools/command.j
 import { placementCandidates } from './tools/placement-tool.js';
 import { GPU_THROTTLE_TEMP_C, indexSnapshot, type SnapshotIndex } from './tools/snapshot-index.js';
 import { CLOCKS_EVENT_SW_THERMAL } from './ports.js';
+import type { TeamTrace } from './team/protocol.js';
 
 // ---------------------------------------------------------------------------------------------- public API
+
+export interface ChooserInput {
+  ix: SnapshotIndex;
+  incidents: Incident[];
+  evidence: Evidence | null;
+  ranked: ReadonlyMap<string, RankedOption[]>;
+  toolCalls: ToolCallSummary[];
+  workflowId: string;
+  attempt: number;
+}
+export interface ChooserResult { choices: Choice[] | null; team: TeamTrace }
+export type OptionChooser = (input: ChooserInput) => Promise<ChooserResult>;
 
 export interface RankedOption {
   option_id: string;
@@ -68,6 +81,7 @@ export interface PlanResult {
   candidates?: PersistedCandidate[];
   /** Set when a job's mitigation was deferred (rule (b)): the caller must re-plan within this many sim seconds. */
   recheck_after_s?: number;
+  team?: TeamTrace;
 }
 
 export interface PlannerDeps {
@@ -87,6 +101,7 @@ export interface PlannerDeps {
    * is clean for its whole lead time are deferred. Unset (the agent loop): act now.
    */
   recheckAfterS?: number;
+  chooser?: OptionChooser;
 }
 
 /** Why keep_running was put first for a job (RANKING_ASSUMPTION rule (a) / (b)). */
@@ -600,7 +615,7 @@ const choiceItemSchema = z.object({
   explanation: z.string().min(1),
 });
 const choiceSchema = z.object({ choices: z.array(z.unknown()).min(1) });
-type Choice = z.infer<typeof choiceItemSchema>;
+export type Choice = z.infer<typeof choiceItemSchema>;
 
 /**
  * Collapse every choose_options call into one choice list (Nemotron sometimes repeats the call): each call is
@@ -630,7 +645,7 @@ export function collectChoices(calls: readonly { name: string; argumentsJson: st
 const round = (n: number) => Math.round(n * 10) / 10;
 const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 1)}…`);
 
-function buildLlmPayload(ix: SnapshotIndex, incidents: Incident[], ranked: Map<string, RankedOption[]>, topN: number): string {
+export function buildLlmPayload(ix: SnapshotIndex, incidents: Incident[], ranked: Map<string, RankedOption[]>, topN: number): string {
   const order = [...ranked.keys()];
   const jobs = [...ranked].map(([jobId, opts], i) => {
     const spec = ix.jobSpec.get(jobId);
@@ -847,7 +862,10 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
     ctx = extendContext(ctx, top);
   }
 
-  const choices = ranked.size > 0 ? await askNemotron(llm, ix, incidents, ranked, toolCalls) : null;
+  const teamResult = ranked.size > 0 && deps.chooser
+    ? await deps.chooser({ ix, incidents, evidence, ranked, toolCalls, workflowId, attempt })
+    : null;
+  const choices = ranked.size === 0 ? null : deps.chooser ? teamResult!.choices : await askNemotron(llm, ix, incidents, ranked, toolCalls);
   const llmUp = choices !== null;
   const byJob = new Map((choices ?? []).map((c) => [c.job_id, c]));
 
@@ -883,6 +901,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
     candidates: buildCandidates(jobPlans, ix.snap.clock.decision_epoch, ix.snap.clock.sim_time_ms),
     ...planNarrative(jobPlans, llmUp),
     ...(recheckAfterS !== undefined ? { recheck_after_s: recheckAfterS } : {}),
+    ...(teamResult ? { team: teamResult.team } : {}),
   };
 }
 

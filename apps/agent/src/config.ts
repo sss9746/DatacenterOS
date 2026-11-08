@@ -56,6 +56,17 @@ const envSchema = z.object({
       ctx.addIssue({ code: 'custom', message: `must be 'true', 'false' or 'omit', got "${v}"` });
       return z.NEVER;
     }),
+  DCOS_AGENT_TEAM_MODE: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .optional()
+    .transform((v, ctx) => {
+      if (v === undefined || v === '') return 'single' as const;
+      if (v === 'single' || v === 'multi') return v;
+      ctx.addIssue({ code: 'custom', message: `must be 'single' or 'multi', got "${v}"` });
+      return z.NEVER;
+    }),
 });
 
 /** Every env var the agent reads. Secrets: NIM_API_KEY, STDB_AGENT_TOKEN. */
@@ -73,6 +84,7 @@ export type AgentConfig = {
   readonly LLM_TIMEOUT_MS: number;
   readonly LLM_RETRIES: number;
   readonly NIM_ENABLE_THINKING: 'true' | 'false' | 'omit';
+  readonly DCOS_AGENT_TEAM_MODE: 'single' | 'multi';
 };
 
 export type AgentConfigKey = keyof AgentConfig;
@@ -148,6 +160,7 @@ export function loadConfig(
     LLM_TIMEOUT_MS: c.LLM_TIMEOUT_MS,
     LLM_RETRIES: c.LLM_RETRIES,
     NIM_ENABLE_THINKING: c.NIM_ENABLE_THINKING,
+    DCOS_AGENT_TEAM_MODE: c.DCOS_AGENT_TEAM_MODE,
   };
   return Object.freeze(cfg);
 }

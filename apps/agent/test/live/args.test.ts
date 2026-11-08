@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ArgsError, CASE_IDS, DEFAULT_HOLD_S, DEFAULT_TIMEOUT_S, isProdDb, MAX_HOLD_S, parseArgs, parseCases, resolveTarget, USAGE } from '../../scripts/live/args.js';
+import { ArgsError, CASE_IDS, DEFAULT_HOLD_S, DEFAULT_TEAM_MODE, DEFAULT_TIMEOUT_S, isProdDb, MAX_HOLD_S, parseArgs, parseCases, resolveTarget, USAGE } from '../../scripts/live/args.js';
 
 describe('live harness args', () => {
   it('requires --db', () => {
@@ -58,6 +58,33 @@ describe('live harness args', () => {
     expect(() => parseArgs(['--db', 'd', '--hold-s', 'abc'])).toThrow(/--hold-s must be .* got "abc"/);
     expect(() => parseArgs(['--db', 'd', '--hold-s', 'Infinity'])).toThrow(/--hold-s/);
     expect(() => parseArgs(['--db', 'd', '--hold-s'])).toThrow(/--hold-s needs a value/);
+  });
+
+  it('--team-mode defaults to single and accepts single or multi (both spellings)', () => {
+    expect(DEFAULT_TEAM_MODE).toBe('single');
+    expect(parseArgs(['--db', 'd']).teamMode).toBe('single');
+    expect(parseArgs(['--db', 'd', '--team-mode', 'multi']).teamMode).toBe('multi');
+    expect(parseArgs(['--db', 'd', '--team-mode=single']).teamMode).toBe('single');
+    expect(parseArgs(['--team-mode', 'multi', '--help']).teamMode).toBe('multi');
+  });
+
+  it('--team-mode rejects unknown values, other casing and a missing value', () => {
+    expect(() => parseArgs(['--db', 'd', '--team-mode', 'solo'])).toThrow(/--team-mode must be single\|multi, got "solo"/);
+    expect(() => parseArgs(['--db', 'd', '--team-mode', 'MULTI'])).toThrow(ArgsError);
+    expect(() => parseArgs(['--db', 'd', '--team-mode'])).toThrow(/--team-mode needs a value/);
+  });
+
+  it('--outage-s defaults to 30 sim seconds and is bounded', () => {
+    expect(parseArgs(['--db', 'd']).outageS).toBe(30);
+    expect(parseArgs(['--db', 'd', '--outage-s', '90']).outageS).toBe(90);
+    expect(() => parseArgs(['--db', 'd', '--outage-s', '4'])).toThrow(/--outage-s/);
+    expect(() => parseArgs(['--db', 'd', '--outage-s', '601'])).toThrow(/--outage-s/);
+  });
+
+  it('accepts the Scene B cases, case-insensitively, and keeps L1-L6 selectable on their own', () => {
+    expect(parseArgs(['--db', 'd', '--case', 'sb,SBK']).cases).toEqual(['SB', 'SBK']);
+    expect(CASE_IDS).toEqual(['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'SB', 'SBK']);
+    expect(parseCases('L1,L2,L3,L4,L5,L6')).toEqual(['L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
   });
 
   it('documents --hold-s in the usage text', () => {

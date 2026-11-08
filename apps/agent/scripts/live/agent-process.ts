@@ -6,7 +6,8 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { TeamMode } from './args.js';
 
 export const AGENT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const AGENT_ENTRY = resolve(AGENT_DIR, 'src', 'main.ts');
@@ -18,6 +19,7 @@ export const AGENT_ENV_KEYS = [
   'STDB_URI', 'STDB_DB', 'STDB_AGENT_TOKEN',
   'NIM_BASE_URL', 'NIM_API_KEY', 'NIM_MODEL', 'NIM_FALLBACK_BASE_URL', 'NIM_FALLBACK_MODEL',
   'LLM_MAX_TOKENS', 'LLM_MAX_TOOL_STEPS', 'LLM_TIMEOUT_MS', 'LLM_RETRIES', 'NIM_ENABLE_THINKING',
+  'DCOS_AGENT_TEAM_MODE',
 ] as const;
 
 export interface AgentEnvInput {
@@ -30,6 +32,8 @@ export interface AgentEnvInput {
   noLlm: boolean;
   /** L6: point NIM (and its fallback) at an unreachable endpoint with a short timeout. */
   llmOverride?: { baseUrl: string; timeoutMs: number; retries: number };
+  /** Always written to the child, so a stray DCOS_AGENT_TEAM_MODE in .env.local cannot change the mode under test. */
+  teamMode: TeamMode;
 }
 
 /**
@@ -43,6 +47,7 @@ export function buildAgentEnv(input: AgentEnvInput): Record<string, string> {
   env.STDB_URI = input.uri;
   env.STDB_DB = input.db;
   env.STDB_AGENT_TOKEN = input.agentToken;
+  env.DCOS_AGENT_TEAM_MODE = input.teamMode;
   if (input.noLlm) {
     env.NIM_API_KEY = '';
     env.NIM_MODEL = '';
@@ -70,6 +75,16 @@ export function agentSpawnSpec(): SpawnSpec {
   const req = createRequire(resolve(AGENT_DIR, 'package.json'));
   const tsxCli = req.resolve('tsx/cli');
   return { command: process.execPath, args: [tsxCli, AGENT_ENTRY], cwd: AGENT_DIR };
+}
+
+/**
+ * node --import <tsx loader> src/main.ts: the agent is the spawned process itself. `tsx/cli` instead spawns a second
+ * node process, so a SIGKILL sent to the handle ends only the wrapper and the agent keeps running on POSIX. Anything
+ * that must really crash or signal the agent (the supervisor, Scene B, every case under --team-mode multi) uses this.
+ */
+export function directAgentSpawnSpec(): SpawnSpec {
+  const req = createRequire(resolve(AGENT_DIR, 'package.json'));
+  return { command: process.execPath, args: ['--import', pathToFileURL(req.resolve('tsx')).href, AGENT_ENTRY], cwd: AGENT_DIR };
 }
 
 export interface AgentHandle {

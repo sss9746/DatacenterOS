@@ -56,6 +56,32 @@ export function xid79(runId: string, gpuId: string, clock: FaultClock, startSimM
   };
 }
 
+/**
+ * Finite `node_crash` on `nodeId`, for Scene B. The caller gives every node the same future `startSimMs`. The
+ * schedule lives only in this private fault row: when the node is back is never told to the agent.
+ */
+export function nodeCrash(runId: string, nodeId: string, clock: FaultClock, startSimMs: number, durationSimMs: number, tag = 'lr'): FaultInjection {
+  if (startSimMs <= clock.sim_time_ms) throw new Error(`nodeCrash start ${startSimMs} must be in the future (sim now ${clock.sim_time_ms})`);
+  if (!Number.isFinite(durationSimMs) || durationSimMs <= 0) throw new Error(`nodeCrash duration must be a positive number of sim-ms, got ${durationSimMs}`);
+  return {
+    schema_version: V,
+    fault_id: `${tag}-node-crash-${nodeId}-${startSimMs}`,
+    run_id: runId,
+    target_resource_id: nodeId,
+    kind: 'node_crash',
+    start_sim_time_ms: startSimMs,
+    duration_sim_ms: durationSimMs,
+    severity: 1,
+    parameters: {},
+    seed_offset: 0,
+  };
+}
+
+/** The simulated nodes: `inject_fault` refuses to target hardware-backed resources such as node-real-0. */
+export function simulatedNodeIds(resources: readonly { resource_id: string; kind: string; config: Record<string, unknown> }[]): string[] {
+  return resources.filter((r) => r.kind === 'node' && r.config.hardware_backed !== true).map((r) => r.resource_id);
+}
+
 /** Node hosting a demo GPU id (`gpu-r7-n1-3` -> `node-r7-n1`); null for unknown shapes. */
 export const nodeOfGpu = (gpuId: string): string | null => {
   const m = /^gpu-(r\d+-n\d+)-\d+$/.exec(gpuId);

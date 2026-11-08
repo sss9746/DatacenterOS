@@ -5,30 +5,50 @@
 
 import type { ActionCommand, ActionStatus } from '@dcos/contracts';
 import { isDbError, type ActionDetail, type DbClient, type WorkflowRecord } from '@dcos/db-client';
-import { spawnAgent, buildAgentEnv, type AgentHandle } from './agent-process.js';
-import type { CaseId, HarnessArgs, TargetPolicy } from './args.js';
+import { spawnAgent, buildAgentEnv, directAgentSpawnSpec, type AgentHandle } from './agent-process.js';
+import type { CaseId, HarnessArgs, TargetPolicy, TeamMode } from './args.js';
 import {
   allPassed,
   allWorkflowsSettled,
+  buildProvenance,
   check,
   checkAllocationUniqueness,
   checkCheckpointOnce,
+  checkFirstWaitPreserved,
   checkHandoffRecorded,
   checkDestinationReplanned,
   checkFallbackAttributed,
   checkHardSafetyHeld,
+  checkJobInOperatorHandoff,
   checkKeysReconciled,
   checkNoNewDurableCheckpoint,
+  checkNoRestartDuringOutage,
+  checkNotRestarted,
+  checkpointBaseline,
+  checkProvenanceReported,
   checkRecoveredOrEscalated,
+  checkRecoveryWaiting,
+  checkRestartFromCheckpoint,
   checkSeparateIncidents,
+  checkSinglePlacement,
+  checkTeamRounds,
+  checkWorkAdvanced,
   checkWorkflowReclaimed,
   extractPlannedDestinations,
   finalMigrate,
   allocationUniqueness,
+  newLlmLogStats,
+  nodeOutage,
+  recoveryOf,
+  tallyLlmLogLine,
+  waitingJobIds,
   type Check,
+  type CheckpointBaseline,
+  type LlmLogStats,
+  type RecoverySample,
 } from './asserts.js';
 import { deriveCheckpointDue, describeDue } from './due.js';
-import { COOLING_RESOURCE_IDS, dueTickTooLate, nodeOfGpu, pumpDegradation, xid79 } from './faults.js';
+import { COOLING_RESOURCE_IDS, dueTickTooLate, nodeCrash, nodeOfGpu, pumpDegradation, simulatedNodeIds, xid79 } from './faults.js';
 import { byKey, completeCheckpoints, createObserver, jobState, ledgerRow, openAction, snapshotSummary, type LiveState, type Observer } from './observe.js';
 import type { Redactor } from './redact.js';
 import type { AgentGenerationRecord, CaseArtifact, RunMeta, TimelineEntry } from './report.js';
@@ -37,11 +57,19 @@ import { Budget, WaitTimeoutError } from './wait.js';
 
 export const JOB_A = 'job-a';
 export const JOB_B = 'job-b';
+export const JOB_C = 'job-c';
+/** Scene B: the jobs with a completed checkpoint, and every job the outage takes down. */
+const RESTART_JOBS = [JOB_A, JOB_B] as const;
+const SCENE_B_JOBS = [JOB_A, JOB_B, JOB_C] as const;
+const SCENE_B_NODE_COUNT = 8;
+/** Sim steps between reading the clock and the outage tick: room for all eight reducer calls to land first. */
+const OUTAGE_LEAD_STEPS = 12;
 /** Physics constants mirrored for timeout sizing only (never for correctness). */
 const CHECKPOINT_SIM_MS = 30_000;
 const RESTART_SIM_MS = 120_000;
 const WORKFLOW_LEASE_MS = 15_000;
 const L6_UNREACHABLE_NIM = 'http://127.0.0.1:9/v1';
+const MAX_REPORTED_ROUNDS = 8;
 
 export const CASE_TITLES: Record<CaseId, string> = {
   L1: 'SIGKILL during checkpoint; fresh process reclaims',
@@ -50,7 +78,18 @@ export const CASE_TITLES: Record<CaseId, string> = {
   L4: 'Stale fencing token cannot mutate after takeover',
   L5: 'Source Xid 79 on the checkpoint due tick: no new durable checkpoint',
   L6: 'Model unreachable: hard safety holds, fallback attributed to code',
+  SB: 'Scene B: all nodes down, checkpoint-backed jobs wait and restart when nodes return',
+  SBK: 'Scene B + SIGKILL during the wait: fresh process keeps the wait and places once',
 };
+
+/**
+ * Whether this case launches the agent as a single process so SIGKILL truly ends it. Single-mode L1-L6 keep the
+ * original `tsx/cli` launch unchanged; Scene B and every case under multi need a real kill.
+ */
+export const needsDirectAgent = (id: CaseId, teamMode: TeamMode): boolean => teamMode === 'multi' || id === 'SB' || id === 'SBK';
+
+/** A Lead decision is only possible with a real model; L6 forces the endpoint unreachable. */
+export const expectsLead = (id: CaseId, llmMode: RunMeta['llm_mode']): boolean => llmMode === 'live_nim' && id !== 'L6';
 
 export interface CaseEnv {
   args: HarnessArgs;
@@ -76,6 +115,7 @@ class CaseRun {
   simStart: number | null = null;
   verification: Record<string, unknown> | null = null;
   checkpointCount: CaseArtifact['checkpoint_count'] = null;
+  readonly llmLog: LlmLogStats = newLlmLogStats();
   private gen = 0;
   private agent: AgentHandle | null = null;
   readonly budget: Budget;
@@ -100,11 +140,22 @@ class CaseRun {
   // ---- agent lifecycle
   startAgent(opts: { noLlm: boolean; llmOverride?: { baseUrl: string; timeoutMs: number; retries: number } }): AgentHandle {
     this.gen += 1;
-    const env = buildAgentEnv({ base: this.env.env, uri: this.env.uri, db: this.env.args.db, agentToken: this.env.agentToken, noLlm: opts.noLlm, llmOverride: opts.llmOverride });
-    const h = spawnAgent({ env, redact: this.env.redact, generation: this.gen, onLine: (l) => this.env.log(`  agent#${this.gen} ${l}`) });
+    const teamMode = this.env.args.teamMode;
+    const env = buildAgentEnv({ base: this.env.env, uri: this.env.uri, db: this.env.args.db, agentToken: this.env.agentToken, noLlm: opts.noLlm, llmOverride: opts.llmOverride, teamMode });
+    const spec = needsDirectAgent(this.id, teamMode) ? directAgentSpawnSpec() : undefined;
+    const h = spawnAgent({
+      env,
+      redact: this.env.redact,
+      generation: this.gen,
+      spec,
+      onLine: (l) => {
+        tallyLlmLogLine(this.llmLog, l);
+        this.env.log(`  agent#${this.gen} ${l}`);
+      },
+    });
     this.agent = h;
     this.generations.push({ generation: this.gen, pid: h.pid, started_unix_ms: h.startedUnixMs, ended_unix_ms: null, how_ended: 'running', exit_code: null, stderr_tail: [] });
-    this.log(`agent generation ${this.gen} spawned`, { pid: h.pid, no_llm: opts.noLlm, nim_override: opts.llmOverride ? 'unreachable' : null });
+    this.log(`agent generation ${this.gen} spawned`, { pid: h.pid, no_llm: opts.noLlm, nim_override: opts.llmOverride ? 'unreachable' : null, team_mode: teamMode });
     return h;
   }
   private record(h: AgentHandle, how: AgentGenerationRecord['how_ended']) {
@@ -147,14 +198,30 @@ class CaseRun {
     return this.obs.until(what, this.budget.slice(wantMs), pred, needAgent ? this.agentMustBeAlive : undefined);
   }
 
+  /** Observed model/fallback usage, from persisted events and rounds plus the agent's own log lines. */
+  provenance(events: LiveState['events']) {
+    return buildProvenance(this.env.meta.model, this.env.meta.llm_mode, events, this.llmLog, this.obs.teamRounds());
+  }
+
   async artifact(passed: boolean, error: string | null, last: LiveState | null): Promise<CaseArtifact> {
     const alloc = last ? allocationUniqueness(last.snapshot.allocations, last.jobs) : null;
     const failures = this.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`);
     if (error) failures.push(error);
+    const multi = this.env.args.teamMode === 'multi';
+    const rounds = this.obs.teamRounds();
+    const team = multi
+      ? {
+          lead_rounds: rounds.filter((r) => r.trace.outcome === 'lead').length,
+          fallback_rounds: rounds.filter((r) => r.trace.outcome === 'deterministic').length,
+          malformed_workflows: this.obs.teamMalformed(),
+          rounds: rounds.slice(-MAX_REPORTED_ROUNDS),
+        }
+      : null;
+    const label = this.env.meta.llm_mode === 'live_nim' ? 'live DB + real agent process + live NIM' : this.env.meta.llm_mode === 'deterministic_no_llm' ? 'live DB + real agent process, DETERMINISTIC (no LLM) rehearsal' : 'live DB + real agent process, NIM forced unreachable';
     return {
       case: this.id,
       title: CASE_TITLES[this.id],
-      evidence_label: this.env.meta.llm_mode === 'live_nim' ? 'live DB + real agent process + live NIM' : this.env.meta.llm_mode === 'deterministic_no_llm' ? 'live DB + real agent process, DETERMINISTIC (no LLM) rehearsal' : 'live DB + real agent process, NIM forced unreachable',
+      evidence_label: multi ? `${label} [team mode: multi]` : label,
       passed,
       failure_reasons: failures,
       started_unix_ms: this.started,
@@ -170,6 +237,8 @@ class CaseRun {
       timeline: this.timeline,
       last_snapshot_summary: last ? snapshotSummary(last) : null,
       ledger: last ? last.details.map(ledgerRow) : [],
+      team,
+      provenance: last && needsDirectAgent(this.id, this.env.args.teamMode) ? this.provenance(last.events) : null,
       error,
     };
   }
@@ -576,9 +645,134 @@ async function caseL6(run: CaseRun): Promise<LiveState> {
   return all.state;
 }
 
-const RUNNERS: Record<CaseId, (run: CaseRun) => Promise<LiveState>> = { L1: caseL1, L2: caseL2, L3: caseL3, L4: caseL4, L5: caseL5, L6: caseL6 };
+// --------------------------------------------------------------------------------------- Scene B
+
+interface OutageWindow {
+  startSimMs: number;
+  endSimMs: number;
+}
+
+/**
+ * Queue one finite node_crash per simulated node on the same future tick, then prove from a fresh clock read that
+ * every reducer call was accepted before that tick. The schedule goes only to the admin reducer's private fault
+ * table, so the agent cannot see when the nodes will return.
+ */
+async function injectOutage(run: CaseRun, nodes: readonly string[], durationMs: number): Promise<OutageWindow> {
+  const { clock } = (await run.obs.read()).snapshot;
+  const startSimMs = clock.sim_time_ms + OUTAGE_LEAD_STEPS * clock.step_ms;
+  for (const node of nodes) await run.env.admin.injectFault(nodeCrash(run.env.args.runId, node, clock, startSimMs, durationMs, run.id.toLowerCase()));
+  const fresh = (await run.obs.read()).snapshot.clock;
+  const late = dueTickTooLate(fresh, startSimMs, 1);
+  run.add(check(`all ${nodes.length} node_crash faults accepted before the start tick`, late === null, late ?? `accepted at sim ${fresh.sim_time_ms}; outage starts at ${startSimMs}`, { nodes: [...nodes], start_sim_ms: startSimMs, duration_sim_ms: durationMs, accepted_at_sim_ms: fresh.sim_time_ms }));
+  if (late) throw new Error(`outage was not queued in time, so the nodes would not fail together: ${late}`);
+  run.log('outage queued', { nodes: nodes.length, start_sim_ms: startSimMs, duration_sim_ms: durationMs });
+  return { startSimMs, endSimMs: startSimMs + durationMs };
+}
+
+const sceneBJobsAre = (s: LiveState, status: 'running' | 'failed'): boolean => SCENE_B_JOBS.every((id) => jobState(s, id)?.status === status);
+
+async function sceneB(run: CaseRun, withKill: boolean): Promise<LiveState> {
+  const { args } = run.env;
+  const durationMs = args.outageS * 1_000;
+  run.startAgent({ noLlm: args.noLlm });
+
+  const ready = await run.until('job-a, job-b and job-c running', 60_000, (s) => (sceneBJobsAre(s, 'running') ? true : null));
+  const baselines: CheckpointBaseline[] = [];
+  for (const id of RESTART_JOBS) {
+    const b = checkpointBaseline(jobState(ready.state, id), ready.state.snapshot.checkpoints);
+    run.add(check(`precondition: ${id} has a completed, accessible checkpoint`, b !== null, b ? `${b.checkpoint_id}, durable ${b.durable_work_units}` : 'none'));
+    if (!b) throw new Error(`${id} has no completed checkpoint, so Scene B cannot show a restart`);
+    baselines.push(b);
+  }
+  const jc = jobState(ready.state, JOB_C);
+  run.add(check('precondition: job-c has no completed checkpoint', jc?.latest_checkpoint_id === null && completeCheckpoints(ready.state, JOB_C) === 0, `latest ${jc?.latest_checkpoint_id ?? 'none'}, complete rows ${completeCheckpoints(ready.state, JOB_C)}`));
+  const ckptBefore = completeCheckpoints(ready.state, JOB_A);
+  run.checkpointCount = { job_id: JOB_A, complete_before: ckptBefore, complete_after: ckptBefore };
+
+  const nodes = simulatedNodeIds(ready.state.snapshot.resources);
+  if (nodes.length !== SCENE_B_NODE_COUNT) throw new Error(`expected ${SCENE_B_NODE_COUNT} simulated nodes, observed ${nodes.length}: [${nodes.join(',')}]`);
+  const outage = await injectOutage(run, nodes, durationMs);
+
+  const stepWallMs = (OUTAGE_LEAD_STEPS * ready.state.snapshot.clock.step_ms) / args.speed;
+  const down = await run.until('every job failed and every simulated node unreachable', stepWallMs + 30_000, (s) => (sceneBJobsAre(s, 'failed') && nodeOutage(s.snapshot, nodes).allDown ? true : null));
+  run.add(check('outage failed every job and took every node down', true, `sim ${down.state.snapshot.clock.sim_time_ms}: ${SCENE_B_JOBS.map((id) => `${id}=${jobState(down.state, id)?.status}`).join(' ')}`, { sim_time_ms: down.state.snapshot.clock.sim_time_ms }));
+
+  const waited = await run.until('workflow.state.recovery waiting for job-a and job-b', durationMs / args.speed + 45_000, (s) => {
+    const ids = waitingJobIds(s.workflows);
+    return RESTART_JOBS.every((id) => ids.includes(id)) ? true : null;
+  });
+  run.add(checkRecoveryWaiting(waited.state.workflows, RESTART_JOBS, [JOB_C]));
+  run.add(check('waiting was observed while the nodes were still down', nodeOutage(waited.state.snapshot, nodes).allDown, `unreachable ${nodeOutage(waited.state.snapshot, nodes).unreachable.length}/${nodes.length} at sim ${waited.state.snapshot.clock.sim_time_ms}`));
+  const waitingIds = waited.state.workflows.filter((w) => recoveryOf(w)?.status === 'waiting').map((w) => w.workflow_id);
+  run.log('recovery waiting observed', { workflows: waitingIds, jobs: waitingJobIds(waited.state.workflows), waited_ms: waited.waitedMs });
+
+  // SBK: kill on the observed waiting state, then a fresh process must take the same wait over.
+  let beforeKillDetails: LiveState['details'] | null = null;
+  const heldWaits: RecoverySample[] = [];
+  if (withKill) {
+    const before = await run.obs.read();
+    const held = before.workflows.filter((w) => recoveryOf(w)?.status === 'waiting');
+    if (held.length === 0) throw new Error('recovery left the waiting state before the kill could land; use a longer --outage-s');
+    for (const w of held) heldWaits.push({ workflow_id: w.workflow_id, lease_owner: w.lease_owner, attempt: w.attempt, wall_unix_ms: before.wallUnixMs, recovery: recoveryOf(w)! });
+    beforeKillDetails = before.details;
+    const downAtKill = nodeOutage(before.snapshot, nodes).allDown;
+    await run.killAgent();
+    run.add(check('SIGKILL landed while recovery was waiting and nodes were down', downAtKill, `${held.length} waiting workflow(s); nodes down=${downAtKill}`, { workflows: held.map((w) => w.workflow_id), nodes_down: downAtKill }));
+    run.startAgent({ noLlm: args.noLlm });
+    for (const wf of held) run.add(checkWorkflowReclaimed(wf, await waitReclaim(run, wf.workflow_id, wf.lease_owner)));
+  }
+
+  const back = await run.until('every simulated node observed ready again', durationMs / args.speed + 60_000, (s) => (nodeOutage(s.snapshot, nodes).allUp ? true : null));
+  run.log('nodes observed back', { sim_time_ms: back.state.snapshot.clock.sim_time_ms, fault_end_sim_ms: outage.endSimMs, waited_ms: back.waitedMs });
+
+  for (const id of RESTART_JOBS) {
+    const restarted = await run.until(`${id} restarted and running`, RESTART_SIM_MS / args.speed + 120_000, (s) => {
+      const j = jobState(s, id);
+      const moved = finalMigrate(s.details.filter((d) => d.command.requested_sim_time_ms >= outage.endSimMs), id);
+      return j && moved?.status === 'succeeded' && j.status === 'running' && j.allocated_gpu_ids.length > 0 ? { progress: j.progress_work_units, key: moved.command_key } : null;
+    });
+    run.key(`restart_${id}`, restarted.value.key);
+    const advanced = await run.until(`${id} work advancing after restart`, 45_000, (s) => {
+      const j = jobState(s, id);
+      return j && j.progress_work_units > restarted.value.progress ? j.progress_work_units : null;
+    });
+    run.add(checkWorkAdvanced(id, restarted.value.progress, advanced.value));
+  }
+
+  await waitWorkflowSettled(run, waitingIds[0]!);
+  const all = await waitAllWorkflowsSettled(run, allSettledWant(run));
+  const s = all.state;
+  run.checkpointCount.complete_after = completeCheckpoints(s, JOB_A);
+
+  run.add(checkNoRestartDuringOutage(s.details, outage.startSimMs, outage.endSimMs));
+  for (const b of baselines) run.add(checkRestartFromCheckpoint(s.details, jobState(s, b.job_id), s.snapshot.checkpoints, b, outage.endSimMs));
+  run.add(checkSinglePlacement(s.details, RESTART_JOBS, outage.startSimMs));
+  run.add(checkAllocationUniqueness(s.snapshot.allocations, s.jobs));
+  run.add(checkNotRestarted(s.details, jobState(s, JOB_C), JOB_C, outage.startSimMs));
+  run.add(checkJobInOperatorHandoff(s.workflows, s.details, JOB_C));
+  if (beforeKillDetails) {
+    run.add(checkKeysReconciled(beforeKillDetails, s.details, { allowReplan: true }));
+    for (const held of heldWaits) run.add(checkFirstWaitPreserved(held, run.obs.recoverySamples()));
+  }
+  run.add(checkProvenanceReported(run.provenance(s.events)));
+  return s;
+}
+
+const RUNNERS: Record<CaseId, (run: CaseRun) => Promise<LiveState>> = {
+  L1: caseL1,
+  L2: caseL2,
+  L3: caseL3,
+  L4: caseL4,
+  L5: caseL5,
+  L6: caseL6,
+  SB: (run) => sceneB(run, false),
+  SBK: (run) => sceneB(run, true),
+};
 
 // --------------------------------------------------------------------------------------- entry
+
+/** Stands in before the real observer exists: the reset step and the did-not-start artifact only need these. */
+const idleObserver = (): Observer => ({ simNow: () => 0, trackWorkflow: () => undefined, teamRounds: () => [], teamMalformed: () => [], recoverySamples: () => [] }) as unknown as Observer;
 
 export async function runCase(id: CaseId, env: CaseEnv): Promise<CaseArtifact> {
   let obs: Observer | null = null;
@@ -587,15 +781,18 @@ export async function runCase(id: CaseId, env: CaseEnv): Promise<CaseArtifact> {
   let error: string | null = null;
   try {
     // Reset BEFORE building the observer: a stale run id would make snapshot reads fail with NOT_FOUND.
-    const pre = new CaseRun(id, env, { simNow: () => 0, trackWorkflow: () => undefined } as unknown as Observer);
+    const pre = new CaseRun(id, env, idleObserver());
     await resetIfAllowed(pre);
-    obs = createObserver(env.admin);
+    obs = createObserver(env.admin, { trackAll: needsDirectAgent(id, env.args.teamMode) });
     run = new CaseRun(id, env, obs);
     run.timeline.push(...pre.timeline);
     const s0 = await obs.read();
     run.simStart = s0.snapshot.clock.sim_time_ms;
     run.log('case start', { sim_time_ms: run.simStart, speed: env.args.speed });
     last = await RUNNERS[id](run);
+    if (env.args.teamMode === 'multi') {
+      for (const c of checkTeamRounds(obs.teamRounds(), { expectLead: expectsLead(id, env.meta.llm_mode), malformed: obs.teamMalformed() })) run.add(c);
+    }
   } catch (e) {
     error = env.redact(e instanceof WaitTimeoutError ? e.message : e instanceof Error ? `${e.name}: ${e.message}` : String(e));
     env.log(`[${id}] ERROR ${error}`);
@@ -605,7 +802,7 @@ export async function runCase(id: CaseId, env: CaseEnv): Promise<CaseArtifact> {
     obs?.close();
   }
   if (!run) {
-    const stub = new CaseRun(id, env, { simNow: () => 0 } as unknown as Observer);
+    const stub = new CaseRun(id, env, idleObserver());
     return stub.artifact(false, error ?? 'case did not start', null);
   }
   return run.artifact(error === null && allPassed(run.checks), error, last);

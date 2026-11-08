@@ -9,7 +9,9 @@ import { createPhysicsPort } from './adapters/physics.js';
 import { ConfigError, loadConfig, redact, redactString, requireConfig, type AgentConfig } from './config.js';
 import { createEventPublisher } from './events.js';
 import { createLoggingLlm, createNimLlm } from './llm.js';
+import type { OptionChooser } from './planner.js';
 import type { DbPort, LlmPort, PhysicsPort } from './ports.js';
+import { createTeamChooser } from './team/round.js';
 
 export const EXIT_CONFIG = 1;
 export const EXIT_NOT_READY = 3;
@@ -26,6 +28,16 @@ function buildLlm(cfg: AgentConfig): LlmPort | null {
   return createLoggingLlm(nim, (e) =>
     log(`nemotron ${e.ok ? 'ok' : `failed (${e.errorName})`} ${e.latencyMs} ms${e.toolNames.length ? ` tools=${e.toolNames.join(',')}` : ''}`),
   );
+}
+
+/** DCOS_AGENT_TEAM_MODE=multi with a configured LLM: the agent team replaces the single planner choice. */
+function buildChooser(cfg: AgentConfig, llm: LlmPort | null, now: () => number): OptionChooser | undefined {
+  if (cfg.DCOS_AGENT_TEAM_MODE !== 'multi') return undefined;
+  if (!llm) {
+    log('WARNING: DCOS_AGENT_TEAM_MODE=multi needs NIM_API_KEY / NIM_MODEL; running without the agent team');
+    return undefined;
+  }
+  return createTeamChooser({ cfg, now, log });
 }
 
 /** Probe both lanes first so one message names everything that is missing. */
@@ -77,7 +89,9 @@ async function main(): Promise<number> {
   const sim = trackSimClock(db, snap.clock.sim_time_ms);
   // No event read-back on DbPort: a wall-clock start seq keeps ids unique across restarts.
   const events = createEventPublisher({ db, runId, clock: sim.clock, redact: (s) => redactString(s, cfg), startSeq: Date.now() });
-  const loop = createAgentLoop({ db, physics: adapters.physics, llm: buildLlm(cfg), events, workerId, runId, clock: sim.clock, log });
+  const llm = buildLlm(cfg);
+  const chooser = buildChooser(cfg, llm, sim.clock.unixMs);
+  const loop = createAgentLoop({ db, physics: adapters.physics, llm, events, workerId, runId, clock: sim.clock, log, ...(chooser ? { chooser } : {}) });
 
   log(`worker ${workerId} on run ${runId} (sim t=${(snap.clock.sim_time_ms / 1000).toFixed(1)} s)`);
   await new Promise<void>((resolve) => {

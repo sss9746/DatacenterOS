@@ -3,8 +3,8 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Check } from './asserts.js';
-import type { CaseId } from './args.js';
+import { describeProvenance, type Check, type ObservedRound, type Provenance } from './asserts.js';
+import type { CaseId, TeamMode } from './args.js';
 import type { Redactor } from './redact.js';
 
 export interface RunMeta {
@@ -19,6 +19,8 @@ export interface RunMeta {
   /** Model name only (never a key). `deterministic` when --no-llm. */
   model: string;
   llm_mode: 'live_nim' | 'deterministic_no_llm' | 'forced_unreachable_nim';
+  /** The DCOS_AGENT_TEAM_MODE the agent child was launched with. */
+  team_mode: TeamMode;
   reset_performed: boolean;
   started_unix_ms: number;
   node: string;
@@ -40,6 +42,15 @@ export interface AgentGenerationRecord {
   how_ended: 'SIGKILL' | 'taskkill' | 'exited' | 'stopped_by_harness' | 'running' | 'already_exited';
   exit_code: number | null;
   stderr_tail: string[];
+}
+
+/** What the team actually did in a case; null in single mode. */
+export interface CaseTeamReport {
+  lead_rounds: number;
+  fallback_rounds: number;
+  malformed_workflows: string[];
+  /** Most recent rounds (each trace is already bounded to 24 messages by the agent). */
+  rounds: ObservedRound[];
 }
 
 export interface CaseArtifact {
@@ -64,6 +75,9 @@ export interface CaseArtifact {
   last_snapshot_summary: Record<string, unknown> | null;
   /** Ledger rows (status + command, no secrets) at the end of the case. */
   ledger: Array<Record<string, unknown>>;
+  team: CaseTeamReport | null;
+  /** Observed model/fallback usage; null where it is not collected (single-mode L1-L6). */
+  provenance: Provenance | null;
   error: string | null;
 }
 
@@ -84,6 +98,7 @@ export function renderMarkdown(run: RunArtifact): string {
   lines.push(`- **Commit:** \`${m.commit}\`${m.branch ? ` (${m.branch})` : ''}`);
   lines.push(`- **Database:** \`${m.db}\` run \`${m.run_id}\` preset \`${m.preset_id}\` seed ${m.seed} speed ${m.speed}; reset performed: ${m.reset_performed ? 'yes' : 'no'}`);
   lines.push(`- **Model:** ${m.model} (${m.llm_mode}${m.llm_mode !== 'live_nim' ? ' — NOT a Nemotron claim' : ''})`);
+  lines.push(`- **Team mode:** ${m.team_mode}`);
   lines.push(`- **Started:** ${new Date(m.started_unix_ms).toISOString()} on ${m.platform} ${m.node}`);
   lines.push('');
   lines.push('| Case | Result | Evidence | Sim window | Wall s | Checks |');
@@ -114,6 +129,8 @@ export function renderMarkdown(run: RunArtifact): string {
     if (c.checkpoint_count) lines.push(`**Checkpoints (${c.checkpoint_count.job_id}):** complete ${c.checkpoint_count.complete_before} → ${c.checkpoint_count.complete_after}`);
     if (c.allocation_uniqueness) lines.push(`**Allocation uniqueness:** ${c.allocation_uniqueness.ok ? 'ok' : `DOUBLED ${JSON.stringify(c.allocation_uniqueness.doubled)}`}`);
     if (c.verification) lines.push(`**Verification:** \`${JSON.stringify(c.verification)}\``);
+    if (c.team) lines.push(`**Team:** ${c.team.rounds.length} round(s) shown; Lead decided ${c.team.lead_rounds}, fell back to deterministic code ${c.team.fallback_rounds}${c.team.malformed_workflows.length ? `; malformed state.team on ${c.team.malformed_workflows.join(', ')}` : ''}`);
+    if (c.provenance) lines.push(`**Provenance:** ${describeProvenance(c.provenance)}`);
     lines.push('');
     lines.push('```');
     for (const k of c.checks) lines.push(`${k.ok ? 'PASS' : 'FAIL'}  ${pad(k.name, 48)} ${k.detail}`);

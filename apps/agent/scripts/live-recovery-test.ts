@@ -4,6 +4,8 @@
 //   pnpm --filter agent live-recovery --db dcos-dev --case all --speed 2  all six
 //   pnpm --filter agent live-recovery --db dcos-dev --case L3 --no-llm    DETERMINISTIC rehearsal (labeled)
 //   pnpm --filter agent live-recovery --db dcos-dev --case L2 --hold-s 45 hold the Verified state 45 s for recording
+//   pnpm --filter agent live-recovery --db dcos-dev --case L3 --team-mode multi      Scene A with the agent team
+//   pnpm --filter agent live-recovery --db dcos-dev --case SB,SBK --team-mode multi  Scene B (all-node outage)
 //
 // What it does, per case: controlled reset with the agent stopped (never on prod) -> spawn the REAL agent as
 // a child process (same entry as `pnpm --filter agent start`) -> inject faults through the admin reducer ->
@@ -95,13 +97,14 @@ async function main(argv: string[]): Promise<number> {
     preset_id: args.presetId,
     model: args.noLlm ? 'deterministic (no LLM)' : env.NIM_MODEL || 'deterministic (NIM_MODEL unset)',
     llm_mode: llmMode,
+    team_mode: args.teamMode,
     reset_performed: target.willReset,
     started_unix_ms: Date.now(),
     node: process.version,
     platform: `${process.platform} ${hostname()}`,
   };
   log(`target db=${args.db}${target.isProd ? ' (PRODUCTION, acknowledged; no reset)' : ''} run=${args.runId} seed=${args.seed} speed=${args.speed} cases=${args.cases.join(',')} timeout=${args.timeoutS}s${args.holdS > 0 ? ` hold=${args.holdS}s` : ''}`);
-  log(`commit ${meta.commit} model=${meta.model} mode=${meta.llm_mode} out=${outDir}`);
+  log(`commit ${meta.commit} model=${meta.model} mode=${meta.llm_mode} team_mode=${meta.team_mode} out=${outDir}`);
   log(`env ${JSON.stringify(describeEnv(env, ['STDB_URI', 'STDB_DB', 'STDB_ADMIN_TOKEN', 'STDB_AGENT_TOKEN', 'NIM_BASE_URL', 'NIM_API_KEY', 'NIM_MODEL']))}`);
   if (!args.noLlm && llmMode !== 'live_nim') log('NOTE: NIM_API_KEY/NIM_MODEL unset -> the agent runs deterministically; evidence is labeled as a rehearsal, not a Nemotron claim');
 

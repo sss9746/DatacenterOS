@@ -20,7 +20,7 @@
 import type { ActionCommand, ActionStatus, Incident, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
 import type { CommandOutcome, ExecutablePlan, ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
-import { planIncidents, planNarrative, type JobPlan, type PlanResult, type RankedOption } from './planner.js';
+import { planIncidents, planNarrative, type JobPlan, type OptionChooser, type PlanResult, type RankedOption } from './planner.js';
 import {
   dbErrorCode,
   type DbChange,
@@ -142,6 +142,19 @@ function materialChange(plan: ExecutablePlan, base: Topology, fresh: ObservedSna
     if (now !== fp) return `${id} is ${now} (${base.roles.get(id) ?? 'in the active plan'})`;
   }
   return null;
+}
+
+/**
+ * What changed materially for `plan` between the snapshot it was built on and a later one, or null. Team mode uses
+ * this right after a team round: the watcher only starts after planning, so a 10-25 s round would otherwise be blind.
+ */
+export function planStaleReason(plan: ExecutablePlan, builtOn: ObservedSnapshot, fresh: ObservedSnapshot): string | null {
+  return materialChange(plan, buildTopology(plan, builtOn), fresh);
+}
+
+/** Resources the plan's commands act on: targets, jobs and destination GPUs. */
+export function planResourceIds(plan: ExecutablePlan): Set<string> {
+  return new Set(directRoles(plan).keys());
 }
 
 function signalReason(sig: SignalEvent, role: string): string {
@@ -300,6 +313,8 @@ export interface ReplanDeps {
    * runReplan writes the workflow itself (db.getWorkflow + db.updateWorkflow with `fencingToken`).
    */
   persist?: (stage: WorkflowStage, patch: Record<string, unknown>) => Promise<WorkflowRecord | null>;
+  /** Team mode: the agent team chooses the options, and triage runs deterministically (no extra model calls). */
+  chooser?: OptionChooser;
 }
 
 export interface ReplanInput {
@@ -421,7 +436,7 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
   const pass = await cancelSuperseded(deps, input.previous.commands);
 
   // (3) triage again: the new failure becomes its own incident
-  const triage = await runTriage({ db, llm: deps.llm, now: deps.now });
+  const triage = await runTriage({ db, llm: deps.chooser ? null : deps.llm, now: deps.now });
   const previousIds = new Set<string>(input.previous.plan.incident_ids);
   const all = await db.listIncidents();
   const byId = new Map<string, Incident>(all.map((i) => [i.incident_id, i]));
@@ -446,6 +461,7 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
       runId: deps.runId,
       attempt: input.attempt,
       reservedGpuIds: [...pass.reserved].sort(),
+      ...(deps.chooser ? { chooser: deps.chooser } : {}),
     },
     { incidents: open.length > 0 ? open : previousAny.length > 0 ? previousAny : [...triage.incidents] },
   );
