@@ -21,6 +21,8 @@ export interface Bubble {
   blocked: boolean;
   toolCalls: ToolCallSummary[];
   handoffTo: Seat | null;
+  /** Owning agent process for this event (from the workflow's lease/resume markers); null when not recorded. */
+  process: string | null;
   simTimeMs: number;
   observedUnixMs: number;
 }
@@ -36,6 +38,10 @@ export interface Thread {
   closed: boolean;
   items: StreamItem[];
   lastObservedUnixMs: number | null;
+  /** Owning process from `workflow.lease_owner` only; null when absent. */
+  owner: string | null;
+  /** True when the lease expiry is in the past and the workflow is still open. */
+  leaseLapsed: boolean;
   /** Seconds since the last event when the thread is open and quiet; null otherwise (and always null in example mode). */
   silentForS: number | null;
 }
@@ -45,7 +51,7 @@ export type SeatState = 'idle' | 'thinking' | 'done';
 export interface RoomView {
   threads: Thread[];
   seatStates: Record<Seat, SeatState>;
-  counts: { events: number; nemotron: number; code: number; unattributed: number };
+  counts: { events: number; nemotron: number; code: number; unattributed: number; processes: number };
 }
 
 export interface RoomInput {
@@ -68,6 +74,44 @@ export function resumeDividerText(e: { by_worker: string | null; count: number |
   const who = e.by_worker ?? 'a new worker';
   const n = e.count !== null ? ` (#${e.count})` : '';
   return `Agent process stopped → new process resumed by ${who}${n}, reconciling…`;
+}
+
+/** `agent-alpha-12345` → `agent-alpha`; strips one trailing numeric pid segment. Null for null/empty. */
+export function processName(workerId: string | null | undefined): string | null {
+  if (!workerId) return null;
+  const name = workerId.replace(/-\d+$/, '');
+  return name || null;
+}
+
+export interface ResumeMarker { previous_owner: string | null; by_worker: string | null; at_sim_time_ms: number }
+
+/** The persisted `state.resumed` marker (resume.ts shape) when its fields are well-typed; otherwise null. */
+export function readResumeMarker(state: Record<string, unknown>): ResumeMarker | null {
+  const m = state.resumed;
+  if (!m || typeof m !== 'object') return null;
+  const r = m as Record<string, unknown>;
+  const at = typeof r.at_sim_time_ms === 'number' ? r.at_sim_time_ms : null;
+  if (at === null) return null;
+  const by = typeof r.by_worker === 'string' ? r.by_worker : null;
+  const prev = typeof r.previous_owner === 'string' ? r.previous_owner : null;
+  return { previous_owner: prev, by_worker: by, at_sim_time_ms: at };
+}
+
+/** Takeover wording only when two different processes are both recorded; otherwise the plain resume text. */
+export function dividerText(resumed: { by_worker: string | null; count: number | null; previous_owner: string | null }): string {
+  const prev = processName(resumed.previous_owner);
+  const next = processName(resumed.by_worker);
+  if (prev && next && prev !== next) {
+    const n = resumed.count !== null ? `, #${resumed.count}` : '';
+    return `${prev} stopped → ${next} took over (lease reclaimed${n}), reconciling…`;
+  }
+  return resumeDividerText(resumed);
+}
+
+/** Which process owned an event: before the resume marker → previous_owner, at/after → by_worker; no marker → lease_owner. */
+export function processOfEvent(simTimeMs: number, marker: ResumeMarker | null, leaseOwner: string | null): string | null {
+  if (marker) return processName(simTimeMs < marker.at_sim_time_ms ? marker.previous_owner : marker.by_worker);
+  return processName(leaseOwner);
 }
 
 const isClosed = (stage: WorkflowRecord['stage'] | null): boolean => stage === 'done' || stage === 'escalated';
@@ -110,12 +154,15 @@ export function buildRoomView(input: RoomInput): RoomView {
     const wf = id === RUN_THREAD_ID ? null : workflows.find((w) => w.workflow_id === id) ?? null;
     const accent: Thread['accent'] = id === RUN_THREAD_ID ? 'run' : wfIndex++ % 2 === 0 ? 'a' : 'b';
     const seats = list.map(seatOf);
+    const marker = wf ? readResumeMarker(wf.state) : null;
+    const leaseOwner = wf?.lease_owner ?? null;
     const bubbles: Bubble[] = list.map((e, i) => {
       const { text, example: ex } = boundSummary(e.summary);
       const next = seats[i + 1] ?? null;
       return {
         kind: 'bubble', id: e.agent_event_id, seat: seats[i]!, stage: e.stage, summary: text, example: ex,
         blocked: /\bBLOCKED\b/.test(e.summary), toolCalls: e.tool_calls, handoffTo: next !== null && next !== seats[i] ? next : null,
+        process: wf ? processOfEvent(e.sim_time_ms, marker, leaseOwner) : null,
         simTimeMs: e.sim_time_ms, observedUnixMs: e.observed_unix_ms,
       };
     });
@@ -124,17 +171,19 @@ export function buildRoomView(input: RoomInput): RoomView {
     const resumed = wf ? resumeEvidence(list, wf.state) : null;
     const anchor = resumed ? resumeAnchorIndex(list, resumed.event_id, resumed.sim_time_ms) : -1;
     bubbles.forEach((b, i) => {
-      if (resumed && i === anchor) items.push({ kind: 'divider', id: `${id}-resume-${resumed.event_id}`, text: resumeDividerText(resumed), simTimeMs: resumed.sim_time_ms });
+      if (resumed && i === anchor) items.push({ kind: 'divider', id: `${id}-resume-${resumed.event_id}`, text: dividerText(resumed), simTimeMs: resumed.sim_time_ms });
       items.push(b);
     });
-    if (resumed && anchor === bubbles.length) items.push({ kind: 'divider', id: `${id}-resume-${resumed.event_id}`, text: resumeDividerText(resumed), simTimeMs: resumed.sim_time_ms });
+    if (resumed && anchor === bubbles.length) items.push({ kind: 'divider', id: `${id}-resume-${resumed.event_id}`, text: dividerText(resumed), simTimeMs: resumed.sim_time_ms });
 
     const last = list.at(-1) ?? null;
     const closed = id === RUN_THREAD_ID ? false : isClosed(wf?.stage ?? null);
     const quietMs = last ? nowUnixMs - last.observed_unix_ms : 0;
     // In the recovery example the clocks are frozen, so "silent" would be a misleading claim: suppressed when example.
     const silentForS = !example && last && !closed && id !== RUN_THREAD_ID && quietMs > SILENT_AFTER_MS ? Math.floor(quietMs / 1000) : null;
-    threads.push({ id, title: id === RUN_THREAD_ID ? 'Run' : threadTitle(id, workflows, incidents), accent, workflowStage: wf?.stage ?? null, closed, items, lastObservedUnixMs: last?.observed_unix_ms ?? null, silentForS });
+    const owner = processName(leaseOwner);
+    const leaseLapsed = wf !== null && owner !== null && !closed && wf.lease_expires_unix_ms < nowUnixMs;
+    threads.push({ id, title: id === RUN_THREAD_ID ? 'Run' : threadTitle(id, workflows, incidents), accent, workflowStage: wf?.stage ?? null, closed, items, lastObservedUnixMs: last?.observed_unix_ms ?? null, owner, leaseLapsed, silentForS });
   }
 
   // Seat states.
@@ -152,7 +201,15 @@ export function buildRoomView(input: RoomInput): RoomView {
     }
   }
 
+  const processes = new Set<string>();
+  for (const t of threads) {
+    const wf = workflows.find((w) => w.workflow_id === t.id);
+    if (!wf) continue;
+    const marker = readResumeMarker(wf.state);
+    for (const n of [processName(wf.lease_owner), processName(marker?.previous_owner), processName(marker?.by_worker)]) if (n) processes.add(n);
+  }
   const counts = {
+    processes: processes.size,
     events: sorted.length,
     nemotron: sorted.filter((e) => e.actor === 'nemotron').length,
     code: sorted.filter((e) => e.actor === 'code').length,
