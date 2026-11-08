@@ -282,7 +282,7 @@ export function gpuAvailability(gpuId: string, h: HiddenState): GpuCurrent['avai
 /**
  * Recompute every observed GPU row from the true state at `simMs`. Unreachable GPUs keep their last observed
  * temperature and last_seen (no telemetry reaches us), draw 0 W and report 0 MHz. Stale-sensor GPUs keep their
- * last good telemetry-derived fields. Bumps `version` when availability, throttle/cap state, limit or XID changes.
+ * last good telemetry-derived fields. Versions are bumped by step() (see materialKey*), not here.
  */
 export function deriveGpus(
   gpus: GpuCurrent[], jobs: Map<string, JobState>, h: HiddenState, topo: Topology, cond: FaultConditions, simMs: number,
@@ -310,12 +310,7 @@ export function deriveGpus(
           clocks_event_reasons: prev.clocks_event_reasons, last_seen_sim_ms: prev.last_seen_sim_ms };
       }
     }
-    const material =
-      next.availability !== prev.availability
-      || (next.clocks_event_reasons & CLOCKS_EVENT_HW_THERMAL) !== (prev.clocks_event_reasons & CLOCKS_EVENT_HW_THERMAL)
-      || next.power_limit_w !== prev.power_limit_w
-      || next.last_xid_code !== prev.last_xid_code;
-    return material ? { ...next, version: prev.version + 1 } : next;
+    return next;
   });
   return { gpus: out, physics };
 }
@@ -332,13 +327,12 @@ export function deriveNodes(
     const maxTemp = live.length > 0
       ? Math.max(...live.map((g) => g.temp_c))
       : rackInletC(prev.rack_id, h, topo);
-    const next: NodeCurrent = {
+    return {
       ...prev,
       availability,
       power_headroom_w: live.reduce((s, g) => s + (g.power_limit_w - g.power_w), 0),
       thermal_headroom_c: round1(SLOWDOWN_C - maxTemp),
     };
-    return availability !== prev.availability ? { ...next, version: prev.version + 1 } : next;
   });
 }
 
@@ -356,7 +350,7 @@ export function deriveCooling(cooling: CoolingCurrent[], topo: Topology, cond: F
       observed_capacity_estimate_w: nominalPower > 0 ? Math.round(prev.nominal_capacity_w * (power / nominalPower)) : null,
     };
     if (cond.stale.has(prev.resource_id)) next = { ...next, pump_power_w: prev.pump_power_w };
-    return state !== prev.operating_state ? { ...next, version: prev.version + 1 } : next;
+    return next;
   });
 }
 
@@ -376,3 +370,14 @@ export function loopHeatW(loop: string, gpuIds: string[], physics: Map<string, G
   for (const id of gpuIds) if (racks.has(topo.gpuRack.get(id) ?? '')) sum += physics.get(id)?.power_w ?? 0;
   return sum;
 }
+
+// ---- material-change keys (decision_epoch / resource versions) ------------------------------------
+// Only OBSERVABLE, safety-relevant fields count (CONTRACTS §A: per-tick gauge samples don't bump epochs), so the
+// public decision_epoch never leaks a hidden fault that has no observable effect yet.
+
+export const gpuMaterialKey = (g: GpuCurrent): string =>
+  `${g.availability}|${g.clocks_event_reasons & CLOCKS_EVENT_HW_THERMAL}|${g.power_limit_w}|${g.last_xid_code}`;
+export const nodeMaterialKey = (n: NodeCurrent): string => n.availability;
+export const coolingMaterialKey = (c: CoolingCurrent): string => c.operating_state;
+export const jobMaterialKey = (j: JobState): string =>
+  `${j.status}|${j.allocated_gpu_ids.join(',')}|${j.durable_work_units}|${j.latest_checkpoint_id}`;

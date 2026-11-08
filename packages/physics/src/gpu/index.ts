@@ -3,3 +3,4 @@
 export * from './constants.js';
 export { buildPreset, type PresetId } from './preset.js';
 export { toObserved, PRIVATE_KEYS } from './observe.js';
+export { step } from './step.js';

@@ -42,4 +42,13 @@ describe('P1-2: package exports', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('GPU src is pure: no Date.now, Math.random, Node APIs, timers, fetch or structuredClone', () => {
+    const banned = /Date\.now|new Date\(|Math\.random|performance\.now|from ['"]node:|require\(|process\.|setTimeout|setInterval|fetch\(|structuredClone|globalThis/;
+    const offenders = srcFiles(join(PKG_DIR, 'src', 'gpu'))
+      .flatMap((file) => readFileSync(file, 'utf8').split('\n').map((line, i) => [file, i + 1, line] as const))
+      .filter(([, , line]) => !line.trim().startsWith('//') && banned.test(line))
+      .map(([file, n, line]) => `${file}:${n}: ${line.trim()}`);
+    expect(offenders).toEqual([]);
+  });
 });
