@@ -1,0 +1,65 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "nemotron-fixed12",
+  "run_id": "nemotron-fixed12-sc14-preventive-move-hurts-s114",
+  "scenario_id": "sc14-preventive-move-hurts",
+  "seed": 114,
+  "policy": "nemotron",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 2,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "wf-policy-run-demo-1-id3488086dd32:checkpoint:job-a:1",
+      "action_id": "act:wf-policy-run-demo-1-id3488086dd32:checkpoint:job-a:1",
+      "operation": "checkpoint",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 630000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 631000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 661000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": true,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "wf-policy-run-demo-1-id3488086dd32:migrate_restart:job-a:1",
+      "action_id": "act:wf-policy-run-demo-1-id3488086dd32:migrate_restart:job-a:1",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 630000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 662000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 782000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": true,
+      "recovery": null,
+      "unsafe_executed": []
+    }
+  ]
+}

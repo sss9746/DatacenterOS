@@ -1,0 +1,65 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "nemotron-fixed12",
+  "run_id": "nemotron-fixed12-sc04-failed-gpu-xid79-s104",
+  "scenario_id": "sc04-failed-gpu-xid79",
+  "seed": 104,
+  "policy": "reactive",
+  "horizon_sim_s": 300,
+  "gate": "safety",
+  "ticks": 300,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 900000,
+  "duplicate_commands_ignored": 239,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "reactive.gpu-r3-n1-5.cordon_gpu.xid79",
+      "action_id": "reactive.gpu-r3-n1-5.cordon_gpu.xid79",
+      "operation": "cordon_gpu",
+      "job_id": null,
+      "target_resource_id": "gpu-r3-n1-5",
+      "issued_sim_time_ms": 660000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 661000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 662000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "reactive.job-a.migrate_restart.v1",
+      "action_id": "reactive.job-a.migrate_restart.v1",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 660000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 661000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 781000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": "succeeded",
+      "unsafe_executed": []
+    }
+  ]
+}
