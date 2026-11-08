@@ -13,11 +13,12 @@ import { RUN_ID, loadPumpDegradedSnapshot, loadSignalXid79Dest, loadSignalXid79R
 vi.mock('../src/team/protocol.js', () => ({
   TEAM_ROLES: ['cooling', 'workload', 'lead'],
   teamFeedEvents: (trace: TeamTrace, incidentId?: string) =>
-    ['Cooling → Workload: first', 'Workload → Lead: second'].map((summary) => ({
+    ['Cooling → Workload: first', 'Workload → Lead: second'].map((summary, i) => ({
       stage: 'plan',
       summary: `${trace.round_id} ${summary}`,
       actor: 'nemotron',
       toolCalls: [{ tool: 'team_message', args_summary: 'x', result_summary: 'y' }],
+      ...(i === 0 ? { evidenceIds: ['ev-feed-1'] } : {}),
       incidentId,
     })),
 }));
@@ -370,5 +371,121 @@ describe('new-incident watch (team mode)', () => {
     await macrotask(20);
     expect(readsOf(w)).toBe(after);
     expect(inFlight).toBe(0);
+  });
+});
+
+describe('live team progress', () => {
+  const running = (roundId: string, attempt: number): TeamTrace => ({
+    ...trace(roundId),
+    version: 2,
+    status: 'running',
+    phase: 'findings',
+    started_unix_ms: attempt * 1_000,
+    budget: { max_calls: 6, round_ms: 30_000, call_timeout_ms: 12_000 },
+    calls: [{ role: 'cooling', phase: 'findings', started_ms: 0, ended_ms: null, status: 'running' }],
+  });
+
+  /** Reports one running trace, then returns the same run closed straight away (no wait for the progress write). */
+  function progressChooser(during?: (input: ChooserInput) => void | Promise<void>) {
+    const calls: ChooserInput[] = [];
+    const chooser: OptionChooser = async (input) => {
+      calls.push(input);
+      const id = `${input.workflowId}:a${input.attempt}`;
+      input.onProgress?.(running(id, input.attempt));
+      await during?.(input);
+      return { choices: null, team: { ...running(id, input.attempt), status: 'closed', phase: 'closed', calls: [] } };
+    };
+    return { chooser, calls };
+  }
+
+  const workflowWrites = (w: World) =>
+    w.db.calls.filter((c) => c.method === 'updateWorkflow').map((c) => ({ stage: c.args[3] as string, state: c.args[4] as Record<string, unknown> }));
+  const teamOf = (s: Record<string, unknown>) => s.team as TeamTrace | undefined;
+
+  it('writes the running trace during the round, then the final save, with no version conflict', async () => {
+    const w = world();
+    const { chooser, calls } = progressChooser();
+    // A slow progress write: without the drain, the final save would overlap it and one of them would hit
+    // VERSION_CONFLICT (updateStage is CAS on version and not serialized).
+    const real = w.db.updateWorkflow.bind(w.db);
+    w.db.updateWorkflow = async (...args: Parameters<typeof real>) => {
+      if (teamOf(args[4])?.status === 'running') await macrotask(20);
+      return real(...args);
+    };
+    const logs: string[] = [];
+    const r = await makeLoop(w, { chooser, log: (m) => logs.push(m) }).runOnce();
+    expect(calls[0]!.onProgress).toBeTypeOf('function');
+    expect(r.status).not.toBe('lost_ownership');
+    expect(r.verification?.verified).toBe(true);
+
+    const writes = workflowWrites(w);
+    const progress = writes.findIndex((x) => teamOf(x.state)?.status === 'running');
+    const final = writes.findIndex((x) => teamOf(x.state)?.status === 'closed');
+    expect(progress).toBeGreaterThanOrEqual(0);
+    expect(final).toBeGreaterThan(progress);
+    expect(writes[final]!.stage).toBe('plan');
+    // The progress write kept the stage the workflow already had.
+    expect(writes[progress]!.stage).not.toBe('plan');
+    if (progress > 0) expect(writes[progress]!.stage).toBe(writes[progress - 1]!.stage);
+    expect(logs.some((l) => /VERSION_CONFLICT|ownership lost|progress write failed/.test(l))).toBe(false);
+
+    const wf = await w.db.getWorkflow(r.workflow_id!);
+    expect(teamOf(wf!.state)).toMatchObject({ round_id: `${r.workflow_id}:a1`, status: 'closed' });
+    expect(wf!.state.team_rounds).toBeUndefined();
+  });
+
+  it('a replan round keeps the current stage in its progress writes and keeps the earlier round in history', async () => {
+    const w = world();
+    const { chooser } = progressChooser();
+    let injected = false;
+    w.hooks.push(async () => {
+      if (injected || !w.db.listActions().some((a) => a.status === 'running' && a.command_key.includes(':checkpoint:job-a:'))) return;
+      const dest = (await openCommands(w)).flatMap(destOf)[0];
+      if (!dest) return;
+      injected = true;
+      w.db.injectSignal(xidOn(w, dest));
+    });
+    const r = await makeLoop(w, { chooser }).runOnce();
+    expect(r.replans).toHaveLength(1);
+
+    const writes = workflowWrites(w);
+    const i = writes.findIndex((x) => teamOf(x.state)?.status === 'running' && teamOf(x.state)?.round_id.endsWith(':a2'));
+    expect(i).toBeGreaterThan(0);
+    expect(writes[i]!.stage).not.toBe('plan');
+    expect(writes[i]!.stage).toBe(writes[i - 1]!.stage);
+    // The round-1 trace moved into history as soon as round 2 reported.
+    expect((writes[i]!.state.team_rounds as { rounds: TeamTrace[] }).rounds.map((t) => [t.round_id, t.status])).toEqual([[`${r.workflow_id}:a1`, 'closed']]);
+
+    const wf = await w.db.getWorkflow(r.workflow_id!);
+    expect(teamOf(wf!.state)).toMatchObject({ round_id: `${r.workflow_id}:a2`, status: 'closed' });
+    expect(wf!.state.team_rounds).toEqual({ rounds: [expect.objectContaining({ round_id: `${r.workflow_id}:a1`, status: 'closed' })], dropped: 0 });
+  });
+
+  it('a progress write that fails does not affect the round or the final save', async () => {
+    const w = world();
+    const { chooser } = progressChooser();
+    const real = w.db.updateWorkflow.bind(w.db);
+    let failed = 0;
+    w.db.updateWorkflow = async (...args: Parameters<typeof real>) => {
+      if (teamOf(args[4])?.status === 'running') {
+        failed += 1;
+        throw new Error('db hiccup');
+      }
+      return real(...args);
+    };
+    const logs: string[] = [];
+    const r = await makeLoop(w, { chooser, log: (m) => logs.push(m) }).runOnce();
+    expect(failed).toBe(1);
+    expect(logs.some((l) => l.includes('team progress write failed (ignored)'))).toBe(true);
+    expect(r.verification?.verified).toBe(true);
+    expect(teamOf((await w.db.getWorkflow(r.workflow_id!))!.state)?.status).toBe('closed');
+  });
+
+  it('feed rows carry the evidence ids of their message', async () => {
+    const w = world();
+    const { chooser } = fakeChooser();
+    const r = await makeLoop(w, { chooser }).runOnce();
+    const rows = w.db.agentEvents.filter((e) => e.workflow_id === r.workflow_id && e.tool_calls.some((t) => t.tool === 'team_message'));
+    expect(rows.map((e) => e.evidence_ids)).toEqual([['ev-feed-1'], []]);
   });
 });

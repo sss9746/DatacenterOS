@@ -31,6 +31,7 @@ import {
   type ResumeHandoff,
   type ResumeReport,
 } from './resume.js';
+import { createTeamProgressSink, teamStatePatch, withTeamProgress } from './team/progress.js';
 import { teamFeedEvents } from './team/protocol.js';
 import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, incidentIdentity, runTriage, SYMPTOM_BUCKET_MS, type Candidate } from './triage.js';
 import { buildOperatorHandoff, verifyRecovery, type VerificationReport } from './verify.js';
@@ -324,6 +325,25 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       return deps.chooser!(input);
     });
 
+  /**
+   * Team mode: the chooser for one round of this workflow, writing live progress into `state.team` (and moving the
+   * previous round into `state.team_rounds`). Each write keeps the CURRENT stage: a `plan` write during a replan
+   * would move the workflow backwards. The wrapper drains before returning, so the caller's final save never races a
+   * progress write. A lost lease (updateStage -> null) stops the sink; other write errors are logged and ignored.
+   */
+  const roundChooser = (coord: Coordinator): OptionChooser | undefined => {
+    if (!chooser) return undefined;
+    const sink = createTeamProgressSink({
+      write: async (team) => {
+        const lease = coord.lease();
+        if (!lease || !coord.isOwner()) return false;
+        return (await coord.updateStage(lease.workflow.stage, teamStatePatch(coord.state(), team))) !== null;
+      },
+      log,
+    });
+    return withTeamProgress(chooser, sink);
+  };
+
   let inflight: Promise<LoopTickReport> | null = null;
   let started = false;
   let stopping = false;
@@ -416,14 +436,15 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   }
 
   async function plan(wfId: string, incidents: Incident[], attempt: number, coord: Coordinator): Promise<PlanResult> {
-    const r = await planIncidents({ db, physics, llm: llm ?? NO_LLM, workflowId: wfId, runId, attempt, ...(chooser ? { chooser } : {}) }, { incidents });
+    const teamChooser = roundChooser(coord);
+    const r = await planIncidents({ db, physics, llm: llm ?? NO_LLM, workflowId: wfId, runId, attempt, ...(teamChooser ? { chooser: teamChooser } : {}) }, { incidents });
     // R3b: candidates ride along in the persisted state; updateStage merges, so they survive execute/verify/done.
     const saved = await coord.updateStage('plan', {
       plan_id: r.plan.plan_id,
       attempt,
       incident_ids: [...r.plan.incident_ids],
       candidates: mergeCandidates(coord.state().candidates, r.candidates ?? []),
-      ...(r.team ? { team: r.team } : {}),
+      ...(r.team ? teamStatePatch(coord.state(), r.team) : {}),
       ...(r.operator_jobs ? { operator_jobs: r.operator_jobs } : {}),
     });
     if (saved) await publishTeam(wfId, r);
@@ -542,7 +563,14 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   async function publishTeam(wfId: string, r: PlanResult): Promise<void> {
     if (!r.team) return;
     for (const ev of teamFeedEvents(r.team, r.plan.incident_ids[0])) {
-      await safeEmit(ev.stage, { workflowId: wfId, incidentId: ev.incidentId, summary: ev.summary, actor: ev.actor, toolCalls: ev.toolCalls });
+      await safeEmit(ev.stage, {
+        workflowId: wfId,
+        incidentId: ev.incidentId,
+        summary: ev.summary,
+        actor: ev.actor,
+        toolCalls: ev.toolCalls,
+        ...(ev.evidenceIds?.length ? { evidenceIds: ev.evidenceIds } : {}),
+      });
     }
   }
 
@@ -765,7 +793,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
             now,
             // Persist through the lease owner: version + fencing token stay coherent, no re-claim needed.
             persist: (stage, patch) => coord.updateStage(stage, patch),
-            ...(chooser ? { chooser } : {}),
+            ...(chooser ? { chooser: roundChooser(coord)! } : {}),
           },
           { previous: current, execution: exec, attempt, reason },
         );
@@ -781,7 +809,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         // R3b: the new plan's candidates replace this workflow's older entries for the same jobs.
         const saved = await coord.updateStage('replan', {
           candidates: mergeCandidates(coord.state().candidates, current.candidates ?? []),
-          ...(current.team ? { team: current.team } : {}),
+          ...(current.team ? teamStatePatch(coord.state(), current.team) : {}),
           ...(current.operator_jobs ? { operator_jobs: current.operator_jobs } : {}),
         });
         if (saved) await publishTeam(wfId, current);

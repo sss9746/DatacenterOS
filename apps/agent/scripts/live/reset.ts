@@ -9,6 +9,7 @@ import { waitFor } from './wait.js';
 
 export const RUN_START_SIM_MS = 600_000;
 export const EXPECTED_GPUS = 64;
+const REAL_GPU_ID = 'gpu-real-0';
 export const EXPECTED_JOBS = 3;
 const LEASE_DRAIN_MS = 25_000;
 const FRESH_RUN_MS = 20_000;
@@ -77,7 +78,9 @@ export async function controlledReset(client: DbClient, opts: ResetOptions): Pro
   });
   const snap = state.snap;
   const problems: string[] = [];
-  if (snap.gpus.length !== EXPECTED_GPUS) problems.push(`gpus=${snap.gpus.length} (expected ${EXPECTED_GPUS})`);
+  // `gpu-real-0` is the observation-only Brev GPU (ingest_observations); physics never models it, so it is not counted.
+  const simulatedGpus = snap.gpus.filter((g) => g.resource_id !== REAL_GPU_ID).length;
+  if (simulatedGpus !== EXPECTED_GPUS) problems.push(`gpus=${simulatedGpus} simulated (expected ${EXPECTED_GPUS})`);
   if (snap.job_states.length !== EXPECTED_JOBS) problems.push(`jobs=${snap.job_states.length} (expected ${EXPECTED_JOBS})`);
   if (state.wfs.length !== 0) problems.push(`open_workflows=${state.wfs.length} (expected 0)`);
   if (snap.clock.sim_time_ms > RUN_START_SIM_MS + 60_000) problems.push(`sim clock ${snap.clock.sim_time_ms} is far past the preset start; was the run actually reset?`);
@@ -99,7 +102,7 @@ export async function controlledReset(client: DbClient, opts: ResetOptions): Pro
     wall_done_unix_ms: Date.now(),
     sim_time_after_ms: snap.clock.sim_time_ms,
     tick_index_after: snap.clock.tick_index,
-    gpus: snap.gpus.length,
+    gpus: simulatedGpus,
     jobs: snap.job_states.length,
     actions: ledger,
     open_workflows: state.wfs.length,

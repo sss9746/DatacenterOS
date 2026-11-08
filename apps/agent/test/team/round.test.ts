@@ -464,7 +464,11 @@ describe('trace bounds and feed', () => {
 
   it('holds the limits and identifies the round on a real trace', async () => {
     const r = await plan(teamLlm());
-    expect(r.team!.version).toBe(1);
+    expect(r.team!.version).toBe(2);
+    expect(r.team!.status).toBe('closed');
+    expect(r.team!.phase).toBe('closed');
+    expect(r.team!.budget).toEqual({ max_calls: TEAM_BUDGET.maxCalls, round_ms: TEAM_BUDGET.roundMs, call_timeout_ms: TEAM_BUDGET.callTimeoutMs });
+    expect(r.team!.calls).toHaveLength(r.team!.calls_used);
     expect(r.team!.round_id).toMatch(/^wf-1:a1:e\d+$/);
     expect(r.team!.snapshot_sim_ms).toBe(SIM_MS);
     expect(r.team!.model).toBe('fake-nemotron');
@@ -532,5 +536,155 @@ describe('planIncidents seam', () => {
     expect(lastUser(llm.requests[0]!)).not.toContain('TEAM_INPUT');
     expect(r.used_llm).toBe(true);
     expect('team' in r).toBe(false);
+  });
+});
+
+describe('live progress (trace v2)', () => {
+  /** planIncidents with the team chooser, reporting every progress copy to `onProgress`. */
+  const planWatched = (llm: FakeLlm, onProgress: (t: TeamTrace) => void): Promise<PlanResult> => {
+    const team = createTeamChooser({ llm, now: () => Date.now() });
+    return planIncidents(
+      { db, physics, llm: new FakeLlm(), workflowId: 'wf-1', runId: RUN_ID, chooser: (input) => team({ ...input, onProgress }) },
+      { incidents: [PUMP] },
+    );
+  };
+
+  it('reports phase, call start, call end and message posts in order, as running copies', async () => {
+    const seen: TeamTrace[] = [];
+    const r = await planWatched(teamLlm(), (t) => seen.push(t));
+
+    expect(seen.length).toBeGreaterThan(5);
+    expect(seen.every((t) => t.version === 2 && t.status === 'running' && t.phase !== 'closed')).toBe(true);
+    // The first report is the round starting: findings phase, nothing called or said yet.
+    expect(seen[0]).toMatchObject({ phase: 'findings', calls: [], messages: [] });
+    // Phases only move forward.
+    const order = ['findings', 'peer_answers', 'cover', 'decide'];
+    const phases = seen.map((t) => order.indexOf(t.phase!));
+    expect(phases).toEqual([...phases].sort((a, b) => a - b));
+    expect(new Set(seen.map((t) => t.phase))).toEqual(new Set(['findings', 'peer_answers', 'decide']));
+    // Both specialists are shown running before either finding is posted.
+    const firstMessage = seen.findIndex((t) => t.messages.length > 0);
+    const bothRunning = seen.findIndex((t) => t.calls!.filter((c) => c.status === 'running').length === 2);
+    expect(bothRunning).toBeGreaterThanOrEqual(0);
+    expect(bothRunning).toBeLessThan(firstMessage);
+    // Every call is seen running before it is seen ended, and messages appear one post at a time.
+    for (let i = 0; i < r.team!.calls!.length; i++) {
+      const running = seen.findIndex((t) => t.calls![i]?.status === 'running');
+      const ended = seen.findIndex((t) => t.calls![i] !== undefined && t.calls![i]!.status !== 'running');
+      expect(running).toBeGreaterThanOrEqual(0);
+      expect(ended).toBeGreaterThan(running);
+    }
+    const counts = seen.map((t) => t.messages.length);
+    for (let i = 1; i < counts.length; i++) expect(counts[i]! - counts[i - 1]!).toBeLessThanOrEqual(1);
+
+    // The final trace: closed, every call ended, phases and times recorded.
+    expect(r.team).toMatchObject({ version: 2, status: 'closed', phase: 'closed' });
+    expect(r.team!.calls!.map((c) => [c.role, c.phase, c.status])).toEqual([
+      ['cooling', 'findings', 'ok'],
+      ['workload', 'findings', 'ok'],
+      ['workload', 'peer_answers', 'ok'],
+      ['cooling', 'peer_answers', 'ok'],
+      ['lead', 'decide', 'ok'],
+    ]);
+    for (const c of r.team!.calls!) expect(c.ended_ms).toBeGreaterThanOrEqual(c.started_ms);
+    expect(r.team!.messages.every((m) => typeof m.t_ms === 'number' && m.t_ms >= 0)).toBe(true);
+    expect(r.team!.started_unix_ms).toBeTypeOf('number');
+  });
+
+  it('hands out copies: changing a reported trace changes neither the round nor later reports', async () => {
+    const r = await planWatched(teamLlm(), (t) => {
+      t.messages.length = 0;
+      t.calls!.length = 0;
+      t.missing_roles.push('lead');
+    });
+    expect(r.team!.messages.length).toBeGreaterThan(0);
+    expect(r.team!.calls).toHaveLength(r.team!.calls_used);
+    expect(r.team!.missing_roles).toEqual([]);
+    expect(r.team!.outcome).toBe('lead');
+  });
+
+  it('a throwing progress callback changes nothing about the round', async () => {
+    const quiet = await plan(teamLlm());
+    let n = 0;
+    const loud = await planWatched(teamLlm(), () => {
+      n += 1;
+      throw new Error('dashboard down');
+    });
+    expect(n).toBeGreaterThan(0);
+    const shape = (r: PlanResult) => ({
+      outcome: r.team!.outcome,
+      calls_used: r.team!.calls_used,
+      messages: r.team!.messages.map((m) => [m.from, m.to, m.kind, m.summary, m.consumed_by]),
+      calls: r.team!.calls!.map((c) => [c.role, c.phase, c.status]),
+      chosen: r.job_plans.map((p) => p.chosen.option_id),
+    });
+    expect(shape(loud)).toEqual(shape(quiet));
+  });
+
+  it('marks timeouts, rejections and failures on the call that had them', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const llm = teamLlm({
+      'cooling:submit_finding': never,
+      'workload:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...WORKLOAD_FINDING, evidence_ids: ['ev-invented'] }),
+      [LEAD]: () => Promise.reject(new Error('down')),
+    });
+    const running = plan(llm);
+    await vi.advanceTimersByTimeAsync(40_000);
+    const r = await running;
+    expect(r.team!.calls!.map((c) => [c.role, c.status])).toEqual([
+      ['cooling', 'timeout'],
+      ['workload', 'rejected'],
+      ['lead', 'failed'],
+    ]);
+    expect(r.team!.calls![0]!.ended_ms).toBe(TEAM_BUDGET.callTimeoutMs);
+  });
+
+  it('drops a breaker-rejected call instead of leaving it running', async () => {
+    const seen: TeamTrace[] = [];
+    const r = await planWatched(teamLlm({ [LEAD]: () => Promise.reject(new LlmUnavailableError('circuit open', [])) }), (t) => seen.push(t));
+    expect(r.team!.calls!.some((c) => c.role === 'lead')).toBe(false);
+    expect(r.team!.calls).toHaveLength(r.team!.calls_used);
+    expect(r.team!.calls!.every((c) => c.status !== 'running')).toBe(true);
+    // Shown running while the request was out, then the next report no longer lists it.
+    expect(seen.some((t) => t.calls!.some((c) => c.role === 'lead' && c.status === 'running'))).toBe(true);
+    expect(seen.at(-1)!.calls!.some((c) => c.role === 'lead')).toBe(false);
+  });
+
+  it('after the deadline a late reply changes nothing and reports nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const late = deferred<LlmChatResponse>();
+    let leadRequest: LlmChatRequest | undefined;
+    const seen: TeamTrace[] = [];
+    const running = planWatched(
+      teamLlm({
+        [LEAD]: (req) => {
+          leadRequest = req;
+          return late.promise;
+        },
+      }),
+      (t) => seen.push(t),
+    );
+    await vi.advanceTimersByTimeAsync(TEAM_BUDGET.roundMs + 1_000);
+    const r = await running;
+    const before = structuredClone(r.team!);
+    const reports = seen.length;
+    expect(r.team!.calls!.find((c) => c.role === 'lead')!.status).toBe('timeout');
+    expect(r.team!.calls!.every((c) => c.status !== 'running' && c.ended_ms !== null)).toBe(true);
+
+    late.resolve(await leadPicksTop(leadRequest!));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(r.team).toEqual(before);
+    expect(seen).toHaveLength(reports);
+  });
+
+  it('puts cited evidence ids on feed rows, after the parsed `<kind> <from>-><to>` prefix', async () => {
+    const r = await plan(teamLlm());
+    const events = teamFeedEvents(r.team!, 'inc-1');
+    const finding = events.find((e) => e.summary.startsWith('Cooling → Lead'))!;
+    expect(finding.evidenceIds).toEqual([COOL_EVENT]);
+    expect(finding.toolCalls[0]!.args_summary).toBe(`finding cooling->lead ev=${COOL_EVENT}`);
+    const decision = events.find((e) => e.summary.startsWith('Lead → Supervisor'))!;
+    expect(decision.evidenceIds).toBeUndefined();
+    expect(decision.toolCalls[0]!.args_summary).toBe('decision lead->supervisor');
   });
 });

@@ -470,6 +470,10 @@ export interface TeamMessageView {
 }
 
 export interface TeamTraceView {
+  /** 1 (no live progress) or 2. Absent only on hand-built views in tests. */
+  version?: 1 | 2;
+  /** v2 only: `running` / `interrupted` traces are never counted as rounds. */
+  status?: 'running' | 'closed' | 'interrupted';
   round_id: string;
   snapshot_sim_ms: number;
   model: string | null;
@@ -489,9 +493,28 @@ const isTeamMessage = (m: unknown): boolean =>
 
 const isCover = (c: unknown): boolean => isRecord(c) && typeof c.failed_role === 'string' && typeof c.covered_by === 'string';
 
-/** A persisted `state.team` as a trace, or null when it does not have the frozen shape. All original fields are kept. */
+const TRACE_STATUSES: ReadonlySet<unknown> = new Set(['running', 'closed', 'interrupted']);
+
+const isTeamCall = (c: unknown): boolean =>
+  isRecord(c) && typeof c.role === 'string' && typeof c.phase === 'string' && typeof c.started_ms === 'number' && (c.ended_ms === null || typeof c.ended_ms === 'number') && typeof c.status === 'string';
+
+/** v2 additions (live progress): status, phase, start time, budget and per-call records. */
+const isV2Extension = (raw: Record<string, unknown>): boolean =>
+  TRACE_STATUSES.has(raw.status) &&
+  typeof raw.phase === 'string' &&
+  typeof raw.started_unix_ms === 'number' &&
+  isRecord(raw.budget) &&
+  Array.isArray(raw.calls) &&
+  raw.calls.every(isTeamCall);
+
+/**
+ * A persisted team trace (`state.team` or a `state.team_rounds.rounds` entry), or null when it does not have the
+ * frozen shape. Version 1 and 2 are accepted; a v2 trace of any status parses (use `isClosedRound` to count it).
+ * All original fields are kept.
+ */
 export function parseTeamTrace(raw: unknown): TeamTraceView | null {
-  if (!isRecord(raw) || raw.version !== 1) return null;
+  if (!isRecord(raw) || (raw.version !== 1 && raw.version !== 2)) return null;
+  if (raw.version === 2 && !isV2Extension(raw)) return null;
   const ok =
     typeof raw.round_id === 'string' &&
     typeof raw.snapshot_sim_ms === 'number' &&
@@ -512,10 +535,16 @@ export interface ObservedRound {
   trace: TeamTraceView;
 }
 
-/** `state.team` holds only the latest round, so the observer accumulates every round it sees across reads. */
+/** A finished round: every v1 trace, or a v2 trace whose status is `closed` (not `running` / `interrupted`). */
+export const isClosedRound = (t: TeamTraceView): boolean => t.version !== 2 || t.status === 'closed';
+
+/**
+ * `state.team` holds the latest round and `state.team_rounds.rounds` the last few before it; the observer still
+ * accumulates every closed round it sees across reads (deduped by workflow + round_id, the latest read wins).
+ */
 export interface TeamStore {
   rounds: Map<string, ObservedRound>;
-  /** Workflows whose `state.team` was present but did not have the frozen shape. */
+  /** Workflows whose `state.team` (or a history entry) was present but did not have the frozen shape. */
   malformed: Set<string>;
 }
 
@@ -523,14 +552,21 @@ export const newTeamStore = (): TeamStore => ({ rounds: new Map(), malformed: ne
 
 export function recordTeamRounds(store: TeamStore, workflows: readonly WorkflowRecord[]): void {
   for (const wf of workflows) {
-    const raw = (wf.state as { team?: unknown }).team;
-    if (raw === undefined || raw === null) continue;
-    const trace = parseTeamTrace(raw);
-    if (!trace) {
+    const state = wf.state as { team?: unknown; team_rounds?: unknown };
+    const history = isRecord(state.team_rounds) && Array.isArray(state.team_rounds.rounds) ? state.team_rounds.rounds : [];
+    if (state.team_rounds !== undefined && state.team_rounds !== null && !(isRecord(state.team_rounds) && Array.isArray(state.team_rounds.rounds))) {
       store.malformed.add(wf.workflow_id);
-      continue;
     }
-    store.rounds.set(`${wf.workflow_id}|${trace.round_id}`, { workflow_id: wf.workflow_id, trace });
+    // Oldest first, then the current round: a later entry for the same round_id replaces an earlier one.
+    for (const raw of [...history, state.team]) {
+      if (raw === undefined || raw === null) continue;
+      const trace = parseTeamTrace(raw);
+      if (!trace) {
+        store.malformed.add(wf.workflow_id);
+        continue;
+      }
+      if (isClosedRound(trace)) store.rounds.set(`${wf.workflow_id}|${trace.round_id}`, { workflow_id: wf.workflow_id, trace });
+    }
   }
 }
 

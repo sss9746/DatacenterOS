@@ -31,9 +31,9 @@ export interface Observer {
   workflow(id: string): Promise<WorkflowRecord | null>;
   /** Keep this workflow in `read().workflows` even after it closes (done/escalated). */
   trackWorkflow(id: string): void;
-  /** Every distinct team round seen so far (`state.team` itself holds only the latest). */
+  /** Every distinct CLOSED team round seen so far (`state.team` plus `state.team_rounds`; running v2 traces are not rounds yet). */
   teamRounds(): ObservedRound[];
-  /** Workflows whose `state.team` did not have the frozen shape. */
+  /** Workflows whose `state.team` or `state.team_rounds` entries did not have the frozen shape (v1 or v2). */
   teamMalformed(): string[];
   /** `state.recovery` history, one entry per change of status, attempts, first wait or owner. */
   recoverySamples(): RecoverySample[];

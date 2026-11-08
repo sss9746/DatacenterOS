@@ -146,6 +146,10 @@ describe('team client budget', () => {
     expect(nim.requests).toHaveLength(3);
     expect(r.team!.calls_used).toBe(TEAM_BUDGET.maxCalls);
     expect(r.team!.outcome).toBe('deterministic');
+    // One record per model call: each corrective retry is its own call, and every attempt was refused.
+    expect(r.team!.calls).toHaveLength(TEAM_BUDGET.maxCalls);
+    expect(r.team!.calls!.map((c) => c.role).sort()).toEqual(['cooling', 'cooling', 'lead', 'lead', 'workload', 'workload']);
+    expect(r.team!.calls!.every((c) => c.status === 'rejected')).toBe(true);
   });
 
   it('still reaches the Lead when correctives leave exactly enough budget', async () => {
@@ -180,6 +184,8 @@ describe('team client budget', () => {
       expect(r.team!.wall_ms).toBe(TEAM_BUDGET.roundMs);
       expect(r.team!.calls_used).toBe(TEAM_BUDGET.maxCalls);
       expect(r.team!.outcome).toBe('deterministic');
+      expect(r.team!.calls).toHaveLength(TEAM_BUDGET.maxCalls);
+      expect(r.team!.calls!.every((c) => c.status !== 'running' && c.ended_ms !== null && c.ended_ms <= TEAM_BUDGET.roundMs)).toBe(true);
       const before = structuredClone(r.team!);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(r.team).toEqual(before);

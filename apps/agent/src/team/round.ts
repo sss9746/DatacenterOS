@@ -17,11 +17,15 @@ import {
   boundSummary,
   boundTrace,
   submitFindingArgsSchema,
+  type TeamCall,
+  type TeamCallStatus,
   type TeamMessage,
   type TeamMessageKind,
   type TeamParty,
+  type TeamPhase,
   type TeamRole,
   type TeamTrace,
+  type TeamTraceStatus,
 } from './protocol.js';
 import {
   ANSWER_PEER_TOOL,
@@ -82,6 +86,9 @@ interface Finding {
 class TeamRound {
   private closed = false;
   private calls = 0;
+  private phase: TeamPhase = 'findings';
+  /** v2 per-call records; mutated only while the round is open. */
+  private readonly callLog: TeamCall[] = [];
   private model: string | null = null;
   private seq = 0;
   private readonly messages: TeamMessage[] = [];
@@ -109,6 +116,74 @@ class TeamRound {
     this.roundTimer.unref?.();
   }
 
+  // ------------------------------------------------------------------------------------------ progress
+
+  private elapsed(): number {
+    return Math.max(0, this.now() - this.startedAt);
+  }
+
+  /**
+   * Live progress: a copy of the trace so far, handed to `input.onProgress`. Synchronous and guarded, so a reporting
+   * failure can neither throw into the round nor delay it. Nothing is reported once the round is closed.
+   */
+  private progress(): void {
+    const report = this.input.onProgress;
+    if (!report || this.closed) return;
+    try {
+      report(this.trace('running', null));
+    } catch {
+      // progress is best effort: the round's result never depends on it
+    }
+  }
+
+  private enter(phase: TeamPhase): void {
+    if (this.closed || this.phase === phase) return;
+    this.phase = phase;
+    this.progress();
+  }
+
+  private startCall(role: TeamRole): TeamCall {
+    const call: TeamCall = { role, phase: this.phase, started_ms: this.elapsed(), ended_ms: null, status: 'running' };
+    this.callLog.push(call);
+    this.progress();
+    return call;
+  }
+
+  private endCall(call: TeamCall, status: Exclude<TeamCallStatus, 'running'>): void {
+    if (this.closed || call.status !== 'running') return;
+    call.status = status;
+    call.ended_ms = this.elapsed();
+    this.progress();
+  }
+
+  /** Code refused the reply of `role`'s latest call (it ended `ok`): no tool call, invalid arguments or citations. */
+  private refuseLatest(role: TeamRole): void {
+    if (this.closed) return;
+    const call = [...this.callLog].reverse().find((c) => c.role === role);
+    if (call && call.status === 'ok') call.status = 'rejected';
+  }
+
+  /** A copy of the round as it stands. */
+  private trace(status: TeamTraceStatus, choices: Choice[] | null): TeamTrace {
+    return boundTrace({
+      version: 2,
+      round_id: this.roundId,
+      snapshot_sim_ms: this.input.ix.snap.clock.sim_time_ms,
+      model: this.model,
+      calls_used: this.calls,
+      wall_ms: this.elapsed(),
+      outcome: choices ? 'lead' : 'deterministic',
+      messages: this.messages.map((m) => ({ ...m, consumed_by: [...m.consumed_by] })),
+      covers: this.covers.map((c) => ({ ...c })),
+      missing_roles: [...this.missing],
+      status,
+      phase: status === 'closed' ? 'closed' : this.phase,
+      started_unix_ms: this.startedAt,
+      budget: { max_calls: TEAM_BUDGET.maxCalls, round_ms: TEAM_BUDGET.roundMs, call_timeout_ms: TEAM_BUDGET.callTimeoutMs },
+      calls: this.callLog,
+    });
+  }
+
   close(): void {
     this.closed = true;
     clearTimeout(this.roundTimer);
@@ -134,6 +209,7 @@ class TeamRound {
       ]),
     ) as Record<SpecialistRole, Session>;
 
+    this.progress(); // phase `findings`: the round has started
     const [cooling, workload] = await Promise.all(SPECIALISTS.map((r) => this.finding(sessions[r])));
     const findings: Record<SpecialistRole, Finding | null> = { cooling: cooling ?? null, workload: workload ?? null };
     for (const r of SPECIALISTS) if (!findings[r]) this.missing.add(r);
@@ -148,7 +224,7 @@ class TeamRound {
   private async finding(session: Session): Promise<Finding | null> {
     const res = await this.call(this.specialistRequest(session, SUBMIT_FINDING_TOOL), this.specialistLimit, session.role, []);
     const tc = res && firstCall(res, SUBMIT_FINDING_TOOL_NAME);
-    if (!tc) return null;
+    if (!tc) return this.unusable(session.role, res);
     const args = parseArgs(submitFindingArgsSchema, tc);
     if (!args) return this.reject(session.role, `finding rejected: invalid arguments (${invalidFields(submitFindingArgsSchema, tc)})`);
     const refused = unknownCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
@@ -170,11 +246,15 @@ class TeamRound {
       const responder = peerOf(asker);
       if (!question || !findings[responder] || !this.canRunSpecialist()) continue;
       const session = sessions[responder];
+      this.enter('peer_answers');
       const pending = this.inboxFor(responder);
       session.messages.push({ role: 'user', content: buildPeerQuestionMessage(LABEL[asker], question.summary, pending.items) });
       const res = await this.call(this.specialistRequest(session, ANSWER_PEER_TOOL), this.specialistLimit, responder, [question, ...pending.messages]);
       const tc = res && firstCall(res, ANSWER_PEER_TOOL_NAME);
-      if (!tc) continue;
+      if (!tc) {
+        this.unusable(responder, res);
+        continue;
+      }
       const args = parseArgs(answerPeerArgsSchema, tc);
       if (!args) {
         this.reject(responder, `answer rejected: invalid arguments (${invalidFields(answerPeerArgsSchema, tc)})`);
@@ -197,11 +277,15 @@ class TeamRound {
     const failedRole = failed[0]!;
     const coverer = sessions[peerOf(failedRole)];
     const failedBundle = sessions[failedRole].bundle;
+    this.enter('cover');
     const pending = this.inboxFor(coverer.role);
     coverer.messages.push({ role: 'user', content: buildCoverMessage(LABEL[failedRole], failedBundle, pending.items) });
     const res = await this.call(this.specialistRequest(coverer, SUBMIT_FINDING_TOOL), this.specialistLimit, coverer.role, pending.messages);
     const tc = res && firstCall(res, SUBMIT_FINDING_TOOL_NAME);
-    if (!tc) return;
+    if (!tc) {
+      this.unusable(coverer.role, res);
+      return;
+    }
     const args = parseArgs(submitFindingArgsSchema, tc);
     if (!args) {
       this.reject(coverer.role, `cover rejected: invalid arguments (${invalidFields(submitFindingArgsSchema, tc)})`);
@@ -221,6 +305,7 @@ class TeamRound {
 
   private async decide(): Promise<ChooserResult> {
     const { ix, incidents, ranked, toolCalls } = this.input;
+    this.enter('decide');
     if (!this.canRunLead()) return this.deterministic('team budget exhausted before the Lead');
 
     const board = new Map(ranked);
@@ -266,7 +351,10 @@ class TeamRound {
     if (!res) return this.deterministic('LLM unavailable');
 
     const choices = collectChoices(res.toolCalls);
-    if (!choices.some((c) => isEligible(c, ranked))) return this.deterministic('invalid or missing choose_options call');
+    if (!choices.some((c) => isEligible(c, ranked))) {
+      this.refuseLatest('lead');
+      return this.deterministic('invalid or missing choose_options call');
+    }
 
     const decision = choices.map((c) => `${c.option_id}${c.needs_approval ? ' (approval)' : ''}`).join(', ');
     toolCalls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, decision, 'nemotron'));
@@ -300,39 +388,53 @@ class TeamRound {
     this.calls += 1;
     const newlyConsumed = consumes.filter((m) => !m.consumed_by.includes(role));
     for (const m of newlyConsumed) m.consumed_by.push(role);
+    let record = this.startCall(role);
     return new Promise((resolve) => {
       let done = false;
       let timer: ReturnType<typeof setTimeout>;
-      const finish = (value: LlmChatResponse | null) => {
+      const finish = (value: LlmChatResponse | null, status: Exclude<TeamCallStatus, 'running'>) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        this.endCall(record, status);
         resolve(this.closed ? null : value);
       };
       const arm = () => {
         clearTimeout(timer);
-        timer = setTimeout(() => finish(null), Math.max(0, Math.min(TEAM_BUDGET.callTimeoutMs, limit - this.now())));
+        timer = setTimeout(() => finish(null, 'timeout'), Math.max(0, Math.min(TEAM_BUDGET.callTimeoutMs, limit - this.now())));
         timer.unref?.();
       };
       const observe: CallObserver = (e) => {
         const extraAttempt = (e.type === 'tool_args_invalid' && e.corrective) || e.type === 'thinking_flag_rejected';
         if (!extraAttempt || this.closed) return;
         this.calls += 1;
-        if (!done) arm();
+        if (done) return;
+        // The adapter's own corrective retry is a second model call: the first attempt ends here.
+        this.endCall(record, e.type === 'thinking_flag_rejected' ? 'failed' : 'rejected');
+        record = this.startCall(role);
+        arm();
       };
       arm();
       this.scope.run(observe, () => this.llm.chat(req)).then(
         (res) => {
           if (!done && !this.closed) this.model = res.model;
-          finish(res);
+          finish(res, 'ok');
         },
         (err: unknown) => {
           // An open circuit breaker never reached the endpoint: not a model call, and nothing was consumed.
           if (err instanceof LlmUnavailableError && err.attempts.length === 0 && !done && !this.closed) {
             this.calls -= 1;
             for (const m of newlyConsumed) m.consumed_by.splice(m.consumed_by.indexOf(role), 1);
+            // Not a model call either: drop its record instead of leaving it `running` or calling it failed.
+            done = true;
+            clearTimeout(timer);
+            const i = this.callLog.indexOf(record);
+            if (i >= 0) this.callLog.splice(i, 1);
+            this.progress();
+            resolve(null);
+            return;
           }
-          finish(null);
+          finish(null, 'failed');
         },
       );
     });
@@ -356,13 +458,24 @@ class TeamRound {
       evidence_ids: boundIds(evidenceIds, TEAM_LIMITS.evidenceIds),
       resource_ids: boundIds(resourceIds, TEAM_LIMITS.resourceIds),
       consumed_by: [],
+      t_ms: this.elapsed(),
     };
-    if (!this.closed) this.messages.push(message);
+    if (!this.closed) {
+      this.messages.push(message);
+      this.progress();
+    }
     return message;
+  }
+
+  /** A reply without the expected tool call: its call is marked rejected. No objection is posted, as before. */
+  private unusable(role: TeamRole, res: LlmChatResponse | null): null {
+    if (res) this.refuseLatest(role);
+    return null;
   }
 
   /** The reason is code-authored: rejected model text and ids are not repeated into the trace. */
   private reject(role: SpecialistRole, reason: string): null {
+    this.refuseLatest(role);
     this.post('supervisor', role, 'objection', reason, null, [], []);
     return null;
   }
@@ -383,20 +496,15 @@ class TeamRound {
 
   /** Closes the round first: the returned trace is a copy that nothing can touch afterwards. */
   result(choices: Choice[] | null): ChooserResult {
+    // A call still open when the round ends (round deadline) ran out of time; it can no longer change anything.
+    const end = this.elapsed();
+    for (const c of this.callLog) {
+      if (c.status !== 'running') continue;
+      c.status = 'timeout';
+      c.ended_ms = end;
+    }
     this.close();
-    const team: TeamTrace = boundTrace({
-      version: 1,
-      round_id: this.roundId,
-      snapshot_sim_ms: this.input.ix.snap.clock.sim_time_ms,
-      model: this.model,
-      calls_used: this.calls,
-      wall_ms: Math.max(0, this.now() - this.startedAt),
-      outcome: choices ? 'lead' : 'deterministic',
-      messages: this.messages.map((m) => ({ ...m, consumed_by: [...m.consumed_by] })),
-      covers: this.covers.map((c) => ({ ...c })),
-      missing_roles: [...this.missing],
-    });
-    return { choices, team };
+    return { choices, team: this.trace('closed', choices) };
   }
 
   /** The unexpected-error exit: same shape as any other failed round. */

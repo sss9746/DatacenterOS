@@ -38,6 +38,11 @@ export interface ChooserInput {
   toolCalls: ToolCallSummary[];
   workflowId: string;
   attempt: number;
+  /**
+   * Team mode: called synchronously with a copy of the in-progress trace (status `running`) on phase change, call
+   * start, call end and message post. Injected by `withTeamProgress` (team/progress.ts); must not throw or block.
+   */
+  onProgress?: (trace: TeamTrace) => void;
 }
 export interface ChooserResult { choices: Choice[] | null; team: TeamTrace }
 export type OptionChooser = (input: ChooserInput) => Promise<ChooserResult>;

@@ -111,6 +111,58 @@ describe('parsing and accumulating persisted rounds', () => {
     expect(store.rounds.size).toBe(1);
     expect([...store.malformed]).toEqual(['wf-3']);
   });
+
+  const v2 = (over: Record<string, unknown> = {}) =>
+    trace({
+      version: 2,
+      status: 'closed',
+      phase: 'closed',
+      started_unix_ms: 1_700_000_000_000,
+      budget: { max_calls: 6, round_ms: 30_000, call_timeout_ms: 12_000 },
+      calls: [{ role: 'cooling', phase: 'findings', started_ms: 0, ended_ms: 900, status: 'ok' }],
+      ...over,
+    });
+
+  it('parses version 2 traces of every status, and rejects a v2 trace missing its v2 fields', () => {
+    for (const status of ['running', 'closed', 'interrupted']) expect(parseTeamTrace(v2({ status }))).not.toBeNull();
+    expect(parseTeamTrace(v2({ calls: [{ role: 'lead', phase: 'decide', started_ms: 1, ended_ms: null, status: 'running' }] }))).not.toBeNull();
+    expect(parseTeamTrace(v2({ status: 'paused' }))).toBeNull();
+    expect(parseTeamTrace(v2({ calls: [{ role: 'lead' }] }))).toBeNull();
+    expect(parseTeamTrace(v2({ started_unix_ms: undefined }))).toBeNull();
+    expect(parseTeamTrace(v2({ version: 3 }))).toBeNull();
+  });
+
+  it('counts only closed rounds: a running v2 trace is neither a round nor malformed', () => {
+    const store = newTeamStore();
+    recordTeamRounds(store, [wf('wf-1', { team: v2({ status: 'running', phase: 'findings' }) })]);
+    expect(store.rounds.size).toBe(0);
+    expect(store.malformed.size).toBe(0);
+    recordTeamRounds(store, [wf('wf-1', { team: v2() })]);
+    expect([...store.rounds.values()].map((r) => r.trace.round_id)).toEqual(['wf-1:a1:e1']);
+  });
+
+  it('reads state.team_rounds too, dedupes by round_id keeping the latest, and skips interrupted rounds', () => {
+    const store = newTeamStore();
+    recordTeamRounds(store, [
+      wf('wf-1', {
+        team_rounds: {
+          rounds: [trace({ round_id: 'wf-1:a1:e1' }), v2({ round_id: 'wf-1:a2:e1', status: 'interrupted', phase: 'peer_answers' }), v2({ round_id: 'wf-1:a3:e1', outcome: 'deterministic' })],
+          dropped: 0,
+        },
+        team: v2({ round_id: 'wf-1:a3:e1', outcome: 'lead' }),
+      }),
+    ]);
+    const rounds = [...store.rounds.values()];
+    expect(rounds.map((r) => [r.trace.round_id, r.trace.outcome])).toEqual([
+      ['wf-1:a1:e1', 'lead'],
+      ['wf-1:a3:e1', 'lead'],
+    ]);
+    expect(store.malformed.size).toBe(0);
+    expect(checkTeamRounds(rounds, { expectLead: true }).every((c) => c.ok)).toBe(true);
+
+    recordTeamRounds(store, [wf('wf-2', { team_rounds: { rounds: [{ version: 2 }] }, team: v2({ round_id: 'wf-2:a1:e1' }) })]);
+    expect([...store.malformed]).toEqual(['wf-2']);
+  });
 });
 
 describe('model provenance', () => {
