@@ -59,7 +59,7 @@ export function SafetyProbe({ store, canAdmin }: SafetyProbeProps) {
     finally { setBusy(false); }
   }
 
-  return <section className="presenter-controls presenter-probe" aria-labelledby={`${id}-title`}>
+  return <section className="presenter-controls presenter-probe-section" aria-labelledby={`${id}-title`}>
     <div className="presenter-controls-head">
       <div><h2 id={`${id}-title`}>Manual safety probe: move {PROBE_JOB_ID} onto hot rack r6</h2><p>{MODE_COPY[mode]}</p></div>
       <span className={`presenter-mode presenter-mode-${mode}`}>{MODE_BADGE[mode]}</span>
