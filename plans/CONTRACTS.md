@@ -93,7 +93,7 @@ Racks r1, r5, r7 and r8 are free capacity. The existing facility model (`compile
 | `nvidia_smi.utilization_gpu` | ratio | Real Brev GPU utilization |
 | `nvidia_smi.clocks_sm` | MHz | Real Brev GPU SM clock |
 
-XIDs are always `SignalEvent`s (`event_type: "xid"`, `xid_code` 48/79/74), never gauges.
+XIDs are always `SignalEvent`s (`event_type: "xid_error"`, as in the schema; `xid_code` 48/79/74), never gauges.
 
 ### 0.6 Function names each lane calls (frozen)
 **P1, `@dcos/physics` (pure, deterministic):**
@@ -180,6 +180,9 @@ The browser can read public tables without a token. **Tokens are handed out by P
 7. **db-client also exports** `getWorkflow(id)`, `listOpenWorkflows()` and `listIncidents()`. Until `@dcos/db-client` ships, `AgentEventInput`, `WorkflowRecord`, `WorkflowLease` and `SymptomRecord` live in `apps/agent/src/ports.ts`; P2's client must match those shapes.
 8. **`@dcos/physics` exports `PlanMetrics`** (same shape as §0.6), and P3 switches its import when P1 ships.
 9. **`cooling_current`** has one row per pump **and** one per loop.
+10. **db-client also exports `upsertSymptoms(symptoms: SymptomRecord[])`** (P2 adds a reducer `upsert_symptoms`, agent role). Triage writes symptoms before linking them.
+11. **Incident severity** maps from symptom severity: critical → `critical`, warning → `high`, info → `medium`.
+12. **The triage tool `submit_incident_assessment`** may return `split_symptom_ids` (a proper subset of a candidate's symptoms) for a `split`. This is internal to P3, not a wire type.
 
 ---
 
