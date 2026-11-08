@@ -463,7 +463,7 @@ export function settleActions(ctx: Ctx, world: PhysicsWorld, completed: string[]
     const row = ctx.db.action.command_key.find(key);
     if (!row || row.status !== 'running') continue;
     const outcome = commandOutcome(world, key);
-    const ok = completed.includes(key) && (outcome?.ok ?? true);
+    const ok = completed.includes(key) && (outcome ? outcome.status === 'succeeded' : true);
     releaseLeases(ctx, row.action_id);
     transition(
       ctx,
