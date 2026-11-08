@@ -65,8 +65,9 @@ function Comparison({ view, source }: { view: ScoreboardView; source: string }) 
   const { cases, names, shortNames, columns } = view;
   const countLine = `${cases.length} matched scenario/seed cases · ${cases.length * policies.length} policy runs · ${source}`;
   return <>
+    <Hero view={view}/>
     <Headline view={view}/>
-    {view.claim.banner && <div className="sb-banner" role="note"><AlertTriangle size={16} aria-hidden="true"/><div><strong>Cannot substantiate a Nemotron performance claim</strong><p>{view.claim.banner}</p></div></div>}
+    {view.claim.banner &&<div className="sb-banner" role="note"><AlertTriangle size={16} aria-hidden="true"/><div><strong>Cannot substantiate a Nemotron performance claim</strong><p>{view.claim.banner}</p></div></div>}
     {/* the honesty point judges should see without clicking: every case where our column is worse on any metric */}
     <Outcomes title={`Cases where ${names.nemotron} loses or trades off`} open items={view.report.losses.flatMap((loss) => loss.worse.map((metric): Outcome => ({ scenario_id: loss.scenario_id, seed: loss.seed, baseline: loss.baseline, metric, ours: loss.nemotron[metric], theirs: loss.other[metric] })))} names={names} empty="No worse values on lost work, finite-horizon work deficit, GPU busy waste, unnecessary interventions, unsafe execution or failed recoveries."/>
     <details className="report-details sb-provenance"><summary>Batch provenance<small>{countLine}</small></summary>
@@ -81,12 +82,34 @@ function Comparison({ view, source }: { view: ScoreboardView; source: string }) 
 }
 
 const tallyText = (t: HeadlineTally) => `${plural(t.win, 'win')} · ${plural(t.tie, 'tie')} · ${plural(t.loss, 'loss', 'losses')}${t.unknown ? ` · ${t.unknown} unknown` : ''}`;
+/**
+ * Hero totals: the nemotron-policy column's lost-work case counts against both baselines, summed, plus the number of
+ * per-metric losses listed in the open "loses or trades off" disclosure. Case counts only; the provenance pill repeats
+ * the column header so the numbers are never read as a Nemotron performance claim on their own.
+ */
+function Hero({ view }: { view: ScoreboardView }) {
+  const ours = view.headline.find((column) => column.policy === 'nemotron');
+  if (!ours) return null;
+  const sum = (key: 'win' | 'tie' | 'loss') => ours.tallies.reduce((acc, t) => acc + t[key], 0);
+  const openLosses = view.report.losses.reduce((acc, loss) => acc + loss.worse.length, 0);
+  const pairs = ours.tallies.length;
+  const cells = [
+    { label: 'Wins', value: sum('win'), sub: `lost work lower than a baseline, ${pairs} pairings` },
+    { label: 'Ties', value: sum('tie'), sub: 'equal lost work' },
+    { label: 'Losses', value: sum('loss'), sub: 'lost work higher than a baseline' },
+    { label: 'Losses open', value: openLosses, sub: 'worse values on any metric, listed below' },
+  ];
+  return <section className="sb-hero" aria-label="Case counts for the nemotron-policy column">
+    {cells.map((cell) => <div key={cell.label} className="sb-hero-cell"><span className="sb-hero-label">{cell.label}</span><strong className="sb-hero-value">{cell.value}</strong><span className="sb-hero-sub">{cell.sub}</span></div>)}
+    <p className="sb-hero-note"><Badge tone={view.columns[2].uniform?.tone ?? 'warning'}>{view.columns[2].headline}</Badge>{view.names.nemotron} vs {view.headline.filter((c) => c.policy !== 'nemotron').map((c) => view.shortNames[c.policy]).join(' and ')} · {plural(view.cases.length, 'matched case')} · counts of cases, not percentages</p>
+  </section>;
+}
 /** First row: lost work per policy over the matched cases, with case-count tallies. Numbers come from `view.headline` only. */
 function Headline({ view }: { view: ScoreboardView }) {
   const { cases, shortNames, columns } = view;
   return <section className="sb-headline" aria-labelledby="sb-headline-heading">
     <h3 id="sb-headline-heading">Lost work over {plural(cases.length, 'matched case')}<span>work units, summed · lower is better · wins, ties and losses are case counts on lost work</span></h3>
-    <ul className="sb-headline-grid">{view.headline.map((column, index) => <li key={column.policy} className={column.lowest ? 'sb-headline-col sb-headline-lowest' : 'sb-headline-col'}>
+    <ul className="sb-headline-grid">{view.headline.map((column, index) => <li key={column.policy} className="sb-headline-col" data-lowest={column.lowest || undefined}>
       <span className="sb-headline-name">{shortNames[column.policy]}</span>
       <Badge tone={columns[index].uniform?.tone ?? 'warning'}>{columns[index].headline}</Badge>
       <strong className="sb-headline-value numeric">{fmt(column.lostWork)}</strong>

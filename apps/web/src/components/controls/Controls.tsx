@@ -6,6 +6,7 @@ import type { PumpId } from './fault-form';
 
 export { FaultControls, type FaultControlsProps } from './FaultControls';
 export { SafetyProbe, type SafetyProbeProps } from './SafetyProbe';
+export { DemoControls, type DemoControlsProps } from './DemoControls';
 
 /** Fault form plus the r6 safety probe; the probe renders only in presenter/admin mode. One component for every mode. */
 export function PresenterControls(props: FaultControlsProps) {
