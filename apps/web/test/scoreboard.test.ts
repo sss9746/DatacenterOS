@@ -6,9 +6,9 @@ import examples from '@dcos/contracts/schema/example-payloads.json';
 import { Scoreboard } from '../src/components/scoreboard/Scoreboard';
 import {
   buildScoreboard, columnName, comparisonConflicts, exportPayload, headlineColumns, matchedCases, metricInfo, metricLabel, metricValue, nemotronClaim, nemotronName,
-  provenanceKind, provenanceLabel, tally, tiesAndLosses, unfinishedTotal, verdict, type Provenance,
+  provenanceKind, provenanceLabel, provenanceLine, tally, tiesAndLosses, unfinishedTotal, verdict, type Provenance,
 } from '../src/components/scoreboard/scoreboard-view';
-import { REHEARSAL_BATCH } from '../src/data/rehearsal-batch';
+import { REAL_BATCH, REHEARSAL_BATCH } from '../src/data/rehearsal-batch';
 
 const base = (examples as Record<string, unknown>).evaluation_result_provenance as EvaluationResult;
 type Patch = Partial<Omit<EvaluationResult, 'provenance'>> & { provenance?: Partial<Provenance> | null };
@@ -250,5 +250,40 @@ describe('empty state', () => {
     expect(mock).toContain('Load deterministic rehearsal batch (mock only)');
     const live = renderToStaticMarkup(createElement(Scoreboard, { results: [], mode: 'live', onLoadRehearsal: () => {} }));
     expect(live).not.toContain('Load deterministic rehearsal batch');
+  });
+});
+
+describe('model-use provenance line (v2 benchmarks page)', () => {
+  it('sums the rows’ own counters for the measured Nemotron batch', () => {
+    const view = buildScoreboard(REAL_BATCH.rows);
+    expect(view.comparable).toBe(true);
+    expect(view.cases).toHaveLength(12);
+    expect(provenanceLine(view)).toBe('76 live Nemotron calls + 51 cached + 3 fallbacks across 127 model requests');
+    const html = renderToStaticMarkup(createElement(Scoreboard, { results: REAL_BATCH.rows, mode: 'mock' }));
+    expect(html).toContain('76 live Nemotron calls + 51 cached + 3 fallbacks');
+    expect(html).not.toContain('$');
+    expect(html.replace('No dollar or GPU-hour conversions.', '')).not.toMatch(/dollar|GPU-hours?/i);
+  });
+  it('names the deterministic batch as a deterministic planner and never as Nemotron calls', () => {
+    const line = provenanceLine(buildScoreboard(REHEARSAL_BATCH.rows));
+    expect(line).toContain('Deterministic planner');
+    expect(line).toContain('cannot substantiate a Nemotron performance claim');
+    expect(line).not.toMatch(/\d+ live Nemotron/);
+  });
+  it('says so when provenance is missing', () => {
+    const legacy = REHEARSAL_BATCH.rows.map((row) => ({ ...row, provenance: undefined })) as EvaluationResult[];
+    expect(provenanceLine(buildScoreboard(legacy))).toContain('Provenance unavailable');
+  });
+  it('never tints the lowest headline number when the nemotron rows are deterministic-only', () => {
+    const det = renderToStaticMarkup(createElement(Scoreboard, { results: REHEARSAL_BATCH.rows, mode: 'mock' }));
+    expect(det).not.toContain('data-lowest');
+  });
+  it('offers the Nemotron batch loader only in mock mode', () => {
+    const mock = renderToStaticMarkup(createElement(Scoreboard, { results: [], mode: 'mock', onLoadReal: () => {}, onLoadRehearsal: () => {} }));
+    expect(mock).toContain('Load Nemotron batch (mock only)');
+    expect(mock).toContain('Load deterministic rehearsal batch (mock only)');
+    expect(mock).toContain('No matched evaluation runs yet');
+    const live = renderToStaticMarkup(createElement(Scoreboard, { results: [], mode: 'live', onLoadReal: () => {}, onLoadRehearsal: () => {} }));
+    expect(live).not.toContain('Load Nemotron batch');
   });
 });
