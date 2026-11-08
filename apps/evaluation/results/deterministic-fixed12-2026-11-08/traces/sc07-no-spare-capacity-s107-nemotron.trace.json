@@ -1,0 +1,65 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "deterministic-fixed12-2026-11-08",
+  "run_id": "deterministic-fixed12-2026-11-08-sc07-no-spare-capacity-s107",
+  "scenario_id": "sc07-no-spare-capacity",
+  "seed": 107,
+  "policy": "nemotron",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 4,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "wf-policy-run-demo-1-if5dd1f2efdeb:checkpoint:job-a:1",
+      "action_id": "act:wf-policy-run-demo-1-if5dd1f2efdeb:checkpoint:job-a:1",
+      "operation": "checkpoint",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 978000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 979000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 1009000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "wf-policy-run-demo-1-if5dd1f2efdeb:pause_job:job-a:1",
+      "action_id": "act:wf-policy-run-demo-1-if5dd1f2efdeb:pause_job:job-a:1",
+      "operation": "pause_job",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 978000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 1010000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 1011000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    }
+  ]
+}

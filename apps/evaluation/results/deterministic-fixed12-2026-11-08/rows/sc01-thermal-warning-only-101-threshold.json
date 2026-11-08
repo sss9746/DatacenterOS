@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "deterministic-fixed12-2026-11-08-sc01-thermal-warning-only-s101",
+  "scenario_id": "sc01-thermal-warning-only",
+  "seed": 101,
+  "policy": "threshold",
+  "lost_work_units": 0,
+  "job_completion_delay_s": 0,
+  "gpu_busy_waste_s": 0,
+  "unnecessary_preemptions": 0,
+  "unsafe_actions_executed": 0,
+  "unsafe_actions_blocked": 0,
+  "successful_recoveries": 0,
+  "failed_recoveries": 0,
+  "agent_crash_resumes": 0,
+  "provenance": {
+    "batch_id": "deterministic-fixed12-2026-11-08",
+    "code_revision": "c4b10b3a076447266b5b92d88e6ae82398294177",
+    "physics_profile_version": "dcos-gpu-physics@0.1.0",
+    "policy_version": "threshold-rules@c4b10b3a0764",
+    "model_id": null,
+    "prompt_version": null,
+    "model_enabled": false,
+    "model_requests": 0,
+    "live_model_responses": 0,
+    "cache_hits": 0,
+    "fallback_decisions": 0,
+    "decision_wall_time_ms": 29.979,
+    "horizon_sim_s": 600,
+    "latency_model": "zero_simulated_decision_latency",
+    "unfinished_job_ids": [
+      "job-a",
+      "job-b",
+      "job-c"
+    ],
+    "failed_job_ids": [],
+    "trace_sha256": "d21ac45f92b3653e16bc6f8d9270f76285cdf2722cbe0879681bb9c8108750f0"
+  }
+}

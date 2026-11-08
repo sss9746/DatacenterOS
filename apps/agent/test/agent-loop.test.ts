@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { ActionCommand, SignalEvent } from '@dcos/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAgentLoop, LLM_UNAVAILABLE_NOTICE, withLlmCircuitBreaker, type AgentLoop, type AgentLoopDeps } from '../src/agent-loop.js';
+import { handoffMissingFields, readHandoff } from '../src/verify.js';
 import { AdapterNotReadyError } from '../src/adapters/errors.js';
 import { createDbPort, DB_PORT_METHODS } from '../src/adapters/db.js';
 import { createPhysicsPort, PHYSICS_NOT_READY_MESSAGE } from '../src/adapters/physics.js';
@@ -236,7 +237,39 @@ describe('createAgentLoop.runOnce', () => {
     const r = await makeLoop(w, { requireApproval: true }).runOnce();
     expect(r.escalated).toBe(true);
     expect(w.db.listActions()).toHaveLength(0);
-    expect((await w.db.getWorkflow(r.workflow_id!))?.stage).toBe('escalated');
+    const wf = await w.db.getWorkflow(r.workflow_id!);
+    expect(wf?.stage).toBe('escalated');
+    // R3: an escalation before executing still leaves a complete durable handoff for the next process / operator
+    const h = await readHandoff(w.db, r.workflow_id!);
+    expect(h).not.toBeNull();
+    expect(handoffMissingFields(h)).toEqual([]);
+    expect(h).toMatchObject({ outcome: 'operator_review', verified: false, escalate: true, source: 'code' });
+    expect(h!.handoff).toContain('planner flagged needs_approval');
+    expect(h!.affected_jobs.map((j) => j.job_id)).toEqual(expect.arrayContaining(['job-a']));
+    expect(h!.unresolved_infrastructure.some((u) => u.startsWith('pump-a degraded'))).toBe(true);
+    expect(h!.next_human_action).toContain('service pump-a');
+  });
+
+  it('R3: the happy-path handoff is durable and complete (fresh connection reads every required field)', async () => {
+    const w = world();
+    const r = await makeLoop(w).runOnce();
+    expect(r.verification?.verified).toBe(true);
+    const h = await readHandoff(w.db, r.workflow_id!);
+    expect(handoffMissingFields(h)).toEqual([]);
+    expect(h!.outcome).toBe('recovered');
+    expect(h!.evidence.incident_ids).toEqual(r.new_incident_ids);
+    expect(h!.evidence.hypotheses[0]).toMatch(/^inc-/);
+    expect(h!.actions.verified).toEqual(h!.actions.completed);
+    expect(h!.actions.completed.length).toBeGreaterThanOrEqual(2);
+    expect(h!.checkpoint_outcome.some((c) => c.job_id === 'job-a' && c.status === 'complete')).toBe(true);
+    expect(h!.placement_outcome.find((p) => p.job_id === 'job-a')!.gpu_ids).toHaveLength(16);
+    expect(h!.verification_interval_sim_ms[1] - h!.verification_interval_sim_ms[0]).toBeGreaterThanOrEqual(10_000);
+    expect(h!.unresolved_infrastructure.some((u) => u.startsWith('pump-a degraded') && u.endsWith('needs human service'))).toBe(true);
+    expect(h!.handoff).not.toMatch(/(?<!not )(repaired|fixed)/i);
+    // the power_cap on job-b was read back (limit applied, progress), not taken from the ledger
+    const cap = r.verification!.checks.find((c) => c.operation === 'power_cap');
+    expect(cap?.ok).toBe(true);
+    expect((cap?.evidence.gpus as Array<{ power_limit_w: number }>).every((g) => g.power_limit_w === 500)).toBe(true);
   });
 
   it('an incident that affects no running job closes as monitoring (no actions)', async () => {
@@ -248,6 +281,11 @@ describe('createAgentLoop.runOnce', () => {
     expect(r.status).toBe('handled');
     expect(r.plans[0]!.commands).toHaveLength(0);
     expect(r.escalated).toBe(false);
+    const h = await readHandoff(db, r.workflow_id!);
+    expect(handoffMissingFields(h)).toEqual([]);
+    expect(h).toMatchObject({ outcome: 'recovered', verified: true });
+    expect(h!.handoff).toMatch(/^No recovery action needed/);
+    expect(h!.unresolved_infrastructure.some((u) => u.includes('XID 79') && u.endsWith('needs hardware service'))).toBe(true);
     expect(db.listActions()).toHaveLength(0);
     expect((await db.getWorkflow(r.workflow_id!))?.stage).toBe('done');
     expect([...db.incidents.values()].map((i) => i.state)).toEqual(['monitoring']);

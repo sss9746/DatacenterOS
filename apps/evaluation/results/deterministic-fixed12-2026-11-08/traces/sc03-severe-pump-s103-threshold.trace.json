@@ -1,0 +1,113 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "deterministic-fixed12-2026-11-08",
+  "run_id": "deterministic-fixed12-2026-11-08-sc03-severe-pump-s103",
+  "scenario_id": "sc03-severe-pump",
+  "seed": 103,
+  "policy": "threshold",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 60,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "threshold.job-b.checkpoint.after.ckpt-job-b-1",
+      "action_id": "threshold.job-b.checkpoint.after.ckpt-job-b-1",
+      "operation": "checkpoint",
+      "job_id": "job-b",
+      "target_resource_id": "job-b",
+      "issued_sim_time_ms": 802000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 803000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 833000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "threshold.job-b.migrate_restart.after.ckpt-job-b-1",
+      "action_id": "threshold.job-b.migrate_restart.after.ckpt-job-b-1",
+      "operation": "migrate_restart",
+      "job_id": "job-b",
+      "target_resource_id": "job-b",
+      "issued_sim_time_ms": 802000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 834000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 954000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": "succeeded",
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "threshold.job-a.checkpoint.after.ckpt-job-a-1",
+      "action_id": "threshold.job-a.checkpoint.after.ckpt-job-a-1",
+      "operation": "checkpoint",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 803000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 804000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 834000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "threshold.job-a.migrate_restart.after.ckpt-job-a-1",
+      "action_id": "threshold.job-a.migrate_restart.after.ckpt-job-a-1",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 803000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 835000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 955000
+      },
+      "dependency_reason": null,
+      "preemptive": true,
+      "unnecessary": false,
+      "recovery": "succeeded",
+      "unsafe_executed": []
+    }
+  ]
+}

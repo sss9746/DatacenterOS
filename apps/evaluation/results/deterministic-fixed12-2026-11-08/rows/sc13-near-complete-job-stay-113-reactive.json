@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "deterministic-fixed12-2026-11-08-sc13-near-complete-job-stay-s113",
+  "scenario_id": "sc13-near-complete-job-stay",
+  "seed": 113,
+  "policy": "reactive",
+  "lost_work_units": 0,
+  "job_completion_delay_s": 0,
+  "gpu_busy_waste_s": 0,
+  "unnecessary_preemptions": 0,
+  "unsafe_actions_executed": 0,
+  "unsafe_actions_blocked": 0,
+  "successful_recoveries": 0,
+  "failed_recoveries": 0,
+  "agent_crash_resumes": 0,
+  "provenance": {
+    "batch_id": "deterministic-fixed12-2026-11-08",
+    "code_revision": "c4b10b3a076447266b5b92d88e6ae82398294177",
+    "physics_profile_version": "dcos-gpu-physics@0.1.0",
+    "policy_version": "reactive-rules@c4b10b3a0764",
+    "model_id": null,
+    "prompt_version": null,
+    "model_enabled": false,
+    "model_requests": 0,
+    "live_model_responses": 0,
+    "cache_hits": 0,
+    "fallback_decisions": 0,
+    "decision_wall_time_ms": 10.662,
+    "horizon_sim_s": 420,
+    "latency_model": "zero_simulated_decision_latency",
+    "unfinished_job_ids": [
+      "job-a",
+      "job-c"
+    ],
+    "failed_job_ids": [],
+    "trace_sha256": "29eadb52b35c2a226718b41d5ba16f0516467a3f88600222528e13071a0a7369"
+  }
+}

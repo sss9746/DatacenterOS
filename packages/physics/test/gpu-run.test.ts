@@ -220,13 +220,21 @@ describe('runScenario: the safety gate', () => {
     expect(d.commands[0]!.safety.violations).toContain('DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT');
   });
 
-  it('gate none: a move onto the hot r1 + r5 (sc09) is denied at request time AND its destination overheats: counted once', async () => {
+  it('gate none: a move onto the hot r1 + r5 (sc09) is denied at request time, executed, and refused at restart completion: counted once', async () => {
     const hotDest: Policy = (obs) => (obs.clock.sim_time_ms >= T0 + 15_000
       ? [mk(obs, 'migrate_restart', 'job-a', 'hot-move-job-a', { destination_gpu_ids: gpusOn(1, 5) })]
       : []);
     const open = await runScenarioDetailed(sc('sc09-hot-destination'), hotDest, { policy_name: 'nemotron', gate: 'none' });
-    expect(open.commands[0]).toMatchObject({ disposition: 'executed', unsafe_executed: ['SAFETY_DENY', 'DEST_REACHED_SLOWDOWN'] });
-    expect(open.result.unsafe_actions_executed).toBe(1);
+    // R1 (SCOPE §4): the naive operator starts the move, but the phase-aware restart completion re-projects the
+    // destination's thermal headroom and refuses it, so job-a never runs hot there (no DEST_REACHED_SLOWDOWN); the
+    // executed command is unsafe for its request-time deny alone and is counted once. job-a ends failed, unplaced.
+    expect(open.commands[0]).toMatchObject({
+      disposition: 'executed', unsafe_executed: ['SAFETY_DENY'],
+      outcome: { status: 'failed', reason_code: 'DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT', sim_time_ms: open.commands[0]!.requested_sim_time_ms! + 120_000 },
+      recovery: 'failed',
+    });
+    expect(open.result).toMatchObject({ unsafe_actions_executed: 1, failed_recoveries: 1, successful_recoveries: 0 });
+    expect(open.failed_job_ids).toContain('job-a');
     const gated = await runScenario(sc('sc09-hot-destination'), hotDest, { policy_name: 'nemotron' });
     expect(gated).toMatchObject({ unsafe_actions_executed: 0, unsafe_actions_blocked: 1 });
     // blocked → nothing physical happened: the same world as do-nothing

@@ -81,6 +81,14 @@ async function world(snapshot: 'pump_degraded' | ObservedSnapshot, shims: Shims 
   return { mock, db, physics: shimPhysics(physics, shims), wall, sim: () => sim, sleep, hooks };
 }
 
+/**
+ * Workflow lease for these loops. Leases here run on REAL wall time (the mock's `now`), and the real-physics planner is
+ * CPU-bound: under a parallel vitest run the default 15 s lease can lapse inside one synchronous planning stretch and
+ * the loop honestly reports `lost_ownership`. A longer lease keeps the ownership assertions about the protocol, not
+ * about CI load. The dead-worker expiry below jumps the wall clock past this value.
+ */
+const TEST_LEASE_MS = 4 * DEFAULT_LEASE_MS;
+
 const loops: AgentLoop[] = [];
 function makeLoop(w: World, over: Partial<AgentLoopDeps> = {}): AgentLoop {
   const db = over.db ?? w.db;
@@ -88,7 +96,7 @@ function makeLoop(w: World, over: Partial<AgentLoopDeps> = {}): AgentLoop {
   const events = over.events ?? createEventPublisher({ db, runId: RUN_ID, clock, redact: (s) => s });
   const loop = createAgentLoop({
     db, physics: w.physics, llm: null, events, workerId: 'worker-1', runId: RUN_ID, clock, sleep: w.sleep,
-    log: () => undefined, pollMs: 50, debounceMs: 10, ...over,
+    log: () => undefined, pollMs: 50, debounceMs: 10, leaseMs: TEST_LEASE_MS, ...over,
   });
   loops.push(loop);
   return loop;
@@ -202,7 +210,7 @@ describe('crash / resume on P2 mock', () => {
     await k.killed;
     expect(killedKey).not.toBeNull();
     for (let i = 0; i < 5; i += 1) w.mock.tick(1000);
-    w.wall.offset += Math.max(CLAIM_LEASE_MS, DEFAULT_LEASE_MS) + 1_000;
+    w.wall.offset += Math.max(CLAIM_LEASE_MS, TEST_LEASE_MS) + 1_000;
 
     const before = perKey(w.mock);
     const clock = { unixMs: () => w.wall.now, simTimeMs: w.sim };
