@@ -70,8 +70,27 @@ export interface NemotronPolicyDeps {
   deferRecheckS?: number | null;
 }
 
+/**
+ * Per-instance usage counters for evaluation provenance (CONTRACTS 0.14). They accumulate over the instance's lifetime
+ * and are NOT cleared by reset(); read them (usage()) before the instance is discarded.
+ */
+export interface PolicyUsage {
+  /** Requests attempted through the model/cache port (cache hits included). 0 when no model is configured. */
+  model_requests: number;
+  /** Successful uncached model responses. */
+  live_model_responses: number;
+  /** Responses replayed from the disk cache. */
+  cache_hits: number;
+  /** Planner selections made without a usable model choice (no model configured, model error or unusable reply). */
+  fallback_decisions: number;
+  /** Total wall time spent inside policy calls, ms. */
+  decision_wall_time_ms: number;
+}
+
 export type NemotronPolicy = Policy & {
   stats(): PolicyStats;
+  /** Provenance counters; survive reset(). */
+  usage(): PolicyUsage;
   /** Forget the event-driven memo (call between scenarios; sim time going backwards also resets it). */
   reset(): void;
 };
@@ -121,11 +140,11 @@ export const cacheKey = (req: LlmChatRequest, model: string): string =>
 
 interface CachedLlm {
   port: LlmPort;
-  counts: { requests: number; hits: number };
+  counts: { requests: number; hits: number; live: number };
 }
 
 function withDiskCache(inner: LlmPort, dir: string, model: string): CachedLlm {
-  const counts = { requests: 0, hits: 0 };
+  const counts = { requests: 0, hits: 0, live: 0 };
   const port: LlmPort = {
     async chat(req) {
       counts.requests += 1;
@@ -138,6 +157,7 @@ function withDiskCache(inner: LlmPort, dir: string, model: string): CachedLlm {
         // miss or unreadable entry: fall through to the live call
       }
       const res = await inner.chat(req); // errors propagate and are never cached
+      counts.live += 1;
       try {
         await mkdir(dir, { recursive: true });
         const tmp = `${file}.${process.pid}.tmp`;
@@ -175,7 +195,7 @@ export function newSupersedeTriggers(obs: ObservedSnapshot, issued: readonly Act
 }
 
 export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
-  const stats = { calls: 0, llmFailures: 0, uncachedRequests: 0, unchangedSkips: 0, replans: 0, deferredRechecks: 0 };
+  const stats = { calls: 0, llmFailures: 0, uncachedRequests: 0, uncachedResponses: 0, wallMs: 0, unchangedSkips: 0, replans: 0, deferredRechecks: 0 };
   const eventDriven = (deps.cadence ?? 'event-driven') === 'event-driven';
   const recheckS = deps.deferRecheckS === undefined ? DEFER_RECHECK_S : deps.deferRecheckS;
   // recheckAtMs: a deferred mitigation's re-check (planner rule (b)); re-plan then even if nothing observable changed
@@ -202,12 +222,14 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
       ? {
           async chat(req) {
             stats.uncachedRequests += 1;
-            return inner.chat(req);
+            const res = await inner.chat(req);
+            stats.uncachedResponses += 1;
+            return res;
           },
         }
       : null;
 
-  const policy: Policy = async (obs, ctx) => {
+  const decide: Policy = async (obs, ctx) => {
     stats.calls += 1;
     const runId = deps.runId ?? obs.run_id;
     const signals = typeof deps.signals === 'function' ? deps.signals(obs) : (deps.signals ?? []);
@@ -253,7 +275,23 @@ export function createNemotronPolicy(deps: NemotronPolicyDeps): NemotronPolicy {
     return result.commands;
   };
 
+  const policy: Policy = async (obs, ctx) => {
+    const t0 = performance.now();
+    try {
+      return await decide(obs, ctx);
+    } finally {
+      stats.wallMs += performance.now() - t0;
+    }
+  };
+
   return Object.assign(policy, {
+    usage: (): PolicyUsage => ({
+      model_requests: cached ? cached.counts.requests : stats.uncachedRequests,
+      live_model_responses: cached ? cached.counts.live : stats.uncachedResponses,
+      cache_hits: cached?.counts.hits ?? 0,
+      fallback_decisions: stats.llmFailures,
+      decision_wall_time_ms: stats.wallMs,
+    }),
     stats: (): PolicyStats => ({
       calls: stats.calls,
       cacheHits: cached?.counts.hits ?? 0,
@@ -289,13 +327,18 @@ export function configureDefaultNemotronPolicy(physics: PhysicsPort): NemotronPo
 
 const EMPTY_STATS: PolicyStats = { calls: 0, cacheHits: 0, llmFailures: 0, llmRequests: 0, unchangedSkips: 0, replans: 0, deferredRechecks: 0 };
 
+const EMPTY_USAGE: PolicyUsage = { model_requests: 0, live_model_responses: 0, cache_hits: 0, fallback_decisions: 0, decision_wall_time_ms: 0 };
+
 /** Default policy; call `configureDefaultNemotronPolicy(physics)` once before use. */
 export const nemotronPolicy: NemotronPolicy = Object.assign(
   (async (obs, ctx) => {
     if (!defaultPolicy) throw new Error('nemotronPolicy: call configureDefaultNemotronPolicy(physics) first');
     return defaultPolicy(obs, ctx);
   }) as Policy,
-  { stats: (): PolicyStats => defaultPolicy?.stats() ?? EMPTY_STATS, reset: (): void => defaultPolicy?.reset() },
+  {
+    stats: (): PolicyStats => defaultPolicy?.stats() ?? EMPTY_STATS,
+    usage: (): PolicyUsage => defaultPolicy?.usage() ?? EMPTY_USAGE,
+    reset: (): void => defaultPolicy?.reset() },
 );
 
 /** Scoreboard disclosure (ARCHITECTURE §9): model, fallback, cache and the event-driven cadence. */

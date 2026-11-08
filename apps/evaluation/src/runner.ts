@@ -1,5 +1,5 @@
 import { type ActionCommand, type ObservedSnapshot, type EvaluationResult } from '@dcos/contracts';
-import { policies, requireResult, summarizeResults } from './report.js';
+import { assertConsistentProvenance, policies, requireResult, summarizeResults } from './report.js';
 
 // P4 orchestration boundary, not a replacement physics model. The adapter binds
 // P1's trusted runScenario and P3's observable-only policy after their exports land.
@@ -41,8 +41,14 @@ export async function runMatrix(adapter: EvaluationAdapter, onResult: (result: E
       if (row.scenario_id !== scenario.scenario_id || row.seed !== scenario.seed || row.policy !== name) throw new Error(`Runner identity mismatch for ${scenario.scenario_id}/${name}.`);
       const peer = results.find((r) => r.scenario_id === row.scenario_id && r.seed === row.seed);
       if (peer && peer.run_id !== row.run_id) throw new Error('All policy results in a comparison must use the same run_id.');
-      await onResult(row); results.push(row);
+      results.push(row);
+      assertConsistentProvenance(results);
+      await onResult(row);
     }
   }
-  return { results, report: summarizeResults(results), provenance: adapter.provenance, policy_stats: adapter.getPolicyStats?.() ?? null, unfinished_jobs: null };
+  // Unfinished jobs come only from per-row provenance (runScenarioDetailed details); unknown stays null, never zero.
+  const unfinished = results.every((r) => r.provenance)
+    ? results.map((r) => ({ scenario_id: r.scenario_id, seed: r.seed, policy: r.policy, unfinished_job_ids: r.provenance!.unfinished_job_ids, failed_job_ids: r.provenance!.failed_job_ids }))
+    : null;
+  return { results, report: summarizeResults(results), provenance: adapter.provenance, policy_stats: adapter.getPolicyStats?.() ?? null, unfinished_jobs: unfinished };
 }
