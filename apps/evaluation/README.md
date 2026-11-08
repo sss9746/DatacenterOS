@@ -10,19 +10,19 @@ This package orchestrates evaluations and reports measured outputs. It does **no
 
 `src/main.ts` writes per-run JSON atomically and a batch summary with physics/policy provenance and optional policy cache/fallback statistics. `--publish` explicitly sends real result rows through the admin client's `publishEvaluationResult`. Nothing is published by default.
 
-## Integration still required
+## Checked-in team adapter (R6)
 
-P1 has not shipped `loadScenarios`, GPU `runScenario`, `reactivePolicy`, or `thresholdPolicy` on the current base. P3's policy exists on its own branch but has not been integrated here. The exact P1 runner call signature is not frozen in the shared contracts. Supply a small adapter after P1 confirms it; do not guess or copy a simulator into this package.
-
-The adapter default-exports the `EvaluationAdapter` type from `src/runner.ts`: `loadScenarios`, `runScenario`, the three policy functions, explicit physics/policy versions, and optional `getPolicyStats`. Its `runScenario` delegates to P1 and returns the canonical `EvaluationResult`, with the same `run_id` across a comparison's policies. It must not pass scenario truth to policy functions.
+`src/team-adapter.ts` binds P1 (`loadScenarios`, `runScenarioDetailed`, real `reactivePolicy`/`thresholdPolicy`) and a fresh P3 `createNemotronPolicy` per case to `EvaluationAdapter`. It delegates all computation. One comparison `run_id` (`<batch_id>-<scenario_id>-s<seed>`) is shared by the three policies. Every row carries CONTRACTS 0.14 provenance: usage counters captured before the Nemotron instance is dropped (`reset()` does not clear them), `unfinished_job_ids`/`failed_job_ids` read from `runScenarioDetailed().details` (an absent list is an error, never zero), `code_revision` (git HEAD, read by the CLI), `horizon_sim_s`, `latency_model`, and `trace_sha256` of the saved canonical trace. `runMatrix` and `provenanceConflicts` refuse mixed batch/revision/horizon.
 
 ```sh
-corepack pnpm --filter @dcos/evaluation evaluate --adapter /absolute/path/to/team-adapter.ts
-# Explicit admin publication, only once live integration is available:
-corepack pnpm --filter @dcos/evaluation evaluate --adapter /absolute/path/to/team-adapter.ts --publish
-corepack pnpm --filter @dcos/evaluation test
+# 12 preselected cases (sc01 sc03 sc04 sc05 sc07 sc08 sc09 sc10 sc11 sc13 sc14 sc17), deterministic-only Nemotron path
+pnpm --filter @dcos/evaluation run evaluate --cases fixed12 --no-llm --out results/<dir>
+# live NIM (needs NIM_API_KEY/NIM_MODEL), cached responses disclosed per row
+pnpm --filter @dcos/evaluation run evaluate --cases fixed12 --out results/<dir> [--max-live-calls 60]
 ```
 
-Without an adapter the command exits with an actionable error and produces no results. Test numbers exist only inside tests. No evaluated results are committed.
+Output: `rows/*.json` (validated `EvaluationResult` with provenance), `traces/*.trace.json`, `manifest.json` (batch id, code revision, profile/policy/prompt versions, horizons, case list, per-row mode label) and `summary.json`. `--no-llm` rows have `model_enabled: false` and honest fallback counts; they cannot support a Nemotron performance claim. `job_completion_delay_s` is a finite-horizon work deficit, not wall completion time; wall decision time is recorded separately in provenance. The adapter imports physics/agent sources by relative path (no new workspace dependency).
 
-The current wire schema has no unfinished-job count, version fields, or cache/fallback provenance. The local summary preserves available provenance, but P2/P1 must agree on an additive public representation before the scoreboard can certify Gate 4. See [handoff](../../docs/p4-handoff.md).
+## Custom adapters
+
+`--adapter /path/to/adapter.ts` still loads any default-exported `EvaluationAdapter`; `--publish` sends rows through the admin client only on explicit request.
