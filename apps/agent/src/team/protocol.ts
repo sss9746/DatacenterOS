@@ -93,7 +93,18 @@ export const TEAM_MESSAGE_TOOL = 'team_message';
 const idList = z.array(z.string().min(1));
 const text = z.string().trim().min(1);
 
-/** `question_for_peer` is required; a null question must say why none is needed. */
+/**
+ * Recorded when a model sets `question_for_peer` to null but gives no reason. The reason is
+ * code-authored, never the model's words, so surfaces must not attribute it to the model.
+ */
+export const NO_QUESTION_REASON_UNSTATED = 'not stated by the model (recorded by code)';
+
+/**
+ * `question_for_peer` is required; a null question should say why none is needed. When the reason is
+ * missing we record {@link NO_QUESTION_REASON_UNSTATED} instead of rejecting the whole finding: the
+ * summary and evidence are still usable by the Lead, and dropping them cost the peer conversation in
+ * the 2026-11-08 L3 dev run. A reason the model *did* give is kept verbatim.
+ */
 export const submitFindingArgsSchema = z
   .object({
     summary: text,
@@ -102,11 +113,11 @@ export const submitFindingArgsSchema = z
     question_for_peer: text.nullable(),
     no_question_reason: text.nullish(),
   })
-  .superRefine((v, ctx) => {
-    if (v.question_for_peer === null && !v.no_question_reason) {
-      ctx.addIssue({ code: 'custom', path: ['no_question_reason'], message: 'a null question_for_peer must carry a reason' });
-    }
-  });
+  .transform((v) => ({
+    ...v,
+    no_question_reason:
+      v.question_for_peer === null ? (v.no_question_reason ?? NO_QUESTION_REASON_UNSTATED) : v.no_question_reason,
+  }));
 export type SubmitFindingArgs = z.infer<typeof submitFindingArgsSchema>;
 
 export const answerPeerArgsSchema = z.object({

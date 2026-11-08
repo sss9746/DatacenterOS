@@ -227,8 +227,9 @@ class TeamRound {
     if (!tc) return this.unusable(session.role, res);
     const args = parseArgs(submitFindingArgsSchema, tc);
     if (!args) return this.reject(session.role, `finding rejected: invalid arguments (${invalidFields(submitFindingArgsSchema, tc)})`);
-    const refused = unknownCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
-    if (refused) return this.reject(session.role, `finding rejected: ${refused}`);
+    const citations = groundCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
+    if (citations?.kind === 'refuse') return this.reject(session.role, `finding rejected: ${citations.reason}`);
+    if (citations) this.note(session.role, `finding citations: ${citations.reason}`);
 
     remember(session, tc);
     const message = this.post(session.role, 'lead', 'finding', args.summary, null, args.evidence_ids, args.resource_ids);
@@ -260,11 +261,12 @@ class TeamRound {
         this.reject(responder, `answer rejected: invalid arguments (${invalidFields(answerPeerArgsSchema, tc)})`);
         continue;
       }
-      const refused = unknownCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
-      if (refused) {
-        this.reject(responder, `answer rejected: ${refused}`);
+      const citations = groundCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
+      if (citations?.kind === 'refuse') {
+        this.reject(responder, `answer rejected: ${citations.reason}`);
         continue;
       }
+      if (citations) this.note(responder, `answer citations: ${citations.reason}`);
       remember(session, tc);
       this.post(responder, asker, 'answer', args.answer, question.id, args.evidence_ids, args.resource_ids);
     }
@@ -293,11 +295,12 @@ class TeamRound {
     }
     const evidence = new Set([...failedBundle.evidence_ids, ...coverer.bundle.evidence_ids]);
     const resources = new Set([...failedBundle.resource_ids, ...coverer.bundle.resource_ids]);
-    const refused = unknownCitations(args, evidence, resources);
-    if (refused) {
-      this.reject(coverer.role, `cover rejected: ${refused}`);
+    const citations = groundCitations(args, evidence, resources);
+    if (citations?.kind === 'refuse') {
+      this.reject(coverer.role, `cover rejected: ${citations.reason}`);
       return;
     }
+    if (citations) this.note(coverer.role, `cover citations: ${citations.reason}`);
     this.post(coverer.role, 'lead', 'cover', args.summary, null, args.evidence_ids, args.resource_ids);
     this.covers.push({ failed_role: failedRole, covered_by: coverer.role });
     this.missing.delete(failedRole);
@@ -473,6 +476,14 @@ class TeamRound {
     return null;
   }
 
+  /**
+   * A code-authored correction that leaves the reply usable: unlike {@link reject} the call stays `ok`, the role is
+   * not counted missing and no cover is triggered, so the specialist can still answer its peer.
+   */
+  private note(role: SpecialistRole, reason: string): void {
+    this.post('supervisor', role, 'objection', reason, null, [], []);
+  }
+
   /** The reason is code-authored: rejected model text and ids are not repeated into the trace. */
   private reject(role: SpecialistRole, reason: string): null {
     this.refuseLatest(role);
@@ -541,19 +552,36 @@ function invalidFields(schema: { safeParse(v: unknown): { success: boolean; erro
 }
 
 /**
- * Null when every citation exists in the bundle; otherwise a reason that repeats no model text. A real resource id
- * placed in evidence_ids (seen live from Nemotron) is moved to resource_ids in `args`, since it is still grounded in
- * the bundle. An id found in neither set is treated as invented and the whole reply is refused.
+ * What to do with a reply's citations. `note` keeps the reply usable and records the correction; `refuse` discards it.
  */
-function unknownCitations(args: { evidence_ids: string[]; resource_ids: string[] }, evidence: ReadonlySet<string>, resources: ReadonlySet<string>): string | null {
+type CitationOutcome = { kind: 'note'; reason: string } | { kind: 'refuse'; reason: string } | null;
+
+/**
+ * Keeps only the citations that exist in the bundle, or null when every one was already grounded. A real resource id
+ * placed in evidence_ids (seen live from Nemotron) moves to resource_ids, since it is still grounded in the bundle.
+ *
+ * An id in neither set is invented. When grounded citations remain it is dropped rather than refused, because the
+ * summary and the surviving citations are still usable by the Lead and refusing whole replies is what cost the peer
+ * conversation in the 2026-11-08 L3 `dcos-dev` run. When *nothing* grounded remains the reply is refused instead: a
+ * claim whose entire basis was invented must not reach the Lead or any surface, since the summary text is kept
+ * verbatim and would otherwise ship the invented numbers without their ids (WORKFLOW-TAB-INTEGRATION, honesty rules).
+ *
+ * Counts only — an invented id is model text and never reaches the trace.
+ */
+function groundCitations(args: { evidence_ids: string[]; resource_ids: string[] }, evidence: ReadonlySet<string>, resources: ReadonlySet<string>): CitationOutcome {
   const misfiled = args.evidence_ids.filter((id) => !evidence.has(id) && resources.has(id));
   const badEvidence = args.evidence_ids.filter((id) => !evidence.has(id) && !resources.has(id)).length;
   const badResources = args.resource_ids.filter((id) => !resources.has(id)).length;
-  if (badEvidence > 0 || badResources > 0) return `${badEvidence} unknown evidence id(s), ${badResources} unknown resource id(s)`;
   args.evidence_ids = args.evidence_ids.filter((id) => evidence.has(id));
-  args.resource_ids = [...new Set([...args.resource_ids, ...misfiled])];
-  if (evidence.size > 0 && args.evidence_ids.length === 0 && misfiled.length === 0) return 'no evidence cited';
-  return null;
+  args.resource_ids = [...new Set([...args.resource_ids.filter((id) => resources.has(id)), ...misfiled])];
+  const dropped = [
+    badEvidence > 0 ? `${badEvidence} unknown evidence id(s)` : null,
+    badResources > 0 ? `${badResources} unknown resource id(s)` : null,
+  ].filter((p): p is string => p !== null);
+  const uncited = evidence.size > 0 && args.evidence_ids.length === 0 && misfiled.length === 0;
+  if (uncited) return { kind: 'refuse', reason: dropped.length ? `${dropped.join(' and ')}, no grounded evidence remains` : 'no evidence cited' };
+  if (dropped.length === 0) return null;
+  return { kind: 'note', reason: `dropped ${dropped.join(' and ')}` };
 }
 
 /** Keeps the accepted tool call in the specialist's own session, so its next input is a real continuation. */

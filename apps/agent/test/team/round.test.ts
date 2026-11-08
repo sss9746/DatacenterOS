@@ -4,7 +4,16 @@ import { planIncidents, type ChooserResult, type PlanResult } from '../../src/pl
 import type { LlmChatRequest, LlmChatResponse } from '../../src/ports.js';
 import { LlmUnavailableError } from '../../src/llm.js';
 import { CHOOSE_OPTIONS_TOOL_NAME } from '../../src/prompts/planner.js';
-import { TEAM_LIMITS, boundMessage, boundTrace, teamFeedEvents, type TeamMessage, type TeamTrace } from '../../src/team/protocol.js';
+import {
+  NO_QUESTION_REASON_UNSTATED,
+  TEAM_LIMITS,
+  boundMessage,
+  boundTrace,
+  submitFindingArgsSchema,
+  teamFeedEvents,
+  type TeamMessage,
+  type TeamTrace,
+} from '../../src/team/protocol.js';
 import { ROLE_EVIDENCE_MAX_BYTES } from '../../src/team/roles.js';
 import { TEAM_BUDGET, createTeamChooser } from '../../src/team/round.js';
 import { FakeDb, FakeLlm, FakePhysics } from '../fakes/index.js';
@@ -264,8 +273,8 @@ describe('cover', () => {
     let n = 0;
     const llm = teamLlm({
       'cooling:submit_finding': () => Promise.reject(new Error('boom')),
-      'workload:submit_finding': () =>
-        FakeLlm.toolCall('submit_finding', n++ === 0 ? WORKLOAD_FINDING : { ...WORKLOAD_FINDING, evidence_ids: ['made-up'] }),
+      // The cover's own reply is unrepairable (an empty summary), so dropping citations cannot rescue it.
+      'workload:submit_finding': () => FakeLlm.toolCall('submit_finding', n++ === 0 ? WORKLOAD_FINDING : { ...WORKLOAD_FINDING, summary: '' }),
     });
     const r = await plan(llm);
     expect(r.team!.covers).toEqual([]);
@@ -285,13 +294,16 @@ describe('cover', () => {
 });
 
 describe('validation', () => {
-  it('rejects a finding citing an unknown evidence id and treats the role as failed', async () => {
+  it('refuses a finding whose only evidence id was invented, and treats the role as failed', async () => {
     const llm = teamLlm({ 'workload:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...WORKLOAD_FINDING, evidence_ids: ['no-such-event'] }) });
     const r = await plan(llm);
+    // Dropping the id would leave nothing grounded, and the summary is kept verbatim, so the whole claim goes.
     expect(messagesOf(r, 'finding').map((m) => m.from)).toEqual(['cooling']);
     const objection = messagesOf(r, 'objection');
     expect(objection).toHaveLength(1);
     expect(objection[0]!.from).toBe('supervisor');
+    expect(objection[0]!.summary).toContain('no grounded evidence remains');
+    // The reason is counts only: the invented id is model text and must not reach the trace.
     expect(JSON.stringify(r.team)).not.toContain('no-such-event');
     expect(requestsFor(llm, LEAD).map(lastUser).join()).not.toContain(WORKLOAD_FINDING.summary);
     expect(requestsFor(llm, 'cooling:submit_finding')).toHaveLength(2); // Cooling covered
@@ -306,17 +318,31 @@ describe('validation', () => {
     expect(r.team!.covers).toEqual([]);
   });
 
-  it('rejects a finding citing a resource outside the role bundle', async () => {
+  it('keeps a finding citing a resource outside the role bundle, dropping that id', async () => {
     const llm = teamLlm({ 'cooling:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...COOLING_FINDING, resource_ids: ['job-a'] }) });
     const r = await plan(llm);
-    expect(messagesOf(r, 'finding').map((m) => m.from)).toEqual(['workload']);
-    expect(r.team!.covers).toEqual([{ failed_role: 'cooling', covered_by: 'workload' }]);
+    expect(messagesOf(r, 'finding').map((m) => m.from).sort()).toEqual(['cooling', 'workload']);
+    expect(messagesOf(r, 'finding').find((m) => m.from === 'cooling')!.resource_ids).toEqual([]);
+    expect(messagesOf(r, 'objection')[0]!.summary).toContain('1 unknown resource id(s)');
+    expect(r.team!.covers).toEqual([]);
   });
 
-  it('rejects a null question that gives no reason', async () => {
+  it('keeps a null question that gives no reason, recording a code-authored reason', async () => {
     const llm = teamLlm({ 'cooling:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...COOLING_FINDING, question_for_peer: null }) });
     const r = await plan(llm);
-    expect(messagesOf(r, 'finding').map((m) => m.from)).toEqual(['workload']);
+    // The finding is usable without a stated reason, so both specialists still reach the Lead.
+    expect(messagesOf(r, 'finding').map((m) => m.from).sort()).toEqual(['cooling', 'workload']);
+    expect(r.team!.covers).toEqual([]);
+    // Cooling asked nothing, so only Workload's question is posted.
+    expect(messagesOf(r, 'question').map((m) => m.from)).toEqual(['workload']);
+  });
+
+  it('defaults only the missing reason, keeping one the model stated', () => {
+    const base = { summary: 's', evidence_ids: [], resource_ids: [] };
+    const missing = submitFindingArgsSchema.safeParse({ ...base, question_for_peer: null, no_question_reason: null });
+    expect(missing.success && missing.data.no_question_reason).toBe(NO_QUESTION_REASON_UNSTATED);
+    const stated = submitFindingArgsSchema.safeParse({ ...base, question_for_peer: null, no_question_reason: 'covering' });
+    expect(stated.success && stated.data.no_question_reason).toBe('covering');
   });
 });
 
@@ -625,7 +651,8 @@ describe('live progress (trace v2)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const llm = teamLlm({
       'cooling:submit_finding': never,
-      'workload:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...WORKLOAD_FINDING, evidence_ids: ['ev-invented'] }),
+      // An empty summary cannot be repaired by dropping citations, so this reply is still refused outright.
+      'workload:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...WORKLOAD_FINDING, summary: '' }),
       [LEAD]: () => Promise.reject(new Error('down')),
     });
     const running = plan(llm);
