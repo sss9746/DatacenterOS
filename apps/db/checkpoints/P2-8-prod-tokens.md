@@ -33,4 +33,5 @@ P3 and P4 run against the real `dcos` database with their own tokens, and we can
   - Fencing tokens are public by design (concurrency guards, not credentials; every reducer taking one also needs the agent role).
   - No JWT / `STDB_*_TOKEN=` value in any captured file. The redactor's hits were TODO text and key/value lookalikes.
   - Hardening notes (not findings): `nextFencingToken` restarts after a `create_run` wipe; anonymous `ping` costs a little energy per call.
-- **Remaining**: hand out the prod tokens; P3 / P4 smoke against `dcos` (then tick "P3's agent and P4's dashboard work against `dcos`").
+- **P3 on prod**: P3's agent (main + lane/p2-db trial merge) on `dcos` with the prod agent token + real Nemotron: pump-a fault → incident → checkpoint → migrate job-a to r1+r5 → verified 2/2, about 95 s at speed 2, 0 Nemotron failures. Prod run-demo-1 reset afterwards (speed 1, clean).
+- **Remaining**: P4 dashboard against `dcos` (then tick the first box); hand out the prod tokens.
