@@ -462,6 +462,27 @@ describe('review P3 regressions (agent loop)', () => {
   });
 });
 
+describe('verify progress window in an accelerated-time harness (P3 cleanup #2)', () => {
+  it('heartbeats during the verify waitSim sleeps, so the lease survives a window longer than the lease', async () => {
+    let wall = 1_794_091_200_000;
+    const w = world(() => wall);
+    // every injected sleep advances 6 s of wall time and no real time: the coordinator's real-time ticker never fires
+    w.hooks.push(() => {
+      wall += 6_000;
+    });
+    const logs: string[] = [];
+    const r = await makeLoop(w, { log: (m) => logs.push(m) }).runOnce();
+    expect(r.status).toBe('handled');
+    expect(r.executions.at(-1)?.outcomes.some((o) => o.operation === 'migrate_restart' && o.status === 'succeeded')).toBe(true);
+    expect(logs.filter((m) => m.includes('lost ownership'))).toEqual([]);
+    expect(r.verification?.verified).toBe(true);
+    expect((await w.db.getWorkflow(r.workflow_id!))?.stage).toBe('done');
+    // the verify window alone (10 sim-s = 10 sleeps = 60 s wall) is 4x the lease: beats must have happened in it
+    const beats = w.db.calls.filter((c) => c.method === 'heartbeatWorkflow').length;
+    expect(beats).toBeGreaterThan(Math.floor((10 * 6_000) / DEFAULT_LEASE_MS));
+  });
+});
+
 describe('withLlmCircuitBreaker', () => {
   it('fails fast during the cooldown after an outage, then retries', async () => {
     let t = 0;
