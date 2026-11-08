@@ -126,6 +126,22 @@ describe('escalation', () => {
     expect(v.nextStep).toEqual({ text: 'replan limit (2) reached', source: 'escalation_reason' });
     expect(v.terminal).toBe(true);
   });
+  it('the handoff card never hides an empty side: escalation without a persisted handoff says what is missing', () => {
+    const v = view(wf({ stage: 'escalated', state: { escalation_reason: 'replan limit (2) reached' } }), [ev({ stage: 'replan' })]);
+    const html = renderToStaticMarkup(createElement(WorkflowBoard, { workflows: [v.workflow], events: v.events, actionDetails: [], incidents: [], snapshot: null, example: false, mode: 'mock' }));
+    expect(html).toContain('wf-handoff-card wf-handoff-unknown');
+    expect(html).toContain('Verification not recorded');
+    expect(html).toContain('No verified actions recorded');
+    expect(html).toContain('No unresolved infrastructure reported');
+    expect(html).toContain('replan limit (2) reached');
+    expect(html).not.toContain('Recovered');
+    const ok = view(wf({ stage: 'done', state: { verification: { verified: true, source: 'code', outcome: 'recovered', handoff: 'Done.', as_of_sim_time_ms: 1, actions: { verified: ['k-succeeded'] }, unresolved_infrastructure: ['pump-a degraded'], next_human_action: 'Service pump-a' } } }), [], [action('succeeded')]);
+    const okHtml = renderToStaticMarkup(createElement(WorkflowBoard, { workflows: [ok.workflow], events: [], actionDetails: ok.actions, incidents: [], snapshot: null, example: false, mode: 'mock' }));
+    expect(okHtml).toContain('wf-handoff-recovered');
+    expect(okHtml).toContain('checkpoint job-a');
+    expect(okHtml).toContain('pump-a degraded');
+    expect(okHtml).toContain('Service pump-a');
+  });
   it('a verifier escalation without a reason says verification did not confirm recovery; next step stays unrecorded', () => {
     const v = view(wf({ stage: 'escalated', state: { verification: { verified: false, escalate: true, handoff: 'Needs operator review.', as_of_sim_time_ms: 1 } } }), [ev({ stage: 'verify' })]);
     expect(v.status.detail).toMatch(/did not confirm/);
