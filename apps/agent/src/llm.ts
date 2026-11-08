@@ -224,8 +224,9 @@ function isRetryableStatus(status: number | undefined): boolean {
  */
 export function createNimLlm(cfg: AgentConfig, opts: NimLlmOptions = {}): NimLlm {
   const c = requireConfig(cfg, ['NIM_API_KEY', 'NIM_MODEL']);
-  const thinking: ThinkingMode = opts.thinking ?? 'disabled';
-  const maxRetries = Math.max(0, opts.maxRetries ?? 2);
+  const thinking: ThinkingMode =
+    opts.thinking ?? (cfg.NIM_ENABLE_THINKING === 'true' ? 'enabled' : cfg.NIM_ENABLE_THINKING === 'omit' ? 'omit' : 'disabled');
+  const maxRetries = Math.max(0, opts.maxRetries ?? cfg.LLM_RETRIES);
   const backoffMs = Math.max(0, opts.backoffMs ?? 400);
   const temperature = opts.temperature ?? 1.0;
   const topP = opts.topP ?? 0.95;

@@ -31,4 +31,6 @@ Read from `process.env`, then repo-root `.env.local` for anything unset.
 | `NIM_FALLBACK_MODEL` | — | |
 | `LLM_MAX_TOKENS` | 768 | |
 | `LLM_MAX_TOOL_STEPS` | 8 | |
-| `LLM_TIMEOUT_MS` | 20000 | |
+| `LLM_TIMEOUT_MS` | 10000 | |
+| `LLM_RETRIES` | 1 | per-endpoint retries, int 0-5 |
+| `NIM_ENABLE_THINKING` | false | `true` / `false` / `omit` (omit = don't send `enable_thinking`) |

@@ -388,6 +388,83 @@ describe('FakeDb symptoms + clock gaps (TEST-ONLY)', () => {
   });
 });
 
+describe('FakeDb cordon, claim lease, post-migration progress (TEST-ONLY)', () => {
+  const cordonCmd = (obs: ObservedSnapshot, op: 'cordon_gpu' | 'uncordon_gpu', gpu: string, n: number) =>
+    cmd(obs, { action_id: `act-c${n}`, command_key: `wf-1:${gpu}:${op}:${n}`, operation: op, target_resource_id: gpu, job_id: null });
+  const finish = async (db: FakeDb, c: ActionCommand) => {
+    const a = await db.requestAction(c);
+    const { fencing_token } = await db.claimAction(a.command_key, a.version, 'w');
+    await db.startAction(a.command_key, fencing_token);
+    db.tick(1_000);
+  };
+
+  it('cordon_gpu completion marks the GPU cordoned and uncordon_gpu restores ready (opt-in applyCordon)', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const gpu = gpuId(6, 1);
+    const availability = async (d: FakeDb) => (await d.getObservedSnapshot()).gpus.find((g) => g.resource_id === gpu)!.availability;
+    const off = new FakeDb({ snapshot: obs });
+    await finish(off, cordonCmd(obs, 'cordon_gpu', gpu, 1));
+    expect(await availability(off)).not.toBe('cordoned'); // default: no effect (back-compat)
+
+    const db = new FakeDb({ snapshot: obs, applyCordon: true });
+    await finish(db, cordonCmd(obs, 'cordon_gpu', gpu, 1));
+    expect(await availability(db)).toBe('cordoned');
+    await finish(db, cordonCmd(obs, 'uncordon_gpu', gpu, 2));
+    expect(await availability(db)).toBe('ready');
+  });
+
+  it('a CLAIMED action is held until claimLeaseMs, then another worker can take it and the old token is stale', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const db = new FakeDb({ snapshot: obs });
+    const a = await db.requestAction(cmd(obs));
+    const first = await db.claimAction(a.command_key, a.version, 'worker-1');
+    await expectDbError(db.claimAction(a.command_key, first.status.version, 'worker-2'), 'LEASE_HELD');
+    db.advanceWallMs(14_999);
+    await expectDbError(db.claimAction(a.command_key, first.status.version, 'worker-2'), 'LEASE_HELD');
+    db.advanceWallMs(1);
+    const second = await db.claimAction(a.command_key, first.status.version, 'worker-2');
+    expect(second.status.status).toBe('claimed');
+    expect(second.status.version).toBe(first.status.version + 1);
+    expect(second.status.result.claimed_by).toBe('worker-2');
+    expect(second.fencing_token).toBeGreaterThan(first.fencing_token);
+    await expectDbError(db.startAction(a.command_key, first.fencing_token), 'STALE_FENCING_TOKEN');
+    expect((await db.startAction(a.command_key, second.fencing_token)).status).toBe('running');
+  });
+
+  it('claimLeaseMs is configurable and a RUNNING action is never released by lease expiry', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const db = new FakeDb({ snapshot: obs, claimLeaseMs: 1_000 });
+    const a = await db.requestAction(cmd(obs));
+    const c1 = await db.claimAction(a.command_key, a.version, 'worker-1');
+    db.advanceWallMs(1_000);
+    const c2 = await db.claimAction(a.command_key, c1.status.version, 'worker-2');
+    const running = await db.startAction(a.command_key, c2.fencing_token);
+    db.advanceWallMs(10 * 60_000);
+    await expectDbError(db.claimAction(a.command_key, running.version, 'worker-3'), 'INVALID_TRANSITION');
+    expect((await db.getActionStatus(a.command_key))!.status).toBe('running');
+  });
+
+  it('after migrate_restart completes tick() accrues progress on the new GPUs (gpus x rate x dt)', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const db = new FakeDb({ snapshot: obs });
+    const dest = rackGpus(7).concat(rackGpus(8));
+    await finish(db, cmd(obs));
+    db.tick(30_000); // checkpoint duration
+    const mv = await db.requestAction(migrateA(obs, dest));
+    const { fencing_token } = await db.claimAction(mv.command_key, mv.version, 'w');
+    await db.startAction(mv.command_key, fencing_token);
+    db.tick(120_000);
+    const before = (await db.getObservedSnapshot()).job_states.find((j) => j.job_id === 'job-a')!;
+    const spec = obs.job_specs.find((j) => j.job_id === 'job-a')!;
+    db.tick(10_000);
+    const after = (await db.getObservedSnapshot()).job_states.find((j) => j.job_id === 'job-a')!;
+    expect(after.progress_work_units - before.progress_work_units).toBeCloseTo(dest.length * spec.work_rate_per_gpu_per_sim_s * 10, 6);
+    // jobs that never migrated do not accrue
+    const jobB = (await db.getObservedSnapshot()).job_states.find((j) => j.job_id === 'job-b')!;
+    expect(jobB.progress_work_units).toBe(obs.job_states.find((j) => j.job_id === 'job-b')!.progress_work_units);
+  });
+});
+
 describe('fakes stay out of production code', () => {
   it('no file under src/ imports test/fakes', () => {
     const srcDir = resolve(import.meta.dirname, '..', 'src');

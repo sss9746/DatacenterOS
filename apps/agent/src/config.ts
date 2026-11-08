@@ -43,7 +43,19 @@ const envSchema = z.object({
   NIM_FALLBACK_MODEL: optionalString,
   LLM_MAX_TOKENS: intWithDefault(768, 1, 32_768),
   LLM_MAX_TOOL_STEPS: intWithDefault(8, 1, 64),
-  LLM_TIMEOUT_MS: intWithDefault(20_000, 100, 600_000),
+  LLM_TIMEOUT_MS: intWithDefault(10_000, 100, 600_000),
+  LLM_RETRIES: intWithDefault(1, 0, 5),
+  NIM_ENABLE_THINKING: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .optional()
+    .transform((v, ctx) => {
+      if (v === undefined || v === '') return 'false' as const;
+      if (v === 'true' || v === 'false' || v === 'omit') return v;
+      ctx.addIssue({ code: 'custom', message: `must be 'true', 'false' or 'omit', got "${v}"` });
+      return z.NEVER;
+    }),
 });
 
 /** Every env var the agent reads. Secrets: NIM_API_KEY, STDB_AGENT_TOKEN. */
@@ -59,6 +71,8 @@ export type AgentConfig = {
   readonly LLM_MAX_TOKENS: number;
   readonly LLM_MAX_TOOL_STEPS: number;
   readonly LLM_TIMEOUT_MS: number;
+  readonly LLM_RETRIES: number;
+  readonly NIM_ENABLE_THINKING: 'true' | 'false' | 'omit';
 };
 
 export type AgentConfigKey = keyof AgentConfig;
@@ -132,6 +146,8 @@ export function loadConfig(
     LLM_MAX_TOKENS: c.LLM_MAX_TOKENS,
     LLM_MAX_TOOL_STEPS: c.LLM_MAX_TOOL_STEPS,
     LLM_TIMEOUT_MS: c.LLM_TIMEOUT_MS,
+    LLM_RETRIES: c.LLM_RETRIES,
+    NIM_ENABLE_THINKING: c.NIM_ENABLE_THINKING,
   };
   return Object.freeze(cfg);
 }

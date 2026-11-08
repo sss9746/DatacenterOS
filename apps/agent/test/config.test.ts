@@ -14,9 +14,19 @@ describe('loadConfig', () => {
     const c = loadConfig({}, {});
     expect(c.LLM_MAX_TOKENS).toBe(768);
     expect(c.LLM_MAX_TOOL_STEPS).toBe(8);
-    expect(c.LLM_TIMEOUT_MS).toBe(20_000);
+    expect(c.LLM_TIMEOUT_MS).toBe(10_000);
+    expect(c.LLM_RETRIES).toBe(1);
+    expect(c.NIM_ENABLE_THINKING).toBe('false');
     expect(c.NIM_FALLBACK_BASE_URL).toBe(DEFAULT_NIM_FALLBACK_BASE_URL);
     expect(c.NIM_API_KEY).toBeUndefined();
+  });
+
+  it('parses NIM_ENABLE_THINKING and LLM_RETRIES', () => {
+    expect(loadConfig({ NIM_ENABLE_THINKING: 'TRUE', LLM_RETRIES: '3' }, {})).toMatchObject({ NIM_ENABLE_THINKING: 'true', LLM_RETRIES: 3 });
+    expect(loadConfig({ NIM_ENABLE_THINKING: 'omit' }, {}).NIM_ENABLE_THINKING).toBe('omit');
+    expect(() => loadConfig({ NIM_ENABLE_THINKING: 'maybe' }, {})).toThrow(/NIM_ENABLE_THINKING/);
+    expect(() => loadConfig({ LLM_RETRIES: '6' }, {})).toThrow(ConfigError);
+    expect(loadConfig({ LLM_RETRIES: '0' }, {}).LLM_RETRIES).toBe(0);
   });
 
   it('lets process env override .env.local and treats empty strings as unset', () => {

@@ -831,6 +831,15 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
   }
   for (const o of overrides) log(`triage: overridden ${o}`);
 
+  if (symptoms.length > 0) {
+    await deps.db.upsertSymptoms(symptoms);
+    toolCalls.push({
+      tool: 'upsert_symptoms',
+      args_summary: `${symptoms.length} symptom(s)`,
+      result_summary: `persisted ${symptoms.length} symptom(s) before linking incidents`,
+    });
+  }
+
   const incidents: Incident[] = [];
   const links: IncidentLink[] = [];
   const evidenceIdsByIncident: Record<string, string[]> = {};
