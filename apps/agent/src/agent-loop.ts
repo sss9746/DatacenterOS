@@ -14,6 +14,7 @@
 // nothing new could appear, so a steady-state cluster does not burn Nemotron calls. A circuit breaker
 // stops calling the LLM for a while after LlmUnavailableError; every module then runs deterministically.
 
+import { createHash } from 'node:crypto';
 import type { Incident, ObservedSnapshot, PlanCandidate } from '@dcos/contracts';
 import { createCoordinator, DEFAULT_LEASE_MS, type Coordinator, type ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
@@ -69,6 +70,8 @@ export interface AgentLoopDeps {
   chooser?: OptionChooser;
   /** Team mode: new-incident watch poll while a workflow executes (default 2000 wall ms). */
   incidentWatchMs?: number;
+  /** Team mode: capacity poll while failed jobs wait for GPUs (default 2000 wall ms). */
+  recoveryPollMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -113,6 +116,11 @@ export const DEFAULT_LLM_COOLDOWN_MS = 60_000;
 export const DEFAULT_MAX_WORKFLOW_RETRIES = 3;
 export const DEFAULT_RETRY_BACKOFF_MS = 2_000;
 export const DEFAULT_INCIDENT_WATCH_MS = 2_000;
+export const DEFAULT_RECOVERY_POLL_MS = 2_000;
+/** Plan attempts in one waiting-recovery episode, the first included. */
+export const MAX_RECOVERY_ATTEMPTS = 3;
+/** Wall time failed jobs may wait for capacity, from the persisted `first_wait_unix_ms`. */
+export const RECOVERY_DEADLINE_MS = 120_000;
 /** Symptoms a plan can produce on the resources it acts on (load moved onto a GPU, telemetry gap during a restart). */
 const PLAN_SIDE_EFFECT_KINDS: ReadonlySet<string> = new Set(['thermal_throttle', 'near_throttle', 'stale_telemetry']);
 /** Retry a lease-held workflow this long after its lease expiry (clock skew margin). */
@@ -152,18 +160,28 @@ const NO_LLM: LlmPort = {
   },
 };
 
-/** After an LlmUnavailableError, fail fast for `cooldownMs` instead of waiting on timeouts again. */
-export function withLlmCircuitBreaker(inner: LlmPort, cooldownMs: number, now: () => number, onOpen?: (e: LlmUnavailableError) => void): LlmPort {
+/**
+ * After `failuresToOpen` consecutive LlmUnavailableErrors, fail fast for `cooldownMs` instead of waiting on timeouts
+ * again. The default of 1 is the single-agent behaviour; a team with several calls per round must tolerate one slow call.
+ */
+export function withLlmCircuitBreaker(inner: LlmPort, cooldownMs: number, now: () => number, onOpen?: (e: LlmUnavailableError) => void, failuresToOpen = 1): LlmPort {
   let openUntil = -Infinity;
+  let failures = 0;
   return {
     async chat(req) {
       if (now() < openUntil) throw new LlmUnavailableError('LLM circuit open after a recent outage', []);
       try {
-        return await inner.chat(req);
+        const res = await inner.chat(req);
+        failures = 0;
+        return res;
       } catch (e) {
         if (e instanceof LlmUnavailableError) {
-          openUntil = now() + cooldownMs;
-          onOpen?.(e);
+          failures += 1;
+          if (failures >= failuresToOpen) {
+            failures = 0;
+            openUntil = now() + cooldownMs;
+            onOpen?.(e);
+          }
         }
         throw e;
       }
@@ -227,6 +245,39 @@ function attemptOf(state: Record<string, unknown>, keys: readonly string[]): num
   const ns = keys.map((k) => Number(/:(\d+)$/.exec(k)?.[1] ?? NaN)).filter((n) => Number.isFinite(n));
   return ns.length > 0 ? Math.max(...ns) : 1;
 }
+
+/** `workflow.state.recovery`: failed, checkpoint-backed jobs waiting for capacity. */
+interface RecoveryRecord {
+  status: 'waiting' | 'resumed' | 'expired';
+  job_ids: string[];
+  blocked_reason: string;
+  first_wait_unix_ms: number;
+  attempts: number;
+  fingerprint: string;
+}
+
+const recoveryOf = (state: Record<string, unknown>): RecoveryRecord | null => (state.recovery as RecoveryRecord | undefined) ?? null;
+
+/** Node and GPU availability plus access to the waiting jobs' completed checkpoints. Progress and telemetry are excluded. */
+function capacityFingerprint(snap: ObservedSnapshot, jobIds: readonly string[]): string {
+  const wanted = new Set(jobIds);
+  const parts = [
+    ...snap.nodes.map((n) => `${n.resource_id}=${n.availability}`),
+    ...snap.gpus.map((g) => `${g.resource_id}=${g.availability}`),
+    ...snap.checkpoints.filter((c) => wanted.has(c.job_id) && c.status === 'complete').map((c) => `${c.checkpoint_id}=${c.accessible}`),
+  ];
+  return createHash('sha256').update(parts.sort().join('|')).digest('hex').slice(0, 16);
+}
+
+/** A plan rebuilt from persisted state has no planner output: restore who is still waiting or needs an operator. */
+function withRecoveryState(r: PlanResult, state: Record<string, unknown>): PlanResult {
+  const rec = recoveryOf(state);
+  const waiting = rec?.status === 'waiting' ? rec.job_ids.map((job_id) => ({ job_id, reason: 'waiting for capacity' })) : [];
+  const operator = Array.isArray(state.operator_jobs) ? (state.operator_jobs as NonNullable<PlanResult['operator_jobs']>) : [];
+  return waiting.length > 0 || operator.length > 0 ? { ...r, waiting_jobs: waiting, operator_jobs: operator } : r;
+}
+
+const nothingToRunButWaiting = (r: PlanResult): boolean => r.commands.length === 0 && (r.waiting_jobs?.length ?? 0) > 0;
 
 /** Diagnose-event tool calls minus the ones the triage event of the same tick already showed. */
 function withoutRepeats(calls: ToolCallSummary[] | undefined, shown: ToolCallSummary[]): ToolCallSummary[] | undefined {
@@ -361,10 +412,112 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       incident_ids: [...r.plan.incident_ids],
       candidates: mergeCandidates(coord.state().candidates, r.candidates ?? []),
       ...(r.team ? { team: r.team } : {}),
+      ...(r.operator_jobs ? { operator_jobs: r.operator_jobs } : {}),
     });
     if (saved) await publishTeam(wfId, r);
     await publishPlan(wfId, r);
     return r;
+  }
+
+  /** Create or refresh `state.recovery`. An open episode keeps its first wait, attempts and (same jobs) baseline. */
+  async function recordWaiting(coord: Coordinator, r: PlanResult, snap: ObservedSnapshot): Promise<RecoveryRecord | null> {
+    const prior = recoveryOf(coord.state());
+    const open = prior?.status === 'waiting' ? prior : null;
+    const jobIds = (r.waiting_jobs ?? []).map((j) => j.job_id).sort();
+    const sameJobs = open !== null && open.job_ids.join() === jobIds.join();
+    const rec: RecoveryRecord = {
+      status: 'waiting',
+      job_ids: jobIds,
+      blocked_reason: (r.waiting_jobs ?? []).map((j) => `${j.job_id}: ${j.reason}`).join('; '),
+      first_wait_unix_ms: open?.first_wait_unix_ms ?? now(),
+      attempts: open?.attempts ?? 1,
+      fingerprint: sameJobs ? open.fingerprint : capacityFingerprint(snap, jobIds),
+    };
+    return (await coord.updateStage('plan', { recovery: rec })) ? rec : null;
+  }
+
+  /**
+   * §0.6: hold the workflow at stage `plan` until capacity may have changed. True = plan again as a new attempt; false =
+   * the drive is over (expired and escalated, stopping, or ownership lost). An unchanged state costs one snapshot read
+   * per poll: no model calls, no action requests. A persisted baseline means a change while the agent was down counts.
+   */
+  async function awaitCapacity(wfId: string, coord: Coordinator, r: PlanResult, report: LoopTickReport): Promise<boolean> {
+    let rec = await recordWaiting(coord, r, await db.getObservedSnapshot());
+    if (!rec) {
+      report.status = 'lost_ownership';
+      return false;
+    }
+    const baseReason = rec.blocked_reason;
+    const expire = async (why: string): Promise<false> => {
+      await coord.updateStage('plan', { recovery: { ...rec!, status: 'expired' } });
+      const operator = (r.operator_jobs ?? []).map((j) => `; ${j.job_id} needs an operator (${j.reason})`).join('');
+      await escalate(wfId, coord, workflowIncidents(coord, r), 'plan', `${why}: ${baseReason}${operator}`, report);
+      return false;
+    };
+    if (rec.attempts >= MAX_RECOVERY_ATTEMPTS) return expire(`recovery attempt limit (${MAX_RECOVERY_ATTEMPTS}) reached`);
+    await safeEmit('plan', { workflowId: wfId, incidentId: r.plan.incident_ids[0], actor: 'code', summary: `waiting for capacity (attempt ${rec.attempts}/${MAX_RECOVERY_ATTEMPTS}): ${baseReason}` });
+
+    let paused = false;
+    for (;;) {
+      if (stopping) {
+        report.status = 'stopped'; // stage `plan` comes back through took_over -> continueTakeover on the next boot
+        return false;
+      }
+      if (!coord.isOwner()) {
+        report.status = 'lost_ownership';
+        return false;
+      }
+      if (now() - rec.first_wait_unix_ms >= RECOVERY_DEADLINE_MS) return expire(`waited ${RECOVERY_DEADLINE_MS / 1000} s for capacity`);
+      const snap = await db.getObservedSnapshot();
+      if (snap.clock.paused !== paused) {
+        paused = snap.clock.paused;
+        rec = { ...rec, blocked_reason: paused ? `simulator paused; ${baseReason}` : baseReason };
+        await coord.updateStage('plan', { recovery: rec });
+        await safeEmit('plan', { workflowId: wfId, incidentId: r.plan.incident_ids[0], actor: 'code', summary: paused ? `simulator paused, not recovered: ${baseReason}` : `simulator running again: ${baseReason}` });
+      }
+      const fingerprint = capacityFingerprint(snap, rec.job_ids);
+      if (!paused && fingerprint !== rec.fingerprint) {
+        await coord.updateStage('plan', { recovery: { ...rec, attempts: rec.attempts + 1, fingerprint } });
+        if (coord.isOwner()) return true;
+        continue; // the check at the top of the loop reports the lost lease
+      }
+      await sleep(deps.recoveryPollMs ?? DEFAULT_RECOVERY_POLL_MS);
+      await coord.heartbeatIfDue();
+    }
+  }
+
+  /** No commands left to run: jobs without a usable checkpoint go to an operator, otherwise the normal no-action close. */
+  function closeNoWork(wfId: string, coord: Coordinator, r: PlanResult, report: LoopTickReport): Promise<void> {
+    const ids = workflowIncidents(coord, r);
+    if (!r.operator_jobs?.length) return closeNoAction(wfId, coord, ids, report);
+    return escalate(wfId, coord, ids, 'plan', r.operator_jobs.map((j) => `${j.job_id} needs an operator (${j.reason})`).join('; '), report);
+  }
+
+  /** Verified what could run, but jobs remain unrecovered: never a full recovery, and the handoff names them. */
+  async function closeUnfinished(coord: Coordinator, r: PlanResult, v: VerificationReport): Promise<VerificationReport> {
+    const left = [...(r.operator_jobs ?? []), ...(r.waiting_jobs ?? [])];
+    const note = `Partial recovery: ${left.map((j) => `${j.job_id} needs an operator (${j.reason})`).join('; ')}.`;
+    const snap = await db.getObservedSnapshot();
+    const listed = new Set(v.persisted.affected_jobs.map((j) => j.job_id));
+    const added = left
+      .filter((j) => !listed.has(j.job_id))
+      .map((j) => {
+        const s = snap.job_states.find((x) => x.job_id === j.job_id);
+        return { job_id: j.job_id, status: s?.status ?? 'unknown', progress_work_units: s?.progress_work_units ?? 0, durable_work_units: s?.durable_work_units ?? 0, racks: [] as string[] };
+      });
+    const outcome = 'operator_review' as const;
+    const persisted = {
+      ...v.persisted,
+      verified: false,
+      escalate: true,
+      outcome,
+      handoff: `${note} ${v.persisted.handoff}`,
+      next_human_action: `${note} ${v.persisted.next_human_action}`,
+      affected_jobs: [...v.persisted.affected_jobs, ...added],
+    };
+    const rec = recoveryOf(coord.state());
+    await coord.updateStage('escalated', { escalation_reason: note, verification: persisted, ...(rec?.status === 'waiting' ? { recovery: { ...rec, status: 'expired' } } : {}) });
+    return { ...v, verified: false, escalate: true, outcome, stage: 'escalated', handoff: persisted.handoff, persisted };
   }
 
   /** The team conversation, in order. Call only after `state.team` is written: the feed never shows an unsaved round. */
@@ -506,9 +659,17 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     coord?: Coordinator;
     /** Replan before executing anything: the persisted plan was found invalid after a restart. */
     pendingReplan?: { execution: ExecutionResult; reason: string };
+    /** This plan's executable part is finished: go on waiting for its `waiting_jobs`. */
+    waitingFrom?: PlanResult;
   }
 
   async function driveWorkflow(wfId: string, incidents: Incident[], start: DriveStart, report: LoopTickReport, stageRef: { stage: AgentStage }): Promise<void> {
+    let next: DriveStart | void = start;
+    while (next) next = await driveOnce(wfId, incidents, next, report, stageRef);
+  }
+
+  /** One pass, plan -> verify. Returns the next pass when jobs are still waiting for capacity. */
+  async function driveOnce(wfId: string, incidents: Incident[], start: DriveStart, report: LoopTickReport, stageRef: { stage: AgentStage }): Promise<DriveStart | void> {
     const ids = incidents.map((i) => i.incident_id);
     const coord =
       start.coord ??
@@ -522,9 +683,19 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       await setIncidentState(ids, 'investigating');
       let attempt = start.attempt;
       stageRef.stage = 'plan';
-      let current = start.plan ?? (await plan(wfId, incidents, attempt, coord));
-      report.plans.push(current);
-      if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
+      let current = start.waitingFrom ?? start.plan ?? (await plan(wfId, incidents, attempt, coord));
+      if (!start.waitingFrom) report.plans.push(current);
+      for (let wait = start.waitingFrom !== undefined || nothingToRunButWaiting(current); wait; wait = nothingToRunButWaiting(current)) {
+        if (!(await awaitCapacity(wfId, coord, current, report))) return;
+        attempt += 1;
+        current = await plan(wfId, incidents, attempt, coord);
+        report.plans.push(current);
+      }
+      if (current.commands.length === 0) return closeNoWork(wfId, coord, current, report);
+      if (current.waiting_jobs?.length && !(await recordWaiting(coord, current, await db.getObservedSnapshot()))) {
+        report.status = 'lost_ownership';
+        return;
+      }
       if (deps.requireApproval && current.job_plans.some((p) => p.needs_approval)) {
         return escalate(wfId, coord, workflowIncidents(coord, current), 'plan', 'planner flagged needs_approval', report);
       }
@@ -555,7 +726,8 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
           }
           reason = w.reason() ?? newFault?.reason() ?? 'material change to the active plan';
         }
-        if (attempt - 1 >= maxReplans) {
+        // Attempts spent waiting for capacity have their own limit and do not use up replans.
+        if (attempt - 1 - Math.max(0, (recoveryOf(coord.state())?.attempts ?? 1) - 1) >= maxReplans) {
           return escalate(wfId, coord, workflowIncidents(coord, current), 'replan', `replan limit (${maxReplans}) reached: ${reason}`, report);
         }
         attempt += 1;
@@ -591,20 +763,33 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         const saved = await coord.updateStage('replan', {
           candidates: mergeCandidates(coord.state().candidates, current.candidates ?? []),
           ...(current.team ? { team: current.team } : {}),
+          ...(current.operator_jobs ? { operator_jobs: current.operator_jobs } : {}),
         });
         if (saved) await publishTeam(wfId, current);
         await publishPlan(wfId, current, out);
-        if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
+        if (nothingToRunButWaiting(current)) return { attempt, coord, waitingFrom: current };
+        if (current.commands.length === 0) return closeNoWork(wfId, coord, current, report);
+        if (current.waiting_jobs?.length) await recordWaiting(coord, current, await db.getObservedSnapshot());
         w.reset(current);
         newFault?.resume(current);
         pending = await staleAfterRound(wfId, current); // goes through the replan-limit check above like any other replan
       }
       stageRef.stage = 'verify';
-      await coord.updateStage('verify', {});
-      const v = await verifyRecovery(
-        { db, events, physics, waitSim: (simMs) => waitSim(simMs, coord), persist: (stage, patch) => coord.updateStage(stage, patch) },
+      const stillWaiting = (current.waiting_jobs?.length ?? 0) > 0;
+      const unfinished = stillWaiting || (current.operator_jobs?.length ?? 0) > 0;
+      const waited = recoveryOf(coord.state());
+      const allRan = exec.outcomes.every((o) => o.status === 'succeeded');
+      // While jobs remain, never persist stage `verify` or a closing stage: resume would close the workflow from there.
+      await coord.updateStage(unfinished ? 'execute' : 'verify', waited?.status === 'waiting' && !stillWaiting ? { recovery: { ...waited, status: allRan ? 'resumed' : 'expired' } } : {});
+      const verified = await verifyRecovery(
+        { db, events, physics, waitSim: (simMs) => waitSim(simMs, coord), persist: (stage, patch) => coord.updateStage(unfinished ? 'plan' : stage, patch) },
         { workflowId: wfId, plan: current, result: exec },
       );
+      if (stillWaiting && !verified.escalate) {
+        report.verification = verified;
+        return { attempt, coord, waitingFrom: current };
+      }
+      const v = unfinished ? await closeUnfinished(coord, current, verified) : verified;
       report.verification = v;
       report.escalated = report.escalated || v.escalate;
       await safeEmit('verify', { workflowId: wfId, incidentId: current.plan.incident_ids[0], actor: 'code', summary: `handoff: ${v.handoff}` });
@@ -629,7 +814,8 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     report.workflow_id = wfId;
     const ids = new Set(wf.incident_ids);
     const incidents = (await db.listIncidents()).filter((i) => ids.has(i.incident_id) && i.state !== 'resolved');
-    const persisted = wf.stage === 'replan' || wf.stage === 'execute' || wf.stage === 'verify' ? planFromWorkflow(wf) : null;
+    const rebuilt = wf.stage === 'replan' || wf.stage === 'execute' || wf.stage === 'verify' ? planFromWorkflow(wf) : null;
+    const persisted = rebuilt && withRecoveryState(rebuilt, wf.state);
     const attempt = persisted
       ? attemptOf(wf.state, persisted.commands.map((c) => c.command_key))
       : typeof wf.state.attempt === 'number'
@@ -767,7 +953,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const ids = new Set(h.workflow.incident_ids);
     const incidents = (await db.listIncidents()).filter((i) => ids.has(i.incident_id) && i.state !== 'resolved');
     const attempt = attemptOf(h.coordinator.state(), h.plan.commands.map((c) => c.command_key));
-    const current: PlanResult = { plan: h.plan.plan, commands: h.plan.commands, job_plans: [], tool_calls: [], used_llm: false };
+    const current = withRecoveryState({ plan: h.plan.plan, commands: h.plan.commands, job_plans: [], tool_calls: [], used_llm: false }, h.coordinator.state());
     let pendingReplan: DriveStart['pendingReplan'];
     if (h.invalidReason) {
       log(`resume: ${wfId} persisted plan invalid (${h.invalidReason}); replanning as attempt ${attempt + 1}`);

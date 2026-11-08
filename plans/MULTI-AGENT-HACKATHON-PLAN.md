@@ -37,9 +37,9 @@ One round runs inside planning and replaces the single Nemotron choice. It runs 
 3. **Cover:** at most one cover call, if a specialist failed and time remains.
 4. **Decision:** the Lead receives findings, answers and the existing candidate board, then calls the existing `choose_options`. Choices go through the existing `decideJob`, conditional re-scoring and `resolveConflicts`.
 
-**Budget:** at most 6 model calls per round. A corrective retry counts as one call (observed through `NimLlmEvent`). At most 2 requests in flight, 8 s per call, 25 s per round, and the Lead's 9 s is reserved. After the deadline, late replies are dropped using a `closed` flag on the round.
+**Budget:** at most 6 model calls per round. A corrective retry counts as one call (observed through `NimLlmEvent`). At most 2 requests in flight, 12 s per call, 30 s per round, and the Lead's 12 s is reserved (raised from 8, 25 and 9 s after live runs showed Workload exceeding 8 s). After the deadline, late replies are dropped using a `closed` flag on the round.
 
-**Team LLM client:** build it with `createNimLlm({ ...cfg, LLM_TIMEOUT_MS: 8000 }, { maxRetries: 0, useFallback: false })` and apply the existing circuit breaker. This replaces the cancellation plumbing in §5.
+**Team LLM client:** build it with `createNimLlm({ ...cfg, LLM_TIMEOUT_MS: 12000 }, { maxRetries: 0, useFallback: false })` and apply the existing circuit breaker, set to open only after 3 consecutive failures. This replaces the cancellation plumbing in §5.
 
 **Validation:** evidence IDs and resource IDs in a finding must exist in that round's bundle, or the finding is rejected. Findings are claims and never become GPU or job facts.
 
@@ -131,6 +131,44 @@ Build only if G3 passes early and Kaushik says yes. A second process with `AGENT
 - Better recovery scores for the team are unmeasured unless a single-versus-multi comparison is run.
 
 **Docs:** once G2 passes, update `plans/FEATURES.md`, which still lists zones, agent messages and automatic takeover from the dropped branch, along with its "cover for each other" one-liner. Align the Devpost text. The web Agent room is outside this sprint; if it ships, its live roles must be Cooling, Workload and Lead.
+
+### 0.9 Progress
+
+**Updated 2026-11-08 07:40 CST.** Live means real Nemotron against the disposable local database `dcos-r-local`. Nothing has run on `dcos-dev` or prod.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| **G0** baseline | Passed 06:26 at `1dd61b4` | Physics build and typecheck clean; 404 agent tests pass |
+| **G1** real NIM | Passed about 06:57 | L1 in team mode, 12/12 checks with a real SIGKILL. One round: 5 model calls, 11 s, Lead decided, both peer answers consumed |
+| **G2** Scene A | Passed 07:03; committed and pushed as `468cda2` | L3 in team mode at speed 1, 18/18 checks: destination Xid, SIGKILL, DB-finished checkpoint, reclaim, separate incidents, new destination, verified handoff. Two rounds, Lead decided both, 5 calls at most |
+| **G3** Scene B | **Recovery passed; conversation check passed in 1 of 2 runs** | SBK 25/25: all nodes crash, jobs wait, SIGKILL during the wait, fresh process keeps the original wait start, jobs restart from checkpoints, job-c goes to an operator, agents talked. SB 20/21: the same recovery, but Workload timed out at 12 s, so Cooling covered and no peer answer was possible |
+| **G4** regression and review | Not started | L2 and L4–L6 not yet run in team mode; Codex review not done; `dcos-dev` run not done |
+
+| Work package | Status |
+|---|---|
+| A: team round | Done, in `468cda2` |
+| B1: wiring and new-incident watch | Done, in `468cda2`. The watch runs in `multi` only |
+| C: harness and supervisor | Done, in `468cda2`. The supervisor passed with a stand-in child; it has not yet run the real agent |
+| B2: waiting recovery | Done and proven live on the local database. 540 agent tests pass, typecheck clean |
+| D: integration | In progress |
+| E: hot standby | Not started; off by default |
+
+**Found by live runs and fixed:**
+- Specialists declined to ask questions when the prompt allowed it, so no talking happened in the first run. The question is now required.
+- Workload could not say which racks jobs run on, so it could not answer Cooling. `current_rack_ids` was added, with a regression test.
+- On macOS the harness's SIGKILL hit only the `tsx` wrapper, so the agent survived and the first L1 run failed. Multi-mode cases, Scene B and the supervisor now launch the agent directly. Single-mode L1–L6 still use the old launch.
+- One slow specialist tripped the shared circuit breaker for 60 s, which could stop the Lead from being called. The team's breaker now opens after 3 consecutive failures.
+- Nemotron put real rack names in `evidence_ids`, so valid findings were rejected. These IDs are now moved to `resource_ids`; invented IDs are still rejected.
+
+**Open:**
+- **Workload latency varies widely.** The same 8,972-byte prompt took 5.8 s in SBK and over 12 s in SB. When it times out, covering works, but that round has no peer conversation. Do not promise a conversation in every round.
+- **Findings can be factually wrong.** In SBK, Workload said job-a occupied rack-r6, and in an earlier run a cover claimed checkpoint-backed jobs had no checkpoint support. The Lead still chose only from code-validated options, and safety does not depend on findings, but the text shown to judges may contain errors.
+- In L3, a Workload finding was rejected for an unknown resource ID. Rejections now name the invalid field for argument errors, but unknown-ID rejections still report only counts, so that case stays undiagnosed.
+- Each live result is a single run, on the local database.
+- L1 and L3 ran before the Scene B fixes and need rerunning.
+- Better recovery scores for the team are unmeasured.
+
+**Evidence:** `apps/agent/live-results/agent-team-2026-11-08/`.
 
 ## 1. Recommendation and finish line
 

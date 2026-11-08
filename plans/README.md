@@ -4,7 +4,7 @@
 
 **Real environment extension:** [Brev GPU telemetry and workload recovery implementation plan](REAL-ENVIRONMENT-IMPLEMENTATION.md) specifies the user-requested $60-credit integration, delivery levels, code changes and acceptance evidence. It is a proposal; the existing simulated environment and its proof gates remain distinct.
 
-**Next 5–6 hour sprint:** [Multi-agent fault recovery plan](MULTI-AGENT-HACKATHON-PLAN.md) scopes three communicating model agents, simultaneous-fault handling and recovery of stopped simulated jobs for one implementer. The user confirmed Brev remains observation-only for this sprint. The document is a proposal, with implementation timeboxes and live acceptance criteria.
+**Current sprint:** [Multi-agent fault recovery plan](MULTI-AGENT-HACKATHON-PLAN.md) adds three communicating model agents and recovery of stopped simulated jobs, on branch `Prod-Multi-Agent-System`. Its §0 is the execution plan and §0.9 tracks progress. As of 07:40 CST on Nov 8, team-mode Scene A and Scene B recovery have passed live on a local database; the regression runs and any `dcos-dev` run remain open. Brev remains observation-only for this sprint.
 
 ## Owners and integration
 

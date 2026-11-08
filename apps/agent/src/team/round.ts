@@ -43,9 +43,10 @@ import {
 
 export const TEAM_BUDGET = {
   maxCalls: 6,
-  callTimeoutMs: 8_000,
-  roundMs: 25_000,
-  leadReserveMs: 9_000,
+  // Raised from 8 s / 25 s / 9 s: live, Workload's Scene B prompt exceeded 8 s in repeated runs.
+  callTimeoutMs: 12_000,
+  roundMs: 30_000,
+  leadReserveMs: 12_000,
   /** A call with less time than this left is not worth starting. */
   minCallMs: 1_000,
   specialistMaxTokens: 768,
@@ -149,7 +150,7 @@ class TeamRound {
     const tc = res && firstCall(res, SUBMIT_FINDING_TOOL_NAME);
     if (!tc) return null;
     const args = parseArgs(submitFindingArgsSchema, tc);
-    if (!args) return this.reject(session.role, 'finding rejected: invalid arguments');
+    if (!args) return this.reject(session.role, `finding rejected: invalid arguments (${invalidFields(submitFindingArgsSchema, tc)})`);
     const refused = unknownCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
     if (refused) return this.reject(session.role, `finding rejected: ${refused}`);
 
@@ -176,7 +177,7 @@ class TeamRound {
       if (!tc) continue;
       const args = parseArgs(answerPeerArgsSchema, tc);
       if (!args) {
-        this.reject(responder, 'answer rejected: invalid arguments');
+        this.reject(responder, `answer rejected: invalid arguments (${invalidFields(answerPeerArgsSchema, tc)})`);
         continue;
       }
       const refused = unknownCitations(args, session.bundle.evidence_ids, session.bundle.resource_ids);
@@ -203,7 +204,7 @@ class TeamRound {
     if (!tc) return;
     const args = parseArgs(submitFindingArgsSchema, tc);
     if (!args) {
-      this.reject(coverer.role, 'cover rejected: invalid arguments');
+      this.reject(coverer.role, `cover rejected: invalid arguments (${invalidFields(submitFindingArgsSchema, tc)})`);
       return;
     }
     const evidence = new Set([...failedBundle.evidence_ids, ...coverer.bundle.evidence_ids]);
@@ -415,13 +416,32 @@ function parseArgs<T>(schema: { safeParse(v: unknown): { success: true; data: T 
   return parsed.success ? parsed.data : null;
 }
 
-/** Null when every citation exists in the bundle; otherwise a reason that repeats no model text. */
+/** Schema field names that failed validation. Names come from the schema, so no model text reaches the trace. */
+function invalidFields(schema: { safeParse(v: unknown): { success: boolean; error?: { issues: { path: PropertyKey[] }[] } } }, call: LlmToolCall): string {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(call.argumentsJson);
+  } catch {
+    return 'not JSON';
+  }
+  const issues = schema.safeParse(raw).error?.issues ?? [];
+  return [...new Set(issues.map((i) => String(i.path[0] ?? 'arguments')))].join(', ') || 'unknown';
+}
+
+/**
+ * Null when every citation exists in the bundle; otherwise a reason that repeats no model text. A real resource id
+ * placed in evidence_ids (seen live from Nemotron) is moved to resource_ids in `args`, since it is still grounded in
+ * the bundle. An id found in neither set is treated as invented and the whole reply is refused.
+ */
 function unknownCitations(args: { evidence_ids: string[]; resource_ids: string[] }, evidence: ReadonlySet<string>, resources: ReadonlySet<string>): string | null {
-  if (evidence.size > 0 && args.evidence_ids.length === 0) return 'no evidence cited';
-  const badEvidence = args.evidence_ids.filter((id) => !evidence.has(id)).length;
+  const misfiled = args.evidence_ids.filter((id) => !evidence.has(id) && resources.has(id));
+  const badEvidence = args.evidence_ids.filter((id) => !evidence.has(id) && !resources.has(id)).length;
   const badResources = args.resource_ids.filter((id) => !resources.has(id)).length;
-  if (badEvidence === 0 && badResources === 0) return null;
-  return `${badEvidence} unknown evidence id(s), ${badResources} unknown resource id(s)`;
+  if (badEvidence > 0 || badResources > 0) return `${badEvidence} unknown evidence id(s), ${badResources} unknown resource id(s)`;
+  args.evidence_ids = args.evidence_ids.filter((id) => evidence.has(id));
+  args.resource_ids = [...new Set([...args.resource_ids, ...misfiled])];
+  if (evidence.size > 0 && args.evidence_ids.length === 0 && misfiled.length === 0) return 'no evidence cited';
+  return null;
 }
 
 /** Keeps the accepted tool call in the specialist's own session, so its next input is a real continuation. */
@@ -445,7 +465,8 @@ export function createTeamChooser(deps: TeamChooserDeps): OptionChooser {
       { ...deps.cfg, LLM_TIMEOUT_MS: TEAM_BUDGET.callTimeoutMs },
       { maxRetries: 0, useFallback: false, onEvent: (e) => scope.getStore()?.(e) },
     );
-    client = withLlmCircuitBreaker(nim, DEFAULT_LLM_COOLDOWN_MS, deps.now, (e) => log(`team LLM circuit open: ${e.name}`));
+    // Three consecutive failures: one slow specialist must not take the Lead down with it.
+    client = withLlmCircuitBreaker(nim, DEFAULT_LLM_COOLDOWN_MS, deps.now, (e) => log(`team LLM circuit open: ${e.name}`), 3);
     return client;
   };
 

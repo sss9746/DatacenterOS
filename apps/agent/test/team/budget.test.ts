@@ -125,9 +125,9 @@ const plan = (script: Script) => {
 };
 
 describe('team client budget', () => {
-  it('builds the client with an 8 s timeout, no retries and no fallback', async () => {
+  it('builds the client with the team call timeout, no retries and no fallback', async () => {
     await plan({ respond: healthy, corrective: () => false });
-    expect((nim.configs[0] as AgentConfig).LLM_TIMEOUT_MS).toBe(8_000);
+    expect((nim.configs[0] as AgentConfig).LLM_TIMEOUT_MS).toBe(TEAM_BUDGET.callTimeoutMs);
     expect(nim.options[0]).toMatchObject({ maxRetries: 0, useFallback: false });
   });
 
@@ -164,15 +164,15 @@ describe('team client budget', () => {
     expect(r.team!.missing_roles).toContain('lead');
   });
 
-  it('caps a corrective retry at the 25 s round deadline and drops what follows', async () => {
+  it('caps a corrective retry at the round deadline and drops what follows', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
       const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
       const running = plan({
         respond: healthy,
         corrective: (n) => n === 4,
-        // Findings take 7 s, both answers hang until the 16 s specialist limit, the Lead retries at 23 s and then hangs.
-        before: (n) => (n < 2 ? wait(7_000) : n < 4 ? new Promise<void>(() => {}) : wait(7_000)),
+        // Findings take 5 s, both answers hang until the 18 s specialist limit, the Lead retries at 25 s and then hangs.
+        before: (n) => (n < 2 ? wait(5_000) : n < 4 ? new Promise<void>(() => {}) : wait(7_000)),
         after: (n) => (n === 4 ? new Promise<void>(() => {}) : Promise.resolve()),
       });
       await vi.advanceTimersByTimeAsync(40_000);

@@ -1,6 +1,6 @@
-# DataCenterOS: every feature (as of 06:00 Sun, Nov 8)
+# DataCenterOS: every feature (as of 07:40 Sun, Nov 8)
 
-**One-liner:** a crash-proof team of Nemotron agents for GPU clusters. When cooling or GPUs fail, the agents decide per training job whether to keep, cap or move it, keep separate failures separate, coordinate through SpacetimeDB, and cover for each other if one goes down.
+**One-liner:** a crash-resilient team of Nemotron agents for GPU clusters. When cooling or GPUs fail, specialist agents question each other and a lead picks, per training job, whether to keep, cap or move it. Safety checks are deterministic, separate failures stay separate, a failed agent's work is picked up by a teammate, and SpacetimeDB preserves recovery if the agent process dies.
 
 **Status legend:**
 - ✅ **LIVE:** proven on a real database with real Nemotron
@@ -8,7 +8,7 @@
 - 🚧 **BUILDING:** in progress on a branch
 - 🎭 **MOCK:** works only on mock/example data, labeled as such
 
-Integration branch: `int/r-sprint`. Safe fallback: `stable/working-single-agent` @ `a153f6d`.
+Integration branch: `int/r-sprint`. Agent-team work: `Prod-Multi-Agent-System`, not yet merged to `int/r-sprint`. Safe fallback: `stable/working-single-agent` @ `a153f6d`.
 
 ---
 
@@ -61,12 +61,14 @@ Integration branch: `int/r-sprint`. Safe fallback: `stable/working-single-agent`
 | Saved candidate options (`state.candidates`: chosen + rejected, with reasons; unsimulated → null, never fabricated) | 🧪 |
 | Resume marker (`state.resumed`, `resume_count`) | 🧪 |
 | Model outage fallback: bounded timeouts, deterministic code fallback, attributed to CODE, safety still holds | ✅ (L6) |
-| **Multiple agent processes** (`AGENT_NAME`, e.g. agent-alpha / agent-beta) coordinating only through SpacetimeDB leases | 🧪 (two agents took two incidents in parallel live; full L7 pending) |
-| **One workflow per incident**, so several failures at once are handled in parallel by different agents | 🧪 (seen live; L7 pending) |
-| **Zones** (`AGENT_ZONE=loop-a / loop-b`): each agent prefers incidents in its part of the data center; takeover is global | 🧪 |
-| **Agent-to-agent messages** over SpacetimeDB: cross-zone move → ack/conflict, incident update, takeover broadcast, stand-by | 🧪 |
-| **Automatic takeover** without a restart: a standby agent adopts a dead agent's workflow when its lease expires | 🧪 |
-| Agent tests: 444 (multi-agent branch) / 404 (int) | 🧪 |
+| **Agent team** (`DCOS_AGENT_TEAM_MODE=multi`, default `single`): Cooling, Workload and Recovery Lead with separate contexts and partitioned evidence | ✅ on local DB (L1, L3 in team mode, one run each) |
+| **Agents talk:** each specialist asks the other a question; answers reach the asker or the Lead as real model input. A round where a specialist times out has no conversation | ✅ on local DB, in L1, L3 and SBK; not in SB |
+| **Agents cover each other:** if a specialist fails, the other answers for it; if the Lead fails, deterministic code chooses, labeled CODE | ✅ specialist cover seen live on local DB; Lead fallback seen once before the breaker fix |
+| **New-fault watch** during recovery: an unrelated incident triggers a replan at the next safe boundary (multi mode only) | 🧪 |
+| **Supervisor** (`supervised` script): relaunches a crashed agent, which reclaims the workflow after its lease expires | 🧪 (stand-in child only; not yet run with the real agent) |
+| **Waiting recovery:** failed checkpoint-backed jobs wait for capacity, then restart; jobs with no checkpoint go to an operator | ✅ on local DB (SB, SBK) |
+| Per-incident workflows, zones, inter-process agent messages and automatic hot-standby takeover (`r/multi-agent`) | Dropped, not merged |
+| Agent tests: 540 (`Prod-Multi-Agent-System`) | 🧪 |
 
 ## 4. Live recovery proof: R5 harness (`apps/agent/scripts/live-recovery-test.ts`)
 | Case | What it proves | Status |
@@ -77,8 +79,9 @@ Integration branch: `int/r-sprint`. Safe fallback: `stable/working-single-agent`
 | L4 | Stale fencing token rejected after takeover | ✅ 8/8 |
 | L5 | Source GPU fails on the checkpoint due tick → no false durability | 🧪 (harness fixed; re-run pending) |
 | L6 | Nemotron unreachable → safety holds, all events CODE | ✅ 5/5 |
-| L7 | Two agents, two incidents in parallel, messages, kill one → the other takes over | 🚧 (parallel split seen live; harness fix ready) |
-| L8 | Three incidents, two agents | 🚧 |
+| L1, L3 in team mode | Same checks, plus Lead decided, peer answer consumed, 6 model calls per round at most | ✅ 12/12 and 18/18 on local DB |
+| SB, SBK | Scene B: all nodes crash, jobs wait, nodes return, checkpoint-backed jobs restart; SBK adds a SIGKILL during the wait | ✅ SBK 25/25; SB 20/21 (recovery passed, no peer answer after a Workload timeout) on local DB |
+| L7, L8 | Multi-process cases from `r/multi-agent` | Dropped, not merged |
 | Refuses to reset prod; `--hold-s` keeps the final state up for recording; JSON + markdown reports | ✅ |
 
 ## 5. Evaluation: `apps/evaluation`
@@ -114,7 +117,7 @@ Integration branch: `int/r-sprint`. Safe fallback: `stable/working-single-agent`
 | Presenter controls (local only, never on Vercel): pump fault, XID 79, hot-r6 safety probe, reset | ✅ |
 | Polish pass (story order, larger type, accessibility WCAG AA, 390 px) | ✅ |
 | **UI v2:** previous look + left sidebar + separate pages (Cluster overview, Training jobs with animated progress, Recovery activity with the **Agent room** and incident explanations, Workflows, Benchmarks, Real GPU) + simple demo buttons | 🚧 `r/ui-v2` (awaiting owner review) |
-| Agent room: role seats, chat handoffs, alpha/beta owner chips, takeover dividers, agent-to-agent bubbles | 🚧 (EXAMPLE fixture in mock; live once multi-agent merges) |
+| Agent room: role seats, chat handoffs, alpha/beta owner chips, takeover dividers, agent-to-agent bubbles | 🚧 (EXAMPLE fixture in mock only; its alpha/beta design came from the dropped `r/multi-agent`, so live roles would be Cooling, Workload and Lead) |
 | Public site https://datacenteros.vercel.app | ⏳ still the old mock build; live deploy at 08:30 |
 | Web tests 101–137 + Playwright e2e with axe accessibility checks | ✅ |
 
@@ -126,5 +129,8 @@ Integration branch: `int/r-sprint`. Safe fallback: `stable/working-single-agent`
 ## Honest limits (say these if asked)
 - The 64-GPU cluster is **simulated** (an illustrative `demo_gpu` profile with H100-class numbers, not calibrated). Only the L40S tile is real hardware, and it's observation-only.
 - Evaluation numbers come from 12 simulated scenarios; no real-world savings claims.
-- Agent roles (triage, planner, …) live inside each agent process; separate processes are per agent, not per role.
+- The three team agents share one Node process, so a process crash stops all of them until it restarts and reclaims the work. No separate agent takes over.
+- Two recovery actions never run at once, and a running action cannot be interrupted.
+- Team mode's effect on recovery scores is unmeasured.
+- Agent findings can be factually wrong. The Lead picks only from code-validated options, and hard safety never depends on what an agent claims.
 - The scripted EXAMPLE views in mock mode are not live runs.

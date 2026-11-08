@@ -1,0 +1,1185 @@
+{
+  "meta": {
+    "harness": "live-recovery-test",
+    "commit": "468cda2433aa74806f2452527d1e2d805a4a4056-dirty",
+    "branch": "Prod-Multi-Agent-System",
+    "db": "dcos-r-local",
+    "run_id": "run-demo-1",
+    "seed": 42,
+    "speed": 2,
+    "preset_id": "gpu_demo_8",
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "llm_mode": "live_nim",
+    "team_mode": "multi",
+    "reset_performed": true,
+    "started_unix_ms": 1794144768562,
+    "node": "v22.23.4",
+    "platform": "darwin MacBook-Pro-8.local"
+  },
+  "case": "SBK",
+  "title": "Scene B + SIGKILL during the wait: fresh process keeps the wait and places once",
+  "evidence_label": "live DB + real agent process + live NIM [team mode: multi]",
+  "passed": true,
+  "failure_reasons": [],
+  "started_unix_ms": 1794144782787,
+  "ended_unix_ms": 1794144982116,
+  "sim_start_ms": 601000,
+  "sim_end_ms": 999000,
+  "command_keys": {
+    "restart_job-a": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+    "restart_job-b": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2"
+  },
+  "checks": [
+    {
+      "name": "precondition: job-a has a completed, accessible checkpoint",
+      "ok": true,
+      "detail": "ckpt-job-a-1, durable 86400"
+    },
+    {
+      "name": "precondition: job-b has a completed, accessible checkpoint",
+      "ok": true,
+      "detail": "ckpt-job-b-1, durable 40000"
+    },
+    {
+      "name": "precondition: job-c has no completed checkpoint",
+      "ok": true,
+      "detail": "latest none, complete rows 0"
+    },
+    {
+      "name": "all 8 node_crash faults accepted before the start tick",
+      "ok": true,
+      "detail": "accepted at sim 601000; outage starts at 613000",
+      "evidence": {
+        "nodes": [
+          "node-r8-n1",
+          "node-r7-n1",
+          "node-r6-n1",
+          "node-r5-n1",
+          "node-r4-n1",
+          "node-r3-n1",
+          "node-r2-n1",
+          "node-r1-n1"
+        ],
+        "start_sim_ms": 613000,
+        "duration_sim_ms": 90000,
+        "accepted_at_sim_ms": 601000
+      }
+    },
+    {
+      "name": "outage failed every job and took every node down",
+      "ok": true,
+      "detail": "sim 613000: job-a=failed job-b=failed job-c=failed",
+      "evidence": {
+        "sim_time_ms": 613000
+      }
+    },
+    {
+      "name": "recovery waiting for the checkpoint-backed jobs",
+      "ok": true,
+      "detail": "waiting=[job-a,job-b]",
+      "evidence": {
+        "waiting": [
+          "job-a",
+          "job-b"
+        ],
+        "missing": [],
+        "wrongly_waiting": []
+      }
+    },
+    {
+      "name": "waiting was observed while the nodes were still down",
+      "ok": true,
+      "detail": "unreachable 8/8 at sim 619000"
+    },
+    {
+      "name": "SIGKILL landed while recovery was waiting and nodes were down",
+      "ok": true,
+      "detail": "1 waiting workflow(s); nodes down=true",
+      "evidence": {
+        "workflows": [
+          "wf-inc-compute-node-r1-n1-b2"
+        ],
+        "nodes_down": true
+      }
+    },
+    {
+      "name": "workflow reclaimed by fresh process",
+      "ok": true,
+      "detail": "owner agent-MacBook-Pro-8.local-19433 -> agent-MacBook-Pro-8.local-19437, token 1 -> 2, attempt 1 -> 2",
+      "evidence": {
+        "workflow_id": "wf-inc-compute-node-r1-n1-b2",
+        "owner_before": "agent-MacBook-Pro-8.local-19433",
+        "owner_after": "agent-MacBook-Pro-8.local-19437",
+        "token_before": "1",
+        "token_after": "2",
+        "attempt_before": 1,
+        "attempt_after": 2
+      }
+    },
+    {
+      "name": "job-a work advancing after restart",
+      "ok": true,
+      "detail": "progress 86416 -> 86448",
+      "evidence": {
+        "before": 86416,
+        "after": 86448
+      }
+    },
+    {
+      "name": "job-b work advancing after restart",
+      "ok": true,
+      "detail": "progress 40008 -> 40024",
+      "evidence": {
+        "before": 40008,
+        "after": 40024
+      }
+    },
+    {
+      "name": "no migrate_restart requested during the outage",
+      "ok": true,
+      "detail": "none in sim [613000, 703000)",
+      "evidence": {
+        "start_sim_ms": 613000,
+        "end_sim_ms": 703000,
+        "violations": []
+      }
+    },
+    {
+      "name": "job-a restarted from its completed checkpoint",
+      "ok": true,
+      "detail": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2 -> [gpu-r1-n1-0,gpu-r1-n1-1,gpu-r1-n1-2,gpu-r1-n1-3,gpu-r1-n1-4,gpu-r1-n1-5,gpu-r1-n1-6,gpu-r1-n1-7,gpu-r2-n1-0,gpu-r2-n1-1,gpu-r2-n1-2,gpu-r2-n1-3,gpu-r2-n1-4,gpu-r2-n1-5,gpu-r2-n1-6,gpu-r2-n1-7], checkpoint ckpt-job-a-1, progress 88528 >= 86400",
+      "evidence": {
+        "job_id": "job-a",
+        "baseline_checkpoint": "ckpt-job-a-1",
+        "latest_checkpoint": "ckpt-job-a-1",
+        "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+        "problems": []
+      }
+    },
+    {
+      "name": "job-b restarted from its completed checkpoint",
+      "ok": true,
+      "detail": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2 -> [gpu-r3-n1-0,gpu-r3-n1-1,gpu-r3-n1-2,gpu-r3-n1-3,gpu-r3-n1-4,gpu-r3-n1-5,gpu-r3-n1-6,gpu-r3-n1-7], checkpoint ckpt-job-b-1, progress 40088 >= 40000",
+      "evidence": {
+        "job_id": "job-b",
+        "baseline_checkpoint": "ckpt-job-b-1",
+        "latest_checkpoint": "ckpt-job-b-1",
+        "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2",
+        "problems": []
+      }
+    },
+    {
+      "name": "exactly one placement per restarted job",
+      "ok": true,
+      "detail": "job-a: 1 [wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2]; job-b: 1 [wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2]",
+      "evidence": {
+        "placements": {
+          "job-a": [
+            "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2"
+          ],
+          "job-b": [
+            "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2"
+          ]
+        }
+      }
+    },
+    {
+      "name": "no GPU allocated to two jobs",
+      "ok": true,
+      "detail": "24 allocation rows, all unique",
+      "evidence": {
+        "doubled": {},
+        "inconsistent": []
+      }
+    },
+    {
+      "name": "job-c not restarted",
+      "ok": true,
+      "detail": "0 restart request(s) []; job failed on []",
+      "evidence": {
+        "requests": [],
+        "status": "failed"
+      }
+    },
+    {
+      "name": "job-c handed off to an operator",
+      "ok": true,
+      "detail": "handoffs=[wf-inc-compute-node-r1-n1-b2] escalations=[]",
+      "evidence": {
+        "handoffs": [
+          "wf-inc-compute-node-r1-n1-b2"
+        ],
+        "escalations": []
+      }
+    },
+    {
+      "name": "same accepted command keys reconciled",
+      "ok": true,
+      "detail": "0 keys retained, 2 added (replan allowed)",
+      "evidence": {
+        "retained": [],
+        "added": [
+          "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+          "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2"
+        ],
+        "lost": [],
+        "changed_payload": [],
+        "new_keys_for_existing_intent": []
+      }
+    },
+    {
+      "name": "first_wait_unix_ms preserved for wf-inc-compute-node-r1-n1-b2",
+      "ok": true,
+      "detail": "1794144792359 across 3 sample(s) from the new owner",
+      "evidence": {
+        "first_wait_unix_ms": 1794144792359,
+        "new_owner_samples": 3
+      }
+    },
+    {
+      "name": "model/fallback provenance reported",
+      "ok": true,
+      "detail": "configured nvidia/nemotron-3.5-lightning-30b-a3b (live_nim); events nemotron=8 code=13 fallback_notices=3; log nemotron_ok=0 nemotron_failed=0 endpoint_failovers=0; team models=[nvidia/nemotron-3.5-lightning-30b-a3b] lead=1 fallback=0",
+      "evidence": {
+        "configured_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "llm_mode": "live_nim",
+        "events": {
+          "codeEvents": 13,
+          "nemotronEvents": 8,
+          "fallbackNotices": 3,
+          "unattributed": 0
+        },
+        "log": {
+          "nemotron_ok": 0,
+          "nemotron_failed": 0,
+          "endpoint_failovers": 0
+        },
+        "team": {
+          "models": [
+            "nvidia/nemotron-3.5-lightning-30b-a3b"
+          ],
+          "lead_rounds": 1,
+          "fallback_rounds": 0
+        }
+      }
+    },
+    {
+      "name": "team: Lead decided",
+      "ok": true,
+      "detail": "1/1 round(s) decided by the Lead",
+      "evidence": {
+        "rounds": 1,
+        "lead_rounds": 1,
+        "fallback_rounds": 0,
+        "fallback_round_ids": [],
+        "missing_roles": []
+      }
+    },
+    {
+      "name": "team: specialist answer consumed by a role",
+      "ok": true,
+      "detail": "wf-inc-compute-node-r1-n1-b2:a2:e2:m5 workload -> [cooling,lead]; wf-inc-compute-node-r1-n1-b2:a2:e2:m6 cooling -> [lead]",
+      "evidence": {
+        "answers": 2,
+        "consumed": [
+          "wf-inc-compute-node-r1-n1-b2:a2:e2:m5",
+          "wf-inc-compute-node-r1-n1-b2:a2:e2:m6"
+        ]
+      }
+    },
+    {
+      "name": "team: at most 6 model calls per round",
+      "ok": true,
+      "detail": "max 5 calls across 1 round(s)",
+      "evidence": {
+        "calls": [
+          {
+            "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+            "calls_used": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "team: covers recorded with their roles",
+      "ok": true,
+      "detail": "no cover occurred",
+      "evidence": {
+        "covers": []
+      }
+    }
+  ],
+  "allocation_uniqueness": {
+    "ok": true,
+    "doubled": {}
+  },
+  "checkpoint_count": {
+    "job_id": "job-a",
+    "complete_before": 1,
+    "complete_after": 1
+  },
+  "verification": {
+    "verified": false,
+    "escalate": true,
+    "handoff": "Partial recovery: job-c needs an operator (no completed checkpoint). Recovery verified. job-a running on 16 GPUs in rack-r1,rack-r2; progress 88368→88528 wu over 10000 sim-ms; headroom ≥14.8 C [wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2]. job-b running on 8 GPUs in rack-r3; progress 40008→40088 wu over 10000 sim-ms; headroom ≥14.8 C [wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2]. Next: none pending from the agent; keep monitoring.",
+    "as_of_sim_time_ms": 999000,
+    "version": 1,
+    "source": "code",
+    "outcome": "operator_review",
+    "verification_interval_sim_ms": [
+      989000,
+      999000
+    ],
+    "evidence": {
+      "incident_ids": [
+        "inc-compute-node-r1-n1-b2",
+        "inc-compute-node-r2-n1-b2",
+        "inc-compute-node-r3-n1-b2",
+        "inc-compute-node-r4-n1-b2",
+        "inc-compute-node-r5-n1-b2",
+        "inc-compute-node-r6-n1-b2",
+        "inc-compute-node-r7-n1-b2",
+        "inc-compute-node-r8-n1-b2"
+      ],
+      "hypotheses": [
+        "inc-compute-node-r8-n1-b2: Host node-r8-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r8-n1 unreachable",
+        "inc-compute-node-r7-n1-b2: Host node-r7-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r7-n1 unreachable",
+        "inc-compute-node-r6-n1-b2: Host node-r6-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r6-n1 unreachable",
+        "inc-compute-node-r5-n1-b2: Host node-r5-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r5-n1 unreachable",
+        "inc-compute-node-r4-n1-b2: Host node-r4-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r4-n1 unreachable",
+        "inc-compute-node-r3-n1-b2: Host node-r3-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r3-n1 unreachable",
+        "inc-compute-node-r2-n1-b2: Host node-r2-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r2-n1 unreachable",
+        "inc-compute-node-r1-n1-b2: Host node-r1-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable — deterministic grouping (LLM unavailable): 9 symptom(s) share degraded provider node-r1-n1 unreachable"
+      ],
+      "decision_epoch": 6,
+      "max_gpu_evidence_age_sim_ms": 0
+    },
+    "affected_jobs": [
+      {
+        "job_id": "job-a",
+        "status": "running",
+        "progress_work_units": 88528,
+        "durable_work_units": 86400,
+        "racks": [
+          "rack-r1",
+          "rack-r2"
+        ]
+      },
+      {
+        "job_id": "job-b",
+        "status": "running",
+        "progress_work_units": 40088,
+        "durable_work_units": 40000,
+        "racks": [
+          "rack-r3"
+        ]
+      },
+      {
+        "job_id": "job-c",
+        "status": "failed",
+        "progress_work_units": 0,
+        "durable_work_units": 0,
+        "racks": []
+      }
+    ],
+    "actions": {
+      "completed": [
+        "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+        "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2"
+      ],
+      "verified": [
+        "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+        "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2"
+      ],
+      "unverified": [],
+      "blocked": [],
+      "failed": [],
+      "not_run": []
+    },
+    "checkpoint_outcome": [],
+    "placement_outcome": [
+      {
+        "job_id": "job-a",
+        "gpu_ids": [
+          "gpu-r1-n1-0",
+          "gpu-r1-n1-1",
+          "gpu-r1-n1-2",
+          "gpu-r1-n1-3",
+          "gpu-r1-n1-4",
+          "gpu-r1-n1-5",
+          "gpu-r1-n1-6",
+          "gpu-r1-n1-7",
+          "gpu-r2-n1-0",
+          "gpu-r2-n1-1",
+          "gpu-r2-n1-2",
+          "gpu-r2-n1-3",
+          "gpu-r2-n1-4",
+          "gpu-r2-n1-5",
+          "gpu-r2-n1-6",
+          "gpu-r2-n1-7"
+        ],
+        "racks": [
+          "rack-r1",
+          "rack-r2"
+        ]
+      },
+      {
+        "job_id": "job-b",
+        "gpu_ids": [
+          "gpu-r3-n1-0",
+          "gpu-r3-n1-1",
+          "gpu-r3-n1-2",
+          "gpu-r3-n1-3",
+          "gpu-r3-n1-4",
+          "gpu-r3-n1-5",
+          "gpu-r3-n1-6",
+          "gpu-r3-n1-7"
+        ],
+        "racks": [
+          "rack-r3"
+        ]
+      }
+    ],
+    "unresolved_infrastructure": [],
+    "remaining_risk": "forecast assumes the observed degradation persists and no hidden faults",
+    "next_human_action": "Partial recovery: job-c needs an operator (no completed checkpoint). none pending from the agent; keep monitoring",
+    "checks": [
+      {
+        "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+        "operation": "migrate_restart",
+        "ok": true,
+        "note": "job-a running on 16 GPUs in rack-r1,rack-r2; progress 88368→88528 wu over 10000 sim-ms; headroom ≥14.8 C"
+      },
+      {
+        "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2",
+        "operation": "migrate_restart",
+        "ok": true,
+        "note": "job-b running on 8 GPUs in rack-r3; progress 40008→40088 wu over 10000 sim-ms; headroom ≥14.8 C"
+      }
+    ]
+  },
+  "agent_generations": [
+    {
+      "generation": 1,
+      "pid": 19433,
+      "started_unix_ms": 1794144782792,
+      "ended_unix_ms": 1794144792414,
+      "how_ended": "SIGKILL",
+      "exit_code": null,
+      "stderr_tail": [
+        "[out] agent: config {\"STDB_URI\":\"ws://127.0.0.1:3000\",\"STDB_DB\":\"dcos-r-local\",\"STDB_AGENT_TOKEN\":\"***\",\"NIM_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"NIM_API_KEY\":\"***\",\"NIM_MODEL\":\"nvidia/nemotron-3.5-lightning-30b-a3b\",\"NIM_FALLBACK_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"LLM_MAX_TOKENS\":16384,\"LLM_MAX_TOOL_STEPS\":8,\"LLM_TIMEOUT_MS\":10000,\"LLM_RETRIES\":1,\"NIM_ENABLE_THINKING\":\"false\",\"DCOS_AGENT_TEAM_MODE\":\"multi\"}",
+        "[out] ℹ️ INFO Connecting to SpacetimeDB WS...",
+        "[out] agent: worker agent-MacBook-Pro-8.local-19433 on run run-demo-1 (sim t=601.0 s)",
+        "[out] agent: triage: overridden LLM assessment not used: no LLM configured"
+      ]
+    },
+    {
+      "generation": 2,
+      "pid": 19437,
+      "started_unix_ms": 1794144792416,
+      "ended_unix_ms": 1794144982110,
+      "how_ended": "stopped_by_harness",
+      "exit_code": null,
+      "stderr_tail": [
+        "[out] agent: config {\"STDB_URI\":\"ws://127.0.0.1:3000\",\"STDB_DB\":\"dcos-r-local\",\"STDB_AGENT_TOKEN\":\"***\",\"NIM_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"NIM_API_KEY\":\"***\",\"NIM_MODEL\":\"nvidia/nemotron-3.5-lightning-30b-a3b\",\"NIM_FALLBACK_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"LLM_MAX_TOKENS\":16384,\"LLM_MAX_TOOL_STEPS\":8,\"LLM_TIMEOUT_MS\":10000,\"LLM_RETRIES\":1,\"NIM_ENABLE_THINKING\":\"false\",\"DCOS_AGENT_TEAM_MODE\":\"multi\"}",
+        "[out] ℹ️ INFO Connecting to SpacetimeDB WS...",
+        "[out] agent: worker agent-MacBook-Pro-8.local-19437 on run run-demo-1 (sim t=621.0 s)",
+        "[out] agent: resume: wf-inc-compute-node-r1-n1-b2 took_over; duplicates 0",
+        "[err] [llm-debug] primary nvidia/nemotron-3.5-lightning-30b-a3b ok 5782 ms prompt=8972 B max_tokens=768 thinking=disabled tool_calls=2 finish=tool_calls tokens=2876/550",
+        "[err] [llm-debug] primary nvidia/nemotron-3.5-lightning-30b-a3b ok 5957 ms prompt=5950 B max_tokens=768 thinking=disabled tool_calls=1 finish=tool_calls tokens=1918/181",
+        "[err] [llm-debug] primary nvidia/nemotron-3.5-lightning-30b-a3b ok 4327 ms prompt=10115 B max_tokens=768 thinking=disabled tool_calls=1 finish=tool_calls tokens=3202/208",
+        "[err] [llm-debug] primary nvidia/nemotron-3.5-lightning-30b-a3b ok 1403 ms prompt=7101 B max_tokens=768 thinking=disabled tool_calls=1 finish=tool_calls tokens=2213/87",
+        "[err] [llm-debug] primary nvidia/nemotron-3.5-lightning-30b-a3b ok 2694 ms prompt=11201 B max_tokens=1024 thinking=disabled tool_calls=1 finish=tool_calls tokens=3795/282"
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "wall_unix_ms": 1794144782786,
+      "sim_time_ms": null,
+      "event": "controlled reset done",
+      "detail": {
+        "sim_time_after_ms": 601000,
+        "tick_index": 1,
+        "gpus": 64,
+        "jobs": 3,
+        "actions": 0,
+        "speed": 2
+      }
+    },
+    {
+      "wall_unix_ms": 1794144782788,
+      "sim_time_ms": 601000,
+      "event": "case start",
+      "detail": {
+        "sim_time_ms": 601000,
+        "speed": 2
+      }
+    },
+    {
+      "wall_unix_ms": 1794144782792,
+      "sim_time_ms": 601000,
+      "event": "agent generation 1 spawned",
+      "detail": {
+        "pid": 19433,
+        "no_llm": false,
+        "nim_override": null,
+        "team_mode": "multi"
+      }
+    },
+    {
+      "wall_unix_ms": 1794144782990,
+      "sim_time_ms": 601000,
+      "event": "outage queued",
+      "detail": {
+        "nodes": 8,
+        "start_sim_ms": 613000,
+        "duration_sim_ms": 90000
+      }
+    },
+    {
+      "wall_unix_ms": 1794144792402,
+      "sim_time_ms": 619000,
+      "event": "recovery waiting observed",
+      "detail": {
+        "workflows": [
+          "wf-inc-compute-node-r1-n1-b2"
+        ],
+        "jobs": [
+          "job-a",
+          "job-b"
+        ],
+        "waited_ms": 3656
+      }
+    },
+    {
+      "wall_unix_ms": 1794144792415,
+      "sim_time_ms": 619000,
+      "event": "agent generation 1 killed",
+      "detail": {
+        "pid": 19433,
+        "how": "SIGKILL",
+        "waited_ms": 11,
+        "sim_at_kill": 619000
+      }
+    },
+    {
+      "wall_unix_ms": 1794144792416,
+      "sim_time_ms": 619000,
+      "event": "agent generation 2 spawned",
+      "detail": {
+        "pid": 19437,
+        "no_llm": false,
+        "nim_override": null,
+        "team_mode": "multi"
+      }
+    },
+    {
+      "wall_unix_ms": 1794144805210,
+      "sim_time_ms": 645000,
+      "event": "workflow reclaimed",
+      "detail": {
+        "workflow_id": "wf-inc-compute-node-r1-n1-b2",
+        "owner": "agent-MacBook-Pro-8.local-19437",
+        "attempt": 2,
+        "waited_ms": 12777
+      }
+    },
+    {
+      "wall_unix_ms": 1794144833755,
+      "sim_time_ms": 703000,
+      "event": "nodes observed back",
+      "detail": {
+        "sim_time_ms": 703000,
+        "fault_end_sim_ms": 703000,
+        "waited_ms": 28545
+      }
+    },
+    {
+      "wall_unix_ms": 1794144981996,
+      "sim_time_ms": 999000,
+      "event": "workflow settled",
+      "detail": {
+        "workflow_id": "wf-inc-compute-node-r1-n1-b2",
+        "stage": "escalated",
+        "waited_ms": 4243
+      }
+    },
+    {
+      "wall_unix_ms": 1794144981997,
+      "sim_time_ms": 999000,
+      "event": "all workflows settled",
+      "detail": {
+        "workflows": [
+          "wf-inc-compute-node-r1-n1-b2@escalated"
+        ],
+        "waited_ms": 1
+      }
+    },
+    {
+      "wall_unix_ms": 1794144982110,
+      "sim_time_ms": 999000,
+      "event": "agent generation 2 stopped by harness",
+      "detail": {
+        "pid": 19437
+      }
+    }
+  ],
+  "last_snapshot_summary": {
+    "wall_unix_ms": 1794144981996,
+    "clock": {
+      "sim_time_ms": 999000,
+      "tick_index": 399,
+      "step_ms": 1000,
+      "wall_tick_ms": 1000,
+      "paused": false,
+      "decision_epoch": 6
+    },
+    "jobs": [
+      {
+        "job_id": "job-c",
+        "status": "failed",
+        "gpus": [],
+        "progress": 0,
+        "durable": 0
+      },
+      {
+        "job_id": "job-b",
+        "status": "running",
+        "gpus": [
+          "gpu-r3-n1-0",
+          "gpu-r3-n1-1",
+          "gpu-r3-n1-2",
+          "gpu-r3-n1-3",
+          "gpu-r3-n1-4",
+          "gpu-r3-n1-5",
+          "gpu-r3-n1-6",
+          "gpu-r3-n1-7"
+        ],
+        "progress": 40088,
+        "durable": 40000
+      },
+      {
+        "job_id": "job-a",
+        "status": "running",
+        "gpus": [
+          "gpu-r1-n1-0",
+          "gpu-r1-n1-1",
+          "gpu-r1-n1-2",
+          "gpu-r1-n1-3",
+          "gpu-r1-n1-4",
+          "gpu-r1-n1-5",
+          "gpu-r1-n1-6",
+          "gpu-r1-n1-7",
+          "gpu-r2-n1-0",
+          "gpu-r2-n1-1",
+          "gpu-r2-n1-2",
+          "gpu-r2-n1-3",
+          "gpu-r2-n1-4",
+          "gpu-r2-n1-5",
+          "gpu-r2-n1-6",
+          "gpu-r2-n1-7"
+        ],
+        "progress": 88528,
+        "durable": 86400
+      }
+    ],
+    "checkpoints": [
+      {
+        "id": "ckpt-job-a-1",
+        "job": "job-a",
+        "status": "complete",
+        "key": "preset.gpu_demo_8.ckpt-job-a-1",
+        "complete_at": 60000,
+        "accessible": true
+      },
+      {
+        "id": "ckpt-job-b-1",
+        "job": "job-b",
+        "status": "complete",
+        "key": "preset.gpu_demo_8.ckpt-job-b-1",
+        "complete_at": 540000,
+        "accessible": true
+      }
+    ],
+    "incidents": [
+      {
+        "id": "inc-compute-node-r1-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r1-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r2-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r2-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r3-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r3-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r4-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r4-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r5-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r5-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r6-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r6-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r7-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r7-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      },
+      {
+        "id": "inc-compute-node-r8-n1-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "Host node-r8-n1 unreachable: 8× gpu_unavailable, 1× node_unavailable"
+      }
+    ],
+    "workflows": [
+      {
+        "id": "wf-inc-compute-node-r1-n1-b2",
+        "stage": "escalated",
+        "owner": "agent-MacBook-Pro-8.local-19437",
+        "attempt": 3,
+        "version": 25,
+        "current": null
+      }
+    ],
+    "actions": [
+      {
+        "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+        "operation": "migrate_restart",
+        "job_id": "job-a",
+        "target": "job-a",
+        "status": "succeeded",
+        "reason_code": null,
+        "attempt": 1,
+        "claimed_by": "agent-MacBook-Pro-8.local-19437",
+        "due_sim_time_ms": 866000,
+        "depends_on": [],
+        "destination_gpu_ids": [
+          "gpu-r1-n1-0",
+          "gpu-r1-n1-1",
+          "gpu-r1-n1-2",
+          "gpu-r1-n1-3",
+          "gpu-r1-n1-4",
+          "gpu-r1-n1-5",
+          "gpu-r1-n1-6",
+          "gpu-r1-n1-7",
+          "gpu-r2-n1-0",
+          "gpu-r2-n1-1",
+          "gpu-r2-n1-2",
+          "gpu-r2-n1-3",
+          "gpu-r2-n1-4",
+          "gpu-r2-n1-5",
+          "gpu-r2-n1-6",
+          "gpu-r2-n1-7"
+        ],
+        "safety": {
+          "decision": "allow",
+          "violations": []
+        },
+        "start_safety": null,
+        "history": [
+          "requested@745000",
+          "claimed@745000",
+          "running@745000",
+          "succeeded@865000",
+          "succeeded@999000"
+        ]
+      },
+      {
+        "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2",
+        "operation": "migrate_restart",
+        "job_id": "job-b",
+        "target": "job-b",
+        "status": "succeeded",
+        "reason_code": null,
+        "attempt": 1,
+        "claimed_by": "agent-MacBook-Pro-8.local-19437",
+        "due_sim_time_ms": 988000,
+        "depends_on": [],
+        "destination_gpu_ids": [
+          "gpu-r3-n1-0",
+          "gpu-r3-n1-1",
+          "gpu-r3-n1-2",
+          "gpu-r3-n1-3",
+          "gpu-r3-n1-4",
+          "gpu-r3-n1-5",
+          "gpu-r3-n1-6",
+          "gpu-r3-n1-7"
+        ],
+        "safety": {
+          "decision": "allow",
+          "violations": []
+        },
+        "start_safety": null,
+        "history": [
+          "requested@867000",
+          "claimed@867000",
+          "running@867000",
+          "succeeded@987000",
+          "succeeded@999000"
+        ]
+      }
+    ],
+    "agent_events_tail": [
+      {
+        "stage": "plan",
+        "actor": "code",
+        "sim": 645000,
+        "summary": "waiting for capacity (attempt 1/3): job-a: no eligible restart placement for 16 GPUs; job-b: no eligible restart placement for 8 GPUs"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Workload → Lead: All 6 host nodes and their 8×GPUs per node report unreachable in inc-compute-node-*. Each node has 9 symptoms; 5 nodes r5‑r8 still unreachable; job‑a requires 16 GPUs and has checkpo…"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Workload → Cooling: Cooling: what is the thermal headroom in rack-r1 and rack-r2 (the destination racks for the best candidate placements of job‑a and job‑b)?"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Cooling → Lead: Cooling observation: rack-r6 avg temp 50.5 °C and max 50.7 °C on loop-b, min headroom 34.3 °C, below the safety margin of other racks (46.3 °C). Risk of thermal throttling or shutdown…"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Cooling → Workload: Workload: which job sits on rack-r6 that worries you most?"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Workload → Cooling: Job-a occupies node-r6-n1 in rack-r6 with 16 GPUs; its checkpoint ckpt-job-a-1 saved 86400 work units at sim_time 60000, well before the current 705000 ms. If job‑a cannot resume …"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Cooling → Workload: rack-r1 avg_temp 38.5 °C, min_headroom 46.3 °C; rack-r2 avg_temp 38.5 °C, min_headroom 46.3 °C"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "Lead → Supervisor: job-a:restart:r1+r2, job-b:restart:r3"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 743000,
+        "summary": "job-a: r1+r2 rank-1 vs r1+r3 rank-2: identical lost_wu=0, risk=0, but r1+r2 chosen as rank-1 with no unsafe actions, lower delay/waste and fewer preemptions; job-a occupies node-r6-n1 and losing it w…"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 745000,
+        "summary": "migrate_restart job-a → gpu-r1-n1-0 +15 running"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 867000,
+        "summary": "migrate_restart job-a → gpu-r1-n1-0 +15 succeeded"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 867000,
+        "summary": "migrate_restart job-b → gpu-r3-n1-0 +7 running"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 989000,
+        "summary": "migrate_restart job-b → gpu-r3-n1-0 +7 succeeded"
+      },
+      {
+        "stage": "verify",
+        "actor": "code",
+        "sim": 999000,
+        "summary": "verified: 2/2 checks passed over 10000 sim-ms"
+      },
+      {
+        "stage": "verify",
+        "actor": "code",
+        "sim": 999000,
+        "summary": "handoff: Partial recovery: job-c needs an operator (no completed checkpoint). Recovery verified. job-a running on 16 GPUs in rack-r1,rack-r2; progress 88368→88528 wu over 10000 sim-ms; headroom ≥14.8…"
+      }
+    ],
+    "unhealthy_gpus": []
+  },
+  "ledger": [
+    {
+      "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-a:2",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target": "job-a",
+      "status": "succeeded",
+      "reason_code": null,
+      "attempt": 1,
+      "claimed_by": "agent-MacBook-Pro-8.local-19437",
+      "due_sim_time_ms": 866000,
+      "depends_on": [],
+      "destination_gpu_ids": [
+        "gpu-r1-n1-0",
+        "gpu-r1-n1-1",
+        "gpu-r1-n1-2",
+        "gpu-r1-n1-3",
+        "gpu-r1-n1-4",
+        "gpu-r1-n1-5",
+        "gpu-r1-n1-6",
+        "gpu-r1-n1-7",
+        "gpu-r2-n1-0",
+        "gpu-r2-n1-1",
+        "gpu-r2-n1-2",
+        "gpu-r2-n1-3",
+        "gpu-r2-n1-4",
+        "gpu-r2-n1-5",
+        "gpu-r2-n1-6",
+        "gpu-r2-n1-7"
+      ],
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "start_safety": null,
+      "history": [
+        "requested@745000",
+        "claimed@745000",
+        "running@745000",
+        "succeeded@865000",
+        "succeeded@999000"
+      ]
+    },
+    {
+      "command_key": "wf-inc-compute-node-r1-n1-b2:migrate_restart:job-b:2",
+      "operation": "migrate_restart",
+      "job_id": "job-b",
+      "target": "job-b",
+      "status": "succeeded",
+      "reason_code": null,
+      "attempt": 1,
+      "claimed_by": "agent-MacBook-Pro-8.local-19437",
+      "due_sim_time_ms": 988000,
+      "depends_on": [],
+      "destination_gpu_ids": [
+        "gpu-r3-n1-0",
+        "gpu-r3-n1-1",
+        "gpu-r3-n1-2",
+        "gpu-r3-n1-3",
+        "gpu-r3-n1-4",
+        "gpu-r3-n1-5",
+        "gpu-r3-n1-6",
+        "gpu-r3-n1-7"
+      ],
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "start_safety": null,
+      "history": [
+        "requested@867000",
+        "claimed@867000",
+        "running@867000",
+        "succeeded@987000",
+        "succeeded@999000"
+      ]
+    }
+  ],
+  "team": {
+    "lead_rounds": 1,
+    "fallback_rounds": 0,
+    "malformed_workflows": [],
+    "rounds": [
+      {
+        "workflow_id": "wf-inc-compute-node-r1-n1-b2",
+        "trace": {
+          "version": 1,
+          "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+          "snapshot_sim_ms": 705000,
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "calls_used": 5,
+          "wall_ms": 14393,
+          "outcome": "lead",
+          "messages": [
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m1",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "workload",
+              "to": "lead",
+              "kind": "finding",
+              "reply_to": null,
+              "summary": "All 6 host nodes and their 8×GPUs per node report unreachable in inc-compute-node-*. Each node has 9 symptoms; 5 nodes r5‑r8 still unreachable; job‑a requires 16 GPUs and has checkpoint ckpt‑job‑a‑1 at 86400/86400, job‑b requires 8 GPUs and has checkpoint ckpt‑job‑b‑1 at 40000/40000; candidate placements for both jobs exist on rack‑r1 (and racks r2‑r4 for job‑a) but thermal headroom for destinati…",
+              "evidence_ids": [
+                "sig.613000.node-r1-n1.node_unreachable",
+                "sig.613000.node-r5-n1.node_unreachable",
+                "sig.703000.node-r1-n1.resource_recovered"
+              ],
+              "resource_ids": [
+                "node-r1-n1",
+                "node-r5-n1",
+                "job-a",
+                "job-b",
+                "ckpt-job-a-1",
+                "ckpt-job-b-1"
+              ],
+              "consumed_by": [
+                "lead"
+              ]
+            },
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m2",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "workload",
+              "to": "cooling",
+              "kind": "question",
+              "reply_to": null,
+              "summary": "Cooling: what is the thermal headroom in rack-r1 and rack-r2 (the destination racks for the best candidate placements of job‑a and job‑b)?",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [
+                "cooling",
+                "lead"
+              ]
+            },
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m3",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "cooling",
+              "to": "lead",
+              "kind": "finding",
+              "reply_to": null,
+              "summary": "Cooling observation: rack-r6 avg temp 50.5 °C and max 50.7 °C on loop-b, min headroom 34.3 °C, below the safety margin of other racks (46.3 °C). Risk of thermal throttling or shutdown. Other racks operate normally with 38.5 °C avg and 46.3 °C headroom. Loop-b serves rack-r6 and rack-r7–r8.",
+              "evidence_ids": [],
+              "resource_ids": [
+                "rack-r6",
+                "loop-b"
+              ],
+              "consumed_by": [
+                "lead"
+              ]
+            },
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m4",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "cooling",
+              "to": "workload",
+              "kind": "question",
+              "reply_to": null,
+              "summary": "Workload: which job sits on rack-r6 that worries you most?",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [
+                "workload",
+                "lead"
+              ]
+            },
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m5",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "workload",
+              "to": "cooling",
+              "kind": "answer",
+              "reply_to": "wf-inc-compute-node-r1-n1-b2:a2:e2:m4",
+              "summary": "Job-a occupies node-r6-n1 in rack-r6 with 16 GPUs; its checkpoint ckpt-job-a-1 saved 86400 work units at sim_time 60000, well before the current 705000 ms. If job‑a cannot resume on rack‑r6, it would lose all progress. Job‑b has no node assignment and its checkpoint ckpt-job-b-1 covers 40000 units, also at risk if reassigned away from its original rack.",
+              "evidence_ids": [
+                "sig.613000.node-r6-n1.node_unreachable"
+              ],
+              "resource_ids": [
+                "node-r6-n1",
+                "job-a",
+                "job-b",
+                "ckpt-job-a-1",
+                "ckpt-job-b-1"
+              ],
+              "consumed_by": [
+                "cooling",
+                "lead"
+              ]
+            },
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m6",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "cooling",
+              "to": "workload",
+              "kind": "answer",
+              "reply_to": "wf-inc-compute-node-r1-n1-b2:a2:e2:m2",
+              "summary": "rack-r1 avg_temp 38.5 °C, min_headroom 46.3 °C; rack-r2 avg_temp 38.5 °C, min_headroom 46.3 °C",
+              "evidence_ids": [],
+              "resource_ids": [
+                "rack-r1",
+                "rack-r2"
+              ],
+              "consumed_by": [
+                "lead"
+              ]
+            },
+            {
+              "id": "wf-inc-compute-node-r1-n1-b2:a2:e2:m7",
+              "round_id": "wf-inc-compute-node-r1-n1-b2:a2:e2",
+              "from": "lead",
+              "to": "supervisor",
+              "kind": "decision",
+              "reply_to": null,
+              "summary": "job-a:restart:r1+r2, job-b:restart:r3",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": []
+            }
+          ],
+          "covers": [],
+          "missing_roles": []
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "configured_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "llm_mode": "live_nim",
+    "events": {
+      "codeEvents": 13,
+      "nemotronEvents": 8,
+      "fallbackNotices": 3,
+      "unattributed": 0
+    },
+    "log": {
+      "nemotron_ok": 0,
+      "nemotron_failed": 0,
+      "endpoint_failovers": 0
+    },
+    "team": {
+      "models": [
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "lead_rounds": 1,
+      "fallback_rounds": 0
+    }
+  },
+  "error": null
+}

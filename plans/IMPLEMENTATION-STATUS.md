@@ -6,6 +6,21 @@ Read-only source/checkpoint audit against fetched **`origin/main` `95e1abd`**, p
 
 Evidence classes: **source** = implementation inspected; **reported test/live** = dated checkpoint report; **remaining** = proof or implementation not found. The recorded 697-test suite (15 contracts, 24 client, 353 physics, 9 evaluation, 290 agent, 6 web) is historical evidence in `plans/status/P2.md`, not a fresh run of this audit.
 
+## Agent-team sprint on `Prod-Multi-Agent-System` (2026-11-08, 07:40 CST)
+
+Three communicating Nemotron agents (Cooling, Workload, Recovery Lead) run behind `DCOS_AGENT_TEAM_MODE=multi`; the default stays `single`. Full status is in [MULTI-AGENT-HACKATHON-PLAN.md §0.9](MULTI-AGENT-HACKATHON-PLAN.md).
+
+| Check | Result | Boundary |
+|---|---|---|
+| Agent tests at `468cda2` | 513 passed, typecheck clean | Fake LLMs |
+| L1, team mode | 12/12 | Live on local `dcos-r-local`, one run |
+| L3 (Scene A), team mode | 18/18 | Live on local `dcos-r-local`, one run |
+| Agent tests with waiting recovery | 540 passed, typecheck clean | Fake LLMs |
+| SBK (Scene B with SIGKILL during the wait), team mode | 25/25 | Live on local `dcos-r-local`, one run |
+| SB (Scene B), team mode | 20/21 | Live on local `dcos-r-local`. Recovery passed; no peer answer because Workload timed out and Cooling covered |
+
+Not proven: anything on `dcos-dev` or prod, team-mode L2 and L4–L6, L1 and L3 after the Scene B fixes, the supervisor with the real agent, or any recovery-score benefit from the team. Agent findings can be factually wrong; deterministic safety does not rely on them. `origin/r/multi-agent` is not merged; that approach was dropped.
+
 ## R-sprint integration on `int/r-sprint` (2026-11-08, base `origin/main` `777b2bf`)
 
 Merged no-ff, in order: `r/r0-provenance` (R0 step 3, S1), `r/r1-completion` (R1, S2), `r/r6-eval-adapter` (R6 adapter + counters, S4), `r/r3-verify-handoff` (R3, S3). No conflicts. Kaushik's R2 (`start_action` blocking any nonempty violations) was **not yet** on `origin/lane/p2-db` (its head `cf56397` is an ancestor of main); `start_action` still rechecks only `decision === 'deny'`.

@@ -82,9 +82,25 @@ export interface PlanResult {
   /** Set when a job's mitigation was deferred (rule (b)): the caller must re-plan within this many sim seconds. */
   recheck_after_s?: number;
   team?: TeamTrace;
+  /** `waitForCapacity` only: failed, checkpoint-backed jobs with no eligible restart yet. Zero commands. */
+  waiting_jobs?: JobHold[];
+  /** `waitForCapacity` only: failed jobs that are never restarted automatically (no usable checkpoint). Zero commands. */
+  operator_jobs?: JobHold[];
+}
+
+export interface JobHold {
+  job_id: string;
+  reason: string;
 }
 
 export interface PlannerDeps {
+  /**
+   * Failed jobs restart only from a complete, accessible checkpoint; the rest are held with zero commands and reported
+   * in `waiting_jobs` / `operator_jobs`, and never reach the chooser. Defaults to on when `chooser` is set (team mode),
+   * so every planning entry point, runReplan included, behaves the same; `single` mode is untouched.
+   */
+  waitForCapacity?: boolean;
+  chooser?: OptionChooser;
   db: DbPort;
   physics: PhysicsPort;
   llm: LlmPort;
@@ -101,7 +117,6 @@ export interface PlannerDeps {
    * is clean for its whole lead time are deferred. Unset (the agent loop): act now.
    */
   recheckAfterS?: number;
-  chooser?: OptionChooser;
 }
 
 /** Why keep_running was put first for a job (RANKING_ASSUMPTION rule (a) / (b)). */
@@ -823,6 +838,38 @@ export function resolveConflicts(plans: JobPlan[], ranked: Map<string, RankedOpt
   });
 }
 
+// ---------------------------------------------------------------------------------------------- waiting recovery
+
+interface RestartBlock extends JobHold {
+  kind: 'waiting' | 'operator';
+}
+
+/** Why a job may not restart now, or null. `opts`: the job's options still open to it. */
+function restartBlock(ix: SnapshotIndex, jobId: string, opts: RankedOption[]): RestartBlock | null {
+  if (ix.jobState.get(jobId)?.status !== 'failed') return null;
+  const complete = ix.snap.checkpoints.filter((c) => c.job_id === jobId && c.status === 'complete' && c.complete_sim_time_ms !== null);
+  if (complete.length === 0) return { kind: 'operator', job_id: jobId, reason: 'no completed checkpoint' };
+  if (!complete.some((c) => c.accessible)) return { kind: 'operator', job_id: jobId, reason: 'completed checkpoint is not accessible' };
+  if (opts.some((o) => !o.excluded_reason && isOp(o, 'migrate_restart'))) return null;
+  return { kind: 'waiting', job_id: jobId, reason: `no eligible restart placement for ${ix.jobSpec.get(jobId)?.gpus_required ?? '?'} GPUs` };
+}
+
+/**
+ * A failed job with a usable checkpoint and an open restart restarts: "leave failed" and "escalate" are not offered,
+ * or a failed Lead's deterministic ranking could leave it down with GPUs free. With no restart open, `opts` is unchanged.
+ */
+function restartsOnly(ix: SnapshotIndex, jobId: string, opts: RankedOption[]): RankedOption[] {
+  if (ix.jobState.get(jobId)?.status !== 'failed') return opts;
+  return opts.some((o) => !o.excluded_reason && isOp(o, 'migrate_restart')) ? opts.filter((o) => isOp(o, 'migrate_restart')) : opts;
+}
+
+/** A held job's plan: always zero commands, so neither a model nor the deterministic path can pick `escalate`. */
+function heldJobPlan(opts: RankedOption[], block: RestartBlock): JobPlan {
+  const { excluded_reason: _excluded, ...floor } = opts.find((o) => o.commands.length === 0) ?? { ...opts[0]!, option_id: `${block.job_id}:keep`, commands: [], safety: [], not_simulated: true };
+  const label = block.kind === 'waiting' ? `${block.job_id} waiting for capacity` : `${block.job_id} needs an operator`;
+  return { job_id: block.job_id, chosen: { ...floor, label }, alternatives: [], decided_by: 'deterministic', needs_approval: false, explanation: `${label}: ${block.reason}` };
+}
+
 // ---------------------------------------------------------------------------------------------- entry point
 
 export async function planIncidents(deps: PlannerDeps, input: { incidents: Incident[] }): Promise<PlanResult> {
@@ -854,8 +901,21 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   const ranked = new Map<string, RankedOption[]>();
   const assumed = new Map<string, string>();
   let ctx = EMPTY_CONTEXT;
+  const waitForCapacity = deps.waitForCapacity ?? deps.chooser !== undefined;
+  const held: JobPlan[] = [];
+  const holds: RestartBlock[] = [];
+  const hold = (opts: RankedOption[], block: RestartBlock): JobPlan => {
+    holds.push(block);
+    return heldJobPlan(opts, block);
+  };
   for (const job of jobs) {
-    const opts = rankJobInContext(physics, ix, job, ctx, enumCtx, toolCalls, deps.recheckAfterS);
+    const all = rankJobInContext(physics, ix, job, ctx, enumCtx, toolCalls, deps.recheckAfterS);
+    const block = waitForCapacity ? restartBlock(ix, job.job_id, all) : null;
+    if (block) {
+      held.push(hold(all, block));
+      continue;
+    }
+    const opts = waitForCapacity ? restartsOnly(ix, job.job_id, all) : all;
     ranked.set(job.job_id, opts);
     const top = deterministicTop(opts);
     assumed.set(job.job_id, top.option_id);
@@ -875,9 +935,11 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   let finalCtx = EMPTY_CONTEXT;
   let diverged = false;
   for (const job of jobs) {
+    if (!ranked.has(job.job_id)) continue; // held above
     let opts = ranked.get(job.job_id)!;
     if (diverged) {
       opts = rankJobInContext(physics, ix, job, finalCtx, enumCtx, toolCalls, deps.recheckAfterS);
+      if (waitForCapacity) opts = restartsOnly(ix, job.job_id, opts);
       ranked.set(job.job_id, opts);
     }
     const d = decideJob(opts, byJob.get(job.job_id), llmUp);
@@ -885,7 +947,16 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
     finalCtx = extendContext(finalCtx, d.chosen);
     decided.push({ ...d, alternatives: [] });
   }
-  const jobPlans = resolveConflicts(decided, ranked);
+  const resolved = resolveConflicts(decided, ranked);
+  // Re-scoring or a destination conflict can take away the last restart of a job that had one before the choice.
+  const stillOpen = (p: JobPlan): JobPlan => {
+    if (isOp(p.chosen, 'migrate_restart')) return p;
+    const others = new Set(resolved.filter((o) => o !== p).flatMap((o) => destinations(o.chosen)));
+    const opts = ranked.get(p.job_id) ?? [];
+    const block = restartBlock(ix, p.job_id, opts.filter((o) => !destinations(o).some((g) => others.has(g))));
+    return block ? hold(opts, block) : p;
+  };
+  const jobPlans = [...(waitForCapacity ? resolved.map(stillOpen) : resolved), ...held];
 
   const commands = jobPlans.flatMap((p) => p.chosen.commands);
   const plan = await buildPlan({ physics, ix, planId, runId, workflowId, attempt, incidentIds, jobPlans, commands, llmUp, toolCalls });
@@ -902,6 +973,12 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
     ...planNarrative(jobPlans, llmUp),
     ...(recheckAfterS !== undefined ? { recheck_after_s: recheckAfterS } : {}),
     ...(teamResult ? { team: teamResult.team } : {}),
+    ...(waitForCapacity
+      ? {
+          waiting_jobs: holds.filter((b) => b.kind === 'waiting').map(({ job_id, reason }) => ({ job_id, reason })),
+          operator_jobs: holds.filter((b) => b.kind === 'operator').map(({ job_id, reason }) => ({ job_id, reason })),
+        }
+      : {}),
   };
 }
 

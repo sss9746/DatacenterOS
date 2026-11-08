@@ -296,6 +296,15 @@ describe('validation', () => {
     expect(requestsFor(llm, 'cooling:submit_finding')).toHaveLength(2); // Cooling covered
   });
 
+  it('keeps a finding that puts a real resource id in evidence_ids, and moves the id to resource_ids', async () => {
+    const llm = teamLlm({ 'cooling:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...COOLING_FINDING, evidence_ids: ['rack-r2'], resource_ids: [] }) });
+    const r = await plan(llm);
+    const finding = messagesOf(r, 'finding').find((m) => m.from === 'cooling')!;
+    expect(finding.evidence_ids).toEqual([]);
+    expect(finding.resource_ids).toEqual(['rack-r2']);
+    expect(r.team!.covers).toEqual([]);
+  });
+
   it('rejects a finding citing a resource outside the role bundle', async () => {
     const llm = teamLlm({ 'cooling:submit_finding': () => FakeLlm.toolCall('submit_finding', { ...COOLING_FINDING, resource_ids: ['job-a'] }) });
     const r = await plan(llm);
@@ -320,7 +329,7 @@ describe('failure and deadlines', () => {
     expect(r.used_llm).toBe(false);
   });
 
-  it('times hung calls out at 8 s each and finishes inside the round deadline', async () => {
+  it('times hung calls out at the call limit and finishes inside the round deadline', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const llm = teamLlm({ 'cooling:submit_finding': never, 'workload:submit_finding': never, [LEAD]: never });
     const running = plan(llm);
@@ -328,7 +337,7 @@ describe('failure and deadlines', () => {
     const r = await running;
     expect(r.team!.outcome).toBe('deterministic');
     expect(r.team!.calls_used).toBe(3);
-    expect(r.team!.wall_ms).toBe(16_000);
+    expect(r.team!.wall_ms).toBe(2 * TEAM_BUDGET.callTimeoutMs);
     expect(r.team!.wall_ms).toBeLessThanOrEqual(TEAM_BUDGET.roundMs);
   });
 
@@ -337,7 +346,7 @@ describe('failure and deadlines', () => {
     const late = deferred<LlmChatResponse>();
     const llm = teamLlm({ 'cooling:submit_finding': () => late.promise });
     const running = plan(llm);
-    await vi.advanceTimersByTimeAsync(9_000);
+    await vi.advanceTimersByTimeAsync(TEAM_BUDGET.callTimeoutMs + 1_000);
     late.resolve(FakeLlm.toolCall('submit_finding', COOLING_FINDING));
     await vi.advanceTimersByTimeAsync(1_000);
     const r = await running;
