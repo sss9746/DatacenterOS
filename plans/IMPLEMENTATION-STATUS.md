@@ -22,7 +22,27 @@ Merged no-ff, in order: `r/r0-provenance` (R0 step 3, S1), `r/r1-completion` (R1
 | `evaluate --cases fixed12 --no-llm` | 36/36 validated rows, every row with provenance, 12 matched groups; artifact `apps/evaluation/results/deterministic-fixed12-2026-11-08/` (rows, traces, manifest, summary) at revision `c4b10b3` (the merge commit). **Deterministic-only:** Nemotron rows have `model_enabled: false`; this is a rehearsal, not a Nemotron performance claim. Gate 4 stays partial until a live or cached-replay NIM matrix exists |
 | `apps/agent/eval-results/deterministic-2026-11-08.json` | regenerated with the merged physics: identical except `generated_at`, so it was not replaced (zero baseline drift from R1) |
 
-Documented limits carried from the task reports: R1 leaves a thermal-shutdown latch derived on the exact checkpoint due tick able to complete that checkpoint (fatal XID/node-crash faults are covered), and completion freshness is scoped to destination GPUs. R3's `closeNoAction` still saves a no-action handoff as `recovered`/verified; `checkPowerCap` treats a missing `power_limit_w` as unverified instead of the 500 W default. The live NIM path of the evaluation adapter has no test. `apps/db` consumes `@dcos/physics` from its built `dist` (there is no `apps/db/src/physics` copy), so the physics build is the sync step; republishing `dcos-dev` from this branch remains Kaushik's step.
+Documented limits carried from the task reports: R1 leaves a thermal-shutdown latch derived on the exact checkpoint due tick able to complete that checkpoint (fatal XID/node-crash faults are covered), and completion freshness is scoped to destination GPUs. R3's `closeNoAction` and `checkPowerCap` limits were fixed in the review pass below. The live NIM path of the evaluation adapter has no test. `apps/db` consumes `@dcos/physics` from its built `dist` (there is no `apps/db/src/physics` copy), so the physics build is the sync step; republishing `dcos-dev` from this branch remains Kaushik's step.
+
+### Review pass on `int/r-sprint` (2026-11-08, commits `7bfee16`, `15d2f77`)
+
+Two HIGH review findings fixed, plus one carried limit:
+
+- **Provenance label (CONTRACTS §0.14):** `modeLabel` returned `model-assisted (live)` for a `model_enabled` row whose requests all failed (`live_model_responses + cache_hits === 0`) while `fallback_decisions` was 0, because the policy only counted planner fallbacks and a failed triage call on a no-incident case never reached the planner. Now such a row is `model-enabled, no model response (deterministic)` (never prefixed `model-assisted`, so the web scoreboard does not count it), and `createNemotronPolicy` counts a triage model request that produced no usable assessment as one fallback decision per decision, also when the planner never runs. No-model counting is unchanged (still one fallback per replan).
+- **No-action close (SCOPE §4 "Verification"):** `closeNoAction` persisted `outcome: 'recovered'`, `verified: true` with no executed command, no second sample and a zero-width interval. New `HandoffOutcome` `'monitoring'` (`verified: false`, `escalate: false`, own headline and next step); the incident still goes to `monitoring`, the workflow still closes `done`, nothing is escalated. `agent-loop.test.ts` "closes as monitoring" now asserts the unverified outcome (asserted behavior changed by the plan).
+- **500 W default:** `checkPowerCap` reads a `power_cap` without `power_limit_w` back against the 500 W default (SCOPE §4 table) and records `power_limit_source`, instead of marking it unverified. The agent's own builder and safety path still always carry the explicit limit.
+
+| Gate re-run at `15d2f77` | Measured result |
+|---|---|
+| `pnpm -r test` (clean run) | 770 passed, 0 failed: contracts 23, db-client 24, physics 370, evaluation 20, agent 327, web 6. A first run with two evaluation batches executing concurrently failed only `gpu-simulate.test.ts` "runs a 600 s plan fast enough" (wall-clock `< 1000 ms` assertion, 6.5 s under load); it passes alone and in the clean run |
+| `tsc --noEmit` in all seven packages | clean |
+| `validate_contracts.py` | all 7 fixtures valid |
+| `pnpm --filter @dcos/web build` | built (pre-existing >500 kB chunk warning) |
+| `crash-test.ts` / `demo-local.ts` | 5/5 kill points PASS / DEMO OK (6/6), in-memory fakes, no NIM key |
+| `evaluate --cases fixed12 --no-llm` | 36/36 validated rows, 36 with provenance, 0 `model_enabled`; metrics and provenance (minus batch id, code_revision, wall time) identical to the committed `deterministic-fixed12-2026-11-08` artifact, which therefore stays as the committed deterministic-only artifact |
+| `eval-side-by-side.ts` | 60 rows, identical to `apps/agent/eval-results/deterministic-2026-11-08.json` except `generated_at`; not replaced |
+
+Still open after this pass: Kaushik's R2 (`start_action` blocking any nonempty violations) is not on `origin/lane/p2-db`; the live/cached-replay NIM matrix (Gate 4) does not exist; live publish → read-back of a provenance row is unproven; `checkCheckpoint` without a baseline rests on `durable >= checkpoint wu` alone.
 
 Integration follow-ups done here: `@dcos/physics` now exports `runScenarioDetailed`/`ScenarioRunDetails`; `summarizeResults` (shared by the web scoreboard) refuses mixed batch/revision/horizon or legacy-plus-provenance sets, reports per-policy mode labels from provenance and unfinished-job totals (null when any row lacks provenance); the scoreboard shows them; `publish_evaluation_result` fills `policy_version`/`physics_profile_version` from supplied provenance (R0 step 4; legacy rows unchanged). Live publish → read-back of a provenance row (R0 step 5) is not proven here: no database was touched.
 
