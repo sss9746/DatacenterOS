@@ -202,6 +202,25 @@ The browser can read public tables without a token. **Tokens are handed out by P
 16. **`heartbeat_workflow` does not bump `workflow.version`.** It only extends `lease_expires_unix_ms` with the same fencing token. `update_workflow` bumps the version.
 17. **When the model is unavailable,** the agent still runs its **deterministic, safety-checked** plan. Events are tagged `actor: "code"` and the summary starts with "deterministic:". Plans are flagged `needs_approval` for the UI but not held back, because hackathon demo resilience outweighs approval gating. `requireApproval=true` turns the gating on.
 
+### 0.12 Decisions from P1 build questions (doc-only, no schema change)
+1. **XID event name** is `event_type: "xid_error"` (§0.5 already fixed).
+2. **The run clock starts at `sim_time_ms = 600000`** (10 min) in `gpu_demo_8`. This keeps checkpoint ages visible without negative times:
+   - job-a's last checkpoint completed at **60000** (9 min old).
+   - job-b's completed at **540000** (1 min old).
+   - job-c has none.
+
+   **Every "t = X" in the gates is relative to the run start:** pump-a degradation is at **610000**, i.e. start + 10 s. Ages are always `sim_time_ms − complete_sim_time_ms`. Don't stamp pre-run checkpoints at 0, because that erases the job-a vs job-b difference the demo depends on.
+3. **Commands into `step`:** the trusted caller (P2's tick) calls `enqueueCommands(world, cmds)`, which stores them in the hidden `command_inbox`. A command starts on the tick its `action_id` appears in `requested_action_ids`, and once per `command_key`. There's no schema change for now.
+4. **Per-command outcome:** `commandOutcome(world, command_key) → { status, reason_code? }` is frozen in `@dcos/physics`. The §0.7 reason codes gain the physics-only codes `JOB_NOT_FOUND`, `JOB_STATE_INVALID`, `TARGET_NOT_FOUND`, `INVALID_ARGUMENT` and `JOB_FAILED_DURING_OPERATION`.
+5. **Due times:** physics computes them (checkpoint = start + 30 s, migrate_restart = start + 120 s, everything else = next tick). `inFlightCommands(world) → [{ command_key, due_sim_time_ms }]` is frozen, and P2 copies the value into `action.due_sim_time_ms`.
+6. **`migrate_restart` destination:** the standard form is `arguments.destination_gpu_ids` (an exact set), which is what P3 sends. Physics also accepts `destination_node_ids` (first free ready GPUs on those nodes) for judge or manual use only.
+7. **Storage outage:** there's no new fault kind yet. A `node_crash` or `network_link_down` that targets `ckpt-store-1` means storage is inaccessible (`checkpoint.accessible = false`). A dedicated `checkpoint_store_outage` kind is Tier 2.
+8. **GPU availability values** are `ready | degraded | cordoned | unreachable`:
+   - XID 79, thermal shutdown and node crash → `unreachable`
+   - XID 48 and XID 74 → `degraded`
+   - cordon → `cordoned`
+9. **Scenario:** `{ scenario_id, seed, preset_id, faults, horizon_s }` may also carry optional `initial_overrides` and `description` fields. P1 documents their exact shape in `packages/physics`.
+
 ---
 
 # Design kit contracts (Kaushik, v1.1.0 with §0 adaptations)
