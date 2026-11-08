@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import type { ActionDetail, AgentActor, AgentEventInput, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import type { Incident, ObservedSnapshot } from '@dcos/contracts';
-import { Code2, RotateCcw, Sparkles } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Code2, RotateCcw, Sparkles, UserRound } from 'lucide-react';
 import { Badge, Empty, Panel } from '../ui/panel';
 import { duration } from '../../lib/utils';
 import {
@@ -10,10 +10,12 @@ import {
   buildWorkflowViews,
   formatSpan,
   operationLabel,
+  subjectOf,
   type ActionLine,
   type CandidateOption,
   type CandidateRound,
   type InfraLine,
+  type ResumeEvidence,
   type StatusKind,
   type WorkflowView,
 } from './workflow-view';
@@ -86,9 +88,7 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
     </ol>
     <p className={`wf-status wf-status-${view.status.kind}`}><strong>{view.status.label}.</strong> {view.status.detail}</p>
     {view.replan && wf.stage !== 'replan' && <p className="wf-note">Replanned{view.replan.previous_plan_id ? <> from <code>{view.replan.previous_plan_id}</code></> : ''}: {view.replan.reason ?? 'reason not recorded'}.</p>}
-    {view.resumed && <p className="wf-note">{view.resumed.source === 'workflow_state'
-      ? <span className="wf-wrap">Resumed by {view.resumed.by_worker}{view.resumed.previous_owner ? ` (was ${view.resumed.previous_owner})` : ''} at sim {duration(view.resumed.sim_time_ms)}{view.resumed.count !== null ? `, #${view.resumed.count}` : ''} · {view.resumed.action?.replaceAll('_', ' ')} · recorded in the persisted workflow state</span>
-      : <>Resumed at {simAt(view.resumed.sim_time_ms)}, {view.resumed.source === 'reconcile_tool_calls' ? 'from ledger reconciliation tool calls' : 'from the resume event summary'}: <span className="wf-wrap">{view.resumed.detail}</span></>}</p>}
+    {view.resumed && <ResumedRow resumed={view.resumed} noDuplicate={view.resumedWithoutDuplicate}/>}
     <dl className="wf-labels">
       <div><dt>Plan</dt><dd>{view.planId ? <code>{view.planId}</code> : 'not recorded'}</dd></div>
       <div><dt>Plan attempt</dt><dd>{view.attempt ?? 'not recorded'}</dd></div>
@@ -102,6 +102,28 @@ const WorkflowCard = memo(function WorkflowCard({ view, example, simNow, now, pl
     <Handoff view={view} example={example}/>
   </article>;
 });
+
+const RESUME_SOURCE_NOTE: Record<ResumeEvidence['source'], string> = {
+  workflow_state: 'recorded in the persisted workflow state',
+  reconcile_tool_calls: 'from ledger reconciliation tool calls',
+  event_summary: 'from the resume event summary',
+};
+
+/**
+ * One-line resume callout. "no duplicate action" appears only when the ledger evidence supports it
+ * (`resumedWithoutDuplicate`); "stopped" is what the lapsed lease shows, not a claim about why the first agent stopped.
+ */
+function ResumedRow({ resumed, noDuplicate }: { resumed: ResumeEvidence; noDuplicate: boolean | null }) {
+  const who = resumed.by_worker ? <>resumed by <code>{resumed.by_worker}</code></> : 'resumed';
+  const stopped = resumed.previous_owner ? <>Agent <code>{resumed.previous_owner}</code> stopped</> : 'Agent stopped';
+  return <div className="wf-resumed" role="note">
+    <RotateCcw size={15} aria-hidden="true"/>
+    <div className="wf-resumed-body">
+      <p className="wf-resumed-line">{stopped} <span className="wf-resumed-arrow" aria-hidden="true">→</span><span className="sr-only">, then</span> {who} at sim {duration(resumed.sim_time_ms)}{resumed.count !== null && resumed.count > 1 ? ` (resume #${resumed.count})` : ''}{noDuplicate === true && <> · <strong>no duplicate action</strong></>}{noDuplicate === false && <> · <strong className="wf-resumed-dup">ledger shows a repeated action</strong></>}</p>
+      <p className="wf-resumed-note">{resumed.action ? `${resumed.action.replaceAll('_', ' ')} · ` : ''}{RESUME_SOURCE_NOTE[resumed.source]}{resumed.source !== 'workflow_state' ? <>: <span className="wf-wrap">{resumed.detail}</span></> : ''}</p>
+    </div>
+  </div>;
+}
 
 /** The workflow's selected plan (`workflow.plan_id`) from the persisted `plan` table. `plan.status` is not shown: it stays `proposed`. */
 function SelectedPlan({ plan, planId }: { plan: PlanRecord | null; planId: string | null }) {
@@ -180,13 +202,51 @@ function InfraList({ title, lines }: { title: string; lines: InfraLine[] }) {
   return <div className="wf-group"><h4>{title}</h4><ul>{lines.slice(0, MAX_INFRA).map((l) => <li key={l.resource_id}><span><code>{l.resource_id}</code> {l.state}</span></li>)}</ul>{lines.length > MAX_INFRA && <p className="wf-muted">+{lines.length - MAX_INFRA} more</p>}</div>;
 }
 
+/** Verified actions for the handoff card: persisted `actions.verified` keys, else ledger verify_action records. */
+function verifiedActionLines(view: WorkflowView): Array<{ key: string; text: string; source: 'handoff' | 'ledger' }> {
+  const byKey = new Map(view.actions.map((a) => [a.command.command_key, a.command]));
+  const persisted = view.verification?.actions?.verified;
+  if (persisted && persisted.length) return persisted.map((key) => { const c = byKey.get(key); return { key, text: c ? `${operationLabel(c.operation)} ${subjectOf(c)}` : key, source: 'handoff' as const }; });
+  return view.groups.completed.filter((l) => l.verified === true).map((l) => ({ key: l.command_key, text: `${operationLabel(l.operation)} ${l.subject}`, source: 'ledger' as const }));
+}
+
+/**
+ * Two-column handoff: what the verifier confirmed (left) and what still needs a person (right). Every line comes from
+ * the persisted OperatorHandoff (`state.verification`) or the ledger; empty sides say so instead of disappearing.
+ */
+function HandoffCard({ view, example }: { view: WorkflowView; example: boolean }) {
+  const v = view.verification;
+  const verified = verifiedActionLines(view);
+  const tone = v?.verified === true ? 'recovered' : v?.verified === false ? 'review' : 'unknown';
+  const title = v?.verified === true ? 'Recovered' : v?.verified === false ? 'Not verified' : 'Verification not recorded';
+  const evidence = v?.asOf ? (v.asOf.from !== null ? `${duration(v.asOf.from)}–${duration(v.asOf.to)} sim` : `as of ${duration(v.asOf.to)} sim`) : 'time not recorded';
+  const unresolved = v?.unresolved ?? [];
+  const outcome = v?.outcome ? v.outcome.replaceAll('_', ' ') : null;
+  return <div className={`wf-handoff-card wf-handoff-${tone}`}>
+    <section className="wf-handoff-col wf-handoff-left" aria-label={title}>
+      <h4 className="wf-handoff-title">{v?.verified === true ? <CheckCircle2 size={15} aria-hidden="true"/> : <CircleDashed size={15} aria-hidden="true"/>}{title}{outcome && outcome.toLowerCase() !== title.toLowerCase() ? <span className="wf-handoff-outcome">{outcome}</span> : null}</h4>
+      {verified.length
+        ? <ul className="wf-handoff-list">{verified.map((l) => <li key={l.key}><span>{l.text}</span><code className="wf-key">{l.key}</code></li>)}</ul>
+        : <p className="wf-handoff-empty">No verified actions recorded</p>}
+      <p className="wf-handoff-verifier">{v ? <>{v.source === 'code' ? 'Deterministic verifier' : v.source ? `Verifier: ${v.source}` : 'Verifier not recorded'} · evidence {evidence}{verified.some((l) => l.source === 'ledger') ? ' · verified in the ledger' : ''}</> : 'No verification result persisted.'}</p>
+      {v?.handoff && <p className="wf-handoff-quote wf-wrap">{v.handoff}{example ? ' (scripted)' : ''}</p>}
+    </section>
+    <section className="wf-handoff-col wf-handoff-right" aria-label="Needs a human">
+      <h4 className="wf-handoff-title"><UserRound size={15} aria-hidden="true"/>Needs a human</h4>
+      {unresolved.length
+        ? <ul className="wf-handoff-list">{unresolved.map((u, i) => <li key={i}><span className="wf-wrap">{u}</span></li>)}</ul>
+        : <p className="wf-handoff-empty">No unresolved infrastructure reported</p>}
+      <p className="wf-handoff-next"><strong>Next step:</strong> {view.nextStep ? <>{view.nextStep.text} <span className="wf-handoff-src">({view.nextStep.source === 'verification' ? 'persisted handoff' : 'escalation reason'})</span></> : 'not recorded'}</p>
+      {v?.remainingRisk && <p className="wf-handoff-risk wf-wrap"><strong>Remaining risk:</strong> {v.remainingRisk}</p>}
+    </section>
+  </div>;
+}
+
 function Handoff({ view, example }: { view: WorkflowView; example: boolean }) {
   const v = view.verification;
   const g = view.groups;
   const infraCount = view.infra.cooling.length + view.infra.relatedGpus.length + view.infra.otherGpus.length;
-  return <details className="wf-section" open={view.terminal}>
-    <summary>{view.terminal ? 'Handoff' : 'Actions so far'} · {view.actions.length} {view.actions.length === 1 ? 'action' : 'actions'}</summary>
-    <div className="wf-section-body">
+  const detail = <div className="wf-section-body">
       {!view.terminal && <p className="wf-muted">Handoff not written yet: the agent persists it when it verifies or escalates.</p>}
       <div className="wf-group"><h4>Evidence and hypothesis</h4>{v && v.hypotheses.length ? <ul>{v.hypotheses.map((h, i) => <li key={i}><span className="wf-wrap">{h}</span><span className="wf-muted">persisted handoff</span></li>)}</ul> : view.incidents.some((i) => i.hypothesis) ? <ul>{view.incidents.map((i) => <li key={i.incident_id}><span className="wf-wrap">{i.hypothesis ?? 'No hypothesis recorded.'}</span><code className="wf-key">{i.incident_id}</code></li>)}</ul> : <p className="wf-muted">No hypothesis recorded on the linked incidents.</p>}</div>
       <h4 className="wf-subhead">Workload mitigation</h4>
@@ -219,6 +279,11 @@ function Handoff({ view, example }: { view: WorkflowView; example: boolean }) {
       <InfraList title="Other unavailable GPUs" lines={view.infra.otherGpus}/>
       {infraCount === 0 && <p className="wf-muted">No degraded cooling or unavailable GPU is currently observed.</p>}
       <div className="wf-group"><h4>Next human step</h4><p className="wf-wrap">{view.nextStep ? <>{view.nextStep.text} <span className="wf-muted">({view.nextStep.source === 'verification' ? 'from the persisted handoff' : 'from the escalation reason'})</span></> : 'Not recorded.'}</p></div>
-    </div>
+    </div>;
+  return <details className="wf-section wf-handoff-section" open={view.terminal}>
+    <summary>{view.terminal ? 'Handoff' : 'Actions so far'} · {view.actions.length} {view.actions.length === 1 ? 'action' : 'actions'}</summary>
+    {view.terminal
+      ? <div className="wf-section-body wf-handoff-body"><HandoffCard view={view} example={example}/><details className="wf-raw"><summary>Full handoff record · evidence, ledger, infrastructure</summary>{detail}</details></div>
+      : detail}
   </details>;
 }

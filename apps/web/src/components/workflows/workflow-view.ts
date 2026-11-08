@@ -39,8 +39,10 @@ export function trackStageOf(stage: AgentStage): TrackStage {
  * - `not_reached`: after the current step and nothing recorded
  * - `verified` / `review`: the Verify step of a closed workflow, from the persisted verification result
  * - `escalated`: the step at which the workflow was escalated to an operator
+ * - `blocked`: the Safety step when the ledger rejected one of this workflow's actions (failed + SAFETY_REJECTED);
+ *   the label carries the first recorded violation code
  */
-export type StepState = 'current' | 'recorded' | 'run_level' | 'no_event' | 'not_reached' | 'verified' | 'review' | 'escalated';
+export type StepState = 'current' | 'recorded' | 'run_level' | 'no_event' | 'not_reached' | 'verified' | 'review' | 'escalated' | 'blocked';
 export interface TrackStep { id: TrackStage; label: string; state: StepState; stateLabel: string }
 
 const STEP_LABEL: Record<StepState, string> = {
@@ -52,6 +54,7 @@ const STEP_LABEL: Record<StepState, string> = {
   verified: 'verified',
   review: 'operator review',
   escalated: 'escalated here',
+  blocked: 'blocked',
 };
 
 // ------------------------------------------------------------------------------------------------ persisted state readers
@@ -241,6 +244,35 @@ function actionLine(d: ActionDetail): ActionLine {
     verified: v.verified,
     verification_note: v.note,
   };
+}
+
+/**
+ * Short reason for the Safety step's blocked state: the first violation code of the first BLOCKED ledger action
+ * ("STALE_DECISION_EPOCH" → "stale decision epoch"), "+N" when more codes were recorded, else the ledger reason code.
+ * null when no action of the workflow was rejected by safety.
+ */
+export function blockedStepReason(groups: ActionGroups): string | null {
+  const first = groups.blocked[0];
+  if (!first) return null;
+  const codes = first.reason ? first.reason.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  if (!codes.length) return 'safety rejected';
+  const head = codes[0]!.replaceAll('_', ' ').toLowerCase();
+  return codes.length > 1 ? `${head} +${codes.length - 1}` : head;
+}
+
+/**
+ * "No duplicate action" only with evidence. true when the resume path's reconcile call skipped the finished action
+ * (`get_action_status … → skip`) or the persisted marker says `nothing_to_do`, AND no ledger action of this workflow
+ * was attempted twice or requested twice for the same plan + operation + subject. false when the ledger shows a
+ * repeat; null (claim omitted) when there is no positive evidence either way.
+ */
+export function resumedWithoutDuplicate(events: readonly AgentEventInput[], actions: readonly ActionDetail[], resumed: ResumeEvidence | null): boolean | null {
+  if (!resumed) return null;
+  const retried = actions.some((a) => a.status.attempt > 1);
+  const keys = actions.map((a) => `${a.command.plan_id}|${a.command.operation}|${subjectOf(a.command)}`);
+  if (retried || new Set(keys).size !== keys.length) return false;
+  const skipped = events.some((e) => e.tool_calls.some((t) => t.tool === 'get_action_status' && /→\s*skip\s*$/.test(t.result_summary)));
+  return skipped || resumed.action === 'nothing_to_do' ? true : null;
 }
 
 export interface ActionGroups { inProgress: ActionLine[]; completed: ActionLine[]; blocked: ActionLine[]; failed: ActionLine[] }
@@ -563,6 +595,10 @@ export interface WorkflowView {
   status: WorkflowStatus;
   waiting: WaitInfo | null;
   resumed: ResumeEvidence | null;
+  /** Resume made no duplicate action: true/false only with ledger evidence (see `resumedWithoutDuplicate`); null = not claimed. */
+  resumedWithoutDuplicate: boolean | null;
+  /** Short violation reason behind the Safety step's blocked state; null when no action was rejected by safety. */
+  blockedReason: string | null;
   verification: VerificationRecord | null;
   escalationReason: string | null;
   replan: { reason: string | null; previous_plan_id: string | null } | null;
@@ -588,7 +624,7 @@ const fmtSim = (ms: number) => {
 };
 export const formatSpan = fmtSim;
 
-function buildSteps(current: TrackStage | null, events: readonly AgentEventInput[], runLevelTriage: boolean, wf: WorkflowRecord, verification: VerificationRecord | null): TrackStep[] {
+export function buildSteps(current: TrackStage | null, events: readonly AgentEventInput[], runLevelTriage: boolean, wf: WorkflowRecord, verification: VerificationRecord | null, blockedReason: string | null = null): TrackStep[] {
   const seen = new Set(events.map((e) => trackStageOf(e.stage)));
   const cur = current === null ? -1 : TRACK.findIndex((t) => t.id === current);
   return TRACK.map((t, i) => {
@@ -597,10 +633,12 @@ function buildSteps(current: TrackStage | null, events: readonly AgentEventInput
       if (wf.stage === 'escalated') state = 'escalated';
       else if (wf.stage === 'done' && t.id === 'verify' && verification) state = verification.verified ? 'verified' : 'review';
       else state = 'current';
-    } else if (seen.has(t.id)) state = 'recorded';
+    } else if (t.id === 'safety' && blockedReason !== null) state = 'blocked';
+    else if (seen.has(t.id)) state = 'recorded';
     else if (t.id === 'triage' && runLevelTriage) state = 'run_level';
     else state = i < cur ? 'no_event' : 'not_reached';
-    return { id: t.id, label: t.label, state, stateLabel: STEP_LABEL[state] };
+    const stateLabel = state === 'blocked' ? `blocked: ${blockedReason}` : STEP_LABEL[state];
+    return { id: t.id, label: t.label, state, stateLabel };
   });
 }
 
@@ -684,17 +722,22 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
       const commands = [...actions.map((a) => a.command), ...persistedCommands.filter((c) => !actions.some((a) => a.command.command_key === c.command_key))];
       const incidentIds = wf.incident_ids.length ? wf.incident_ids : [...new Set(events.map((e) => e.incident_id).filter((x): x is string => !!x))];
       const nextStep = verification?.nextStep ? { text: verification.nextStep, source: 'verification' as const } : wf.stage === 'escalated' && escalationReason ? { text: escalationReason, source: 'escalation_reason' as const } : null;
+      const groups = groupActions(actions);
+      const blockedReason = blockedStepReason(groups);
+      const resumed = resumeEvidence(events, wf.state);
       return {
         workflow: wf,
         incidents: incidentIds.map((id) => {
           const inc = incidentById.get(id);
           return { incident_id: id, title: inc?.title ?? null, hypothesis: inc?.hypothesis ?? null, state: inc?.state ?? null };
         }),
-        steps: buildSteps(current, events, runLevelTriage, wf, verification),
+        steps: buildSteps(current, events, runLevelTriage, wf, verification, blockedReason),
         current,
         status: statusOf(wf, verification, waiting, escalationReason, replan?.reason ?? null),
         waiting,
-        resumed: resumeEvidence(events, wf.state),
+        resumed,
+        resumedWithoutDuplicate: resumedWithoutDuplicate(events, actions, resumed),
+        blockedReason,
         verification,
         escalationReason,
         replan,
@@ -704,7 +747,7 @@ export function buildWorkflowViews(input: BoardInput): WorkflowView[] {
         actors: actorCounts(events),
         lastEventSimMs: events.length ? Math.max(...events.map((e) => e.sim_time_ms)) : null,
         actions,
-        groups: groupActions(actions),
+        groups,
         outcomes: outcomes(actions, input.snapshot),
         affectedJobs: [...new Set(commands.map((c) => c.job_id).filter((j): j is string => !!j))],
         infra: unresolvedInfra(input.snapshot, commands),

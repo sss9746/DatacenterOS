@@ -10,7 +10,7 @@ async function expectAccessibleAndContained(page: Page) {
 
 test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted example', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/'); await page.getByLabel('Run view').selectOption('demo');
+  await page.goto('/?presenter=1'); await page.getByLabel('Run view').selectOption('demo');
   await expect(page.getByRole('button', { name: /Rack \d/ })).toHaveCount(8);
   await expect(page.locator('[data-gpu]')).toHaveCount(8);
   await expect(page.getByRole('heading', { name: 'No matched evaluation runs yet' })).toBeVisible();
@@ -35,7 +35,17 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await expect(page.locator('.wf-card')).toHaveCount(2);
   await expect(page.locator('#workflows')).toContainText('wf-example-cooling');
   await expect(page.locator('#workflows')).toContainText('wf-example-xid');
+  // The feed shows the newest 6 events until "Show all"; every event stays counted in the footer.
+  await expect(page.locator('.feed-event')).toHaveCount(6);
+  await expect(page.locator('#activity')).toContainText('Showing 6 of 17');
+  await page.getByRole('button', { name: 'Show all (17)' }).click();
   await expect(page.locator('.feed-event')).toHaveCount(17);
+  await expect(page.locator('.feed-event.actor-nemotron')).toHaveCount(4);
+  await page.getByRole('button', { name: /^Nemotron/ }).click();
+  await expect(page.locator('.feed-event')).toHaveCount(4);
+  await expect(page.locator('#activity')).toContainText('13 hidden by filter');
+  await page.getByRole('button', { name: /^All/ }).click();
+  await page.getByRole('button', { name: 'Show all (17)' }).click();
   const exclude = page.locator('.tool-call', { hasText: 'list_placement_candidates' }).first();
   await exclude.locator('summary').click(); await expect(exclude).toContainText('Example: exclude');
   await expect(page.locator('#ledger')).toContainText('BLOCKED');
@@ -47,7 +57,8 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
 
 test('local physics: pump degradation heats loop A, XID 79 fails a job, and the r6 probe is BLOCKED', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?presenter=1');
+  await expect(page.locator('#presenter')).toHaveAttribute('open', '');
   await expect(page.getByRole('heading', { name: 'Inject a fault' })).toBeVisible();
   await page.getByRole('button', { name: /Pump B Cools racks/ }).click();
   await expect(page.locator('select[id$="-pump"]')).toHaveValue('pump-b');

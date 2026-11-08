@@ -299,7 +299,7 @@ function verificationView(status: ActionStatus, history: ActionHistoryEntry[]): 
   if (status.status !== 'succeeded') return null;
   const fromHistory = [...history].reverse().find((h) => rec(h.detail.verification))?.detail.verification;
   const v = rec(fromHistory) ?? rec(status.result.verification);
-  if (!v) return { state: 'unverified', label: 'Ledger succeeded · not verified', tone: 'warning', note: null, evidence: [] };
+  if (!v) return { state: 'unverified', label: 'Not verified', tone: 'warning', note: null, evidence: [] };
   const { verified, note, ...rest } = v;
   const evidence = formatEvidence(rest);
   if (verified === true) return { state: 'verified', label: 'Verified', tone: 'agent', note: str(note), evidence };
@@ -312,7 +312,8 @@ function verificationView(status: ActionStatus, history: ActionHistoryEntry[]): 
 export interface DetailView {
   operation: string;
   operationLabel: string;
-  job: string;
+  /** null when the command names no job (cordon, uncordon, escalate). */
+  job: string | null;
   target: string;
   workflowId: string;
   planId: string;
@@ -343,9 +344,30 @@ export interface ActionView {
   updatedAt: string;
   /** `status.result.violations` from the ledger row (shown when details have not arrived). */
   reportedViolations: ReasonView[];
+  /**
+   * For a BLOCKED row: the first recorded violation code, read in this order from `detail.safety.violations`
+   * (request-time check), `detail.start_safety.violations` (start-time recheck), then `status.result.violations`.
+   * null when the row is not blocked or no violation code was recorded.
+   */
+  blockedReason: BlockedReason | null;
   verification: VerificationView | null;
   /** null: the status row exists but `onActionDetails` has not delivered this action yet. */
   detail: DetailView | null;
+}
+
+export interface BlockedReason extends ReasonView { source: 'request-time check' | 'start-time recheck' | 'ledger row'; more: number }
+/** First recorded violation for a blocked action, with where it was read from and how many further codes exist. */
+export function blockedReason(status: ActionStatus, detail: ActionDetail | null, reported: readonly ReasonView[]): BlockedReason | null {
+  if (actionLabel(status) !== 'BLOCKED') return null;
+  const sources: Array<[BlockedReason['source'], readonly string[]]> = [
+    ['request-time check', detail?.safety?.violations ?? []],
+    ['start-time recheck', detail?.start_safety?.violations ?? []],
+    ['ledger row', reported.map((r) => r.code)],
+  ];
+  for (const [source, codes] of sources) {
+    if (codes.length) return { ...reasonView(codes[0]!), source, more: codes.length - 1 };
+  }
+  return null;
 }
 
 const newer = (a: ActionStatus | undefined, b: ActionStatus | undefined) => (!a ? b : !b ? a : b.version > a.version ? b : a);
@@ -362,10 +384,11 @@ export function describeAction(status: ActionStatus, detail: ActionDetail | null
   const label = actionLabel(status);
   const violations = Array.isArray(status.result.violations) ? status.result.violations.filter((v): v is string => typeof v === 'string') : [];
   const history = detail?.history ?? [];
+  const reportedViolations = violations.map(reasonView);
   const base: ActionView = {
     commandKey: status.command_key, status, label, tone: statusTone(status), blocked: label === 'BLOCKED', active: ACTIVE.has(status.status),
     attempt: status.attempt, version: status.version, updatedAt: simTime(status.updated_sim_time_ms),
-    reportedViolations: violations.map(reasonView), verification: verificationView(status, history), detail: null,
+    reportedViolations, blockedReason: blockedReason(status, detail, reportedViolations), verification: verificationView(status, history), detail: null,
   };
   if (!detail) return base;
   const cmd = detail.command;
@@ -383,7 +406,7 @@ export function describeAction(status: ActionStatus, detail: ActionDetail | null
     detail: {
       operation: cmd.operation,
       operationLabel: operationLabel(cmd.operation),
-      job: cmd.job_id ?? 'no job',
+      job: cmd.job_id ?? null,
       target: cmd.target_resource_id,
       workflowId: cmd.workflow_id,
       planId: cmd.plan_id,
