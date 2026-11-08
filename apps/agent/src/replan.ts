@@ -174,6 +174,22 @@ export function createReplanWatcher(deps: { db: DbPort }, plan: ExecutablePlan |
     keys = new Set(p?.commands.map((c) => c.command_key) ?? []);
     roles = p ? directRoles(p) : new Map();
     topology = p ? load(p, generation) : Promise.resolve(null);
+    if (p) seedOwn(p, generation);
+  };
+
+  /**
+   * A watcher attached to an already-running plan (resume after a crash) never saw the `running` status
+   * events of adopted actions: read their ledger rows once so their own effects are not mistaken for news.
+   */
+  const seedOwn = (p: ExecutablePlan, gen: number): void => {
+    for (const c of p.commands) {
+      void db.getActionStatus(c.command_key).then(
+        (s) => {
+          if (s && gen === generation) onOwnStatus(s);
+        },
+        () => undefined,
+      );
+    }
   };
 
   const onOwnStatus = (s: ActionStatus): void => {
@@ -253,6 +269,10 @@ export interface ReplanOutcome {
   kept_keys: string[];
   new_incident_ids: string[];
   reason: string;
+  /** Summary of the final `replan` event (so the following plan event does not repeat it). */
+  event_summary?: string;
+  /** Tool-call objects shown in the final `replan` event (same references as in new_plan.tool_calls where shared). */
+  event_tool_calls?: ToolCallSummary[];
 }
 
 export interface ReplanDeps {
@@ -433,12 +453,14 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
     (newIncidentIds.length ? `; new incident ${newIncidentIds.join(', ')}` : '');
   const narrative = planNarrative(newPlan.job_plans, newPlan.used_llm);
   const chooseCall = narrative.actor === 'nemotron' ? newPlan.tool_calls.find((t) => t.actor === 'nemotron') : undefined;
+  const eventSummary = narrative.actor === 'nemotron' ? narrative.summary : `deterministic: ${ledgerSummary}`;
+  const eventToolCalls = [...pass.calls, ...triage.toolCalls.slice(-2), ...(chooseCall ? [chooseCall] : []), ...newPlan.tool_calls.slice(-1)];
   await events.emit('replan', {
     workflowId,
     incidentId: newIncidentIds[0] ?? firstIncident,
-    summary: narrative.actor === 'nemotron' ? narrative.summary : `deterministic: ${ledgerSummary}`,
+    summary: eventSummary,
     actor: narrative.actor,
-    toolCalls: [...pass.calls, ...triage.toolCalls.slice(-2), ...(chooseCall ? [chooseCall] : []), ...newPlan.tool_calls.slice(-1)],
+    toolCalls: eventToolCalls,
   });
 
   return {
@@ -448,5 +470,7 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
     kept_keys: kept,
     new_incident_ids: newIncidentIds,
     reason: input.reason,
+    event_summary: eventSummary,
+    event_tool_calls: eventToolCalls,
   };
 }

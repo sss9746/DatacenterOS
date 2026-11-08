@@ -21,7 +21,7 @@ import { LlmUnavailableError } from './llm.js';
 import { planIncidents, type PlanResult } from './planner.js';
 import type { AgentStage, DbPort, Evidence, LlmPort, PhysicsPort, ToolCallSummary, WorkflowRecord } from './ports.js';
 import { createReplanWatcher, runReplan, type ReplanOutcome, type ReplanWatcher } from './replan.js';
-import { resumeOpenWorkflows, type ResumeReport } from './resume.js';
+import { outcomesFromLedger, resumeOpenWorkflows, type ResumeContinuation, type ResumeHandoff, type ResumeReport } from './resume.js';
 import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, runTriage, SYMPTOM_BUCKET_MS } from './triage.js';
 import { verifyRecovery, type VerificationReport } from './verify.js';
 
@@ -89,6 +89,9 @@ export const DEFAULT_MAX_REPLANS = 3;
 export const DEFAULT_LLM_COOLDOWN_MS = 60_000;
 const STOP_WAIT_MS = 5_000;
 const MAX_EVENT_TOOL_CALLS = 12;
+/** Max sim time to wait for an in-flight action before replanning after a restart (coordinator's action timeout). */
+const IN_FLIGHT_WAIT_SIM_MS = 15 * 60_000;
+const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'needs_reconciliation']);
 
 const realSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -185,6 +188,20 @@ function planFromWorkflow(wf: WorkflowRecord): PlanResult | null {
   return { plan, commands, job_plans: [], tool_calls: [], used_llm: false };
 }
 
+/** Attempt number of a persisted workflow: state.attempt, else the highest `:<n>` command-key suffix, else 1. */
+function attemptOf(state: Record<string, unknown>, keys: readonly string[]): number {
+  if (typeof state.attempt === 'number' && state.attempt >= 1) return state.attempt;
+  const ns = keys.map((k) => Number(/:(\d+)$/.exec(k)?.[1] ?? NaN)).filter((n) => Number.isFinite(n));
+  return ns.length > 0 ? Math.max(...ns) : 1;
+}
+
+/** Diagnose-event tool calls minus the ones the triage event of the same tick already showed. */
+function withoutRepeats(calls: ToolCallSummary[] | undefined, shown: ToolCallSummary[]): ToolCallSummary[] | undefined {
+  if (!calls) return calls;
+  const seen = new Set(shown.map((t) => `${t.tool}|${t.args_summary}|${t.result_summary}`));
+  return calls.filter((t) => !seen.has(`${t.tool}|${t.args_summary}|${t.result_summary}`));
+}
+
 // ---------------------------------------------------------------------------------------------- loop
 
 export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
@@ -241,14 +258,20 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
 
   // ------------------------------------------------------------------ stage helpers
 
-  async function publishPlan(wfId: string, r: PlanResult): Promise<void> {
+  /**
+   * `afterReplan`: the replan event just published (maybe) Nemotron's narrative and a few planner tool calls, so
+   * the plan event lists the chosen options instead of repeating the same sentence, and drops the repeated calls.
+   */
+  async function publishPlan(wfId: string, r: PlanResult, afterReplan?: ReplanOutcome): Promise<void> {
     const jobs = r.job_plans.map(label).join('; ') || 'no affected running job: keep running';
+    const shown = new Set(afterReplan?.event_tool_calls ?? []);
+    const repeated = afterReplan !== undefined && r.summary !== undefined && afterReplan.event_summary === r.summary;
     await safeEmit('plan', {
       workflowId: wfId,
       incidentId: r.plan.incident_ids[0],
-      summary: r.summary ?? `deterministic: ${r.plan.plan_id}: ${jobs}`,
+      summary: repeated ? `new plan ${r.plan.plan_id}: ${jobs}` : (r.summary ?? `deterministic: ${r.plan.plan_id}: ${jobs}`),
       ...(r.actor ? { actor: r.actor } : {}),
-      toolCalls: r.tool_calls,
+      toolCalls: r.tool_calls.filter((t) => !shown.has(t)),
     });
     const excluded = r.job_plans.flatMap((p) => [p.chosen, ...p.alternatives]).filter((o) => o.excluded_reason);
     if (excluded.length === 0) return;
@@ -293,16 +316,21 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
 
   // ------------------------------------------------------------------ one workflow, plan -> verify
 
-  async function driveWorkflow(
-    wfId: string,
-    incidents: Incident[],
-    start: { attempt: number; plan?: PlanResult },
-    report: LoopTickReport,
-    stageRef: { stage: AgentStage },
-  ): Promise<void> {
+  interface DriveStart {
+    attempt: number;
+    plan?: PlanResult;
+    /** Coordinator that already holds the workflow lease (resume hand-off); otherwise one is created. */
+    coord?: Coordinator;
+    /** Replan before executing anything: the persisted plan was found invalid after a restart. */
+    pendingReplan?: { execution: ExecutionResult; reason: string };
+  }
+
+  async function driveWorkflow(wfId: string, incidents: Incident[], start: DriveStart, report: LoopTickReport, stageRef: { stage: AgentStage }): Promise<void> {
     const ids = incidents.map((i) => i.incident_id);
-    const coord = createCoordinator({ db, physics, events, workerId, clock, sleep, leaseMs, pollMs: actionPollMs, onLostOwnership: (why) => log(`lost ownership of ${wfId}: ${why}`) });
-    await coord.ensureWorkflow(wfId, ids);
+    const coord =
+      start.coord ??
+      createCoordinator({ db, physics, events, workerId, clock, sleep, leaseMs, pollMs: actionPollMs, onLostOwnership: (why) => log(`lost ownership of ${wfId}: ${why}`) });
+    if (!start.coord) await coord.ensureWorkflow(wfId, ids);
     coord.startHeartbeat();
     report.workflow_id = wfId;
     let watcher: ReplanWatcher | null = null;
@@ -319,27 +347,36 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       watcher = createReplanWatcher({ db }, current);
       const w = watcher;
       let exec: ExecutionResult;
+      let pending = start.pendingReplan ?? null;
       for (;;) {
-        stageRef.stage = 'execute';
-        exec = await coord.execute(wfId, current, { shouldAbort: () => stopping || w.shouldAbort() });
-        report.executions.push(exec);
-        if (!exec.aborted) break;
-        if (!coord.isOwner()) {
-          report.status = 'lost_ownership';
-          return;
-        }
-        if (!w.shouldAbort()) {
-          report.status = 'stopped'; // graceful stop: the persisted execute state is resumed on next boot
-          return;
+        let reason: string;
+        if (pending) {
+          exec = pending.execution;
+          reason = pending.reason;
+          pending = null;
+        } else {
+          stageRef.stage = 'execute';
+          exec = await coord.execute(wfId, current, { shouldAbort: () => stopping || w.shouldAbort() });
+          report.executions.push(exec);
+          if (!exec.aborted) break;
+          if (!coord.isOwner()) {
+            report.status = 'lost_ownership';
+            return;
+          }
+          if (!w.shouldAbort()) {
+            report.status = 'stopped'; // graceful stop: the persisted execute state is resumed on next boot
+            return;
+          }
+          reason = w.reason() ?? 'material change to the active plan';
         }
         if (attempt - 1 >= maxReplans) {
-          return escalate(wfId, coord, workflowIncidents(coord, current), 'replan', `replan limit (${maxReplans}) reached: ${w.reason()}`, report);
+          return escalate(wfId, coord, workflowIncidents(coord, current), 'replan', `replan limit (${maxReplans}) reached: ${reason}`, report);
         }
         attempt += 1;
         stageRef.stage = 'replan';
         const out = await runReplan(
           { db, physics, llm, events, workflowId: wfId, runId, workerId, fencingToken: coord.lease()!.fencing_token, now },
-          { previous: current, execution: exec, attempt, reason: w.reason() ?? 'material change to the active plan' },
+          { previous: current, execution: exec, attempt, reason },
         );
         report.replans.push(out);
         await coord.ensureWorkflow(wfId, [...out.new_plan.plan.incident_ids]); // runReplan bumped the workflow version
@@ -347,7 +384,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         await setIncidentState(out.new_plan.plan.incident_ids, 'investigating');
         current = out.new_plan;
         report.plans.push(current);
-        await publishPlan(wfId, current);
+        await publishPlan(wfId, current, out);
         if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current));
         w.reset(current);
       }
@@ -385,6 +422,55 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     }
     await safeEmit('execute', { workflowId: wfId, incidentId: wf.incident_ids[0], summary: `continuing ${wfId} from stage ${wf.stage} after agent restart` });
     await driveWorkflow(wfId, incidents, persisted ? { attempt, plan: persisted } : { attempt }, report, stageRef);
+  }
+
+  /** Wait (DB-supervised) until the given in-flight keys are terminal, keeping the workflow lease alive. */
+  async function waitInFlight(coord: Coordinator, keys: string[]): Promise<void> {
+    const maxPolls = Math.ceil((IN_FLIGHT_WAIT_SIM_MS * 4) / Math.max(1, actionPollMs)) + 20;
+    for (const key of keys) {
+      for (let i = 0; i < maxPolls; i++) {
+        const s = await db.getActionStatus(key);
+        if (!s || TERMINAL_STATUSES.has(s.status)) break;
+        await sleep(actionPollMs);
+        if (!(await coord.heartbeatOnce())) return;
+      }
+    }
+  }
+
+  /**
+   * Resume hand-off for an `execute`-stage workflow: continue it on the normal path (replan watcher, replan
+   * instead of escalate). An invalid persisted plan (e.g. its destination died while we were down) is replanned
+   * with attempt+1 once in-flight actions have finished; nothing that succeeded is ever resubmitted.
+   */
+  async function continueResumed(h: ResumeHandoff): Promise<ResumeContinuation> {
+    const wfId = h.workflow.workflow_id;
+    const report = emptyReport('handled');
+    const stageRef: { stage: AgentStage } = { stage: 'execute' };
+    const ids = new Set(h.workflow.incident_ids);
+    const incidents = (await db.listIncidents()).filter((i) => ids.has(i.incident_id) && i.state !== 'resolved');
+    const attempt = attemptOf(h.coordinator.state(), h.plan.commands.map((c) => c.command_key));
+    const current: PlanResult = { plan: h.plan.plan, commands: h.plan.commands, job_plans: [], tool_calls: [], used_llm: false };
+    let pendingReplan: DriveStart['pendingReplan'];
+    if (h.invalidReason) {
+      log(`resume: ${wfId} persisted plan invalid (${h.invalidReason}); replanning as attempt ${attempt + 1}`);
+      const inFlight = h.reconciled.filter((r) => r.decision === 'wait' || r.decision === 'reclaim_after_timeout').map((r) => r.command_key);
+      await waitInFlight(h.coordinator, inFlight);
+      const outcomes = await outcomesFromLedger(db, h.state);
+      pendingReplan = {
+        execution: { workflow_id: wfId, plan_id: h.state.plan_id, outcomes, aborted: true, baseline: h.state.baseline },
+        reason: `after restart: ${h.invalidReason}`,
+      };
+    }
+    try {
+      const start: DriveStart = { attempt, plan: current, coord: h.coordinator, ...(pendingReplan ? { pendingReplan } : {}) };
+      await driveWorkflow(wfId, incidents, start, report, stageRef);
+    } catch (e) {
+      log(`resume continuation of ${wfId} failed during ${stageRef.stage}: ${errMsg(e)}`);
+      await safeEmit(stageRef.stage, { workflowId: wfId, summary: `agent error during ${stageRef.stage} after restart: ${errMsg(e)}` });
+      return { escalated: false, aborted: true, note: 'CONTINUATION_ERROR' };
+    }
+    const aborted = report.status === 'lost_ownership' || report.status === 'stopped';
+    return { escalated: report.escalated, aborted, ...(report.replans.length > 0 ? { note: `REPLANNED x${report.replans.length}` } : {}) };
   }
 
   /** Mark incidents of workflows that resume finished (done/escalated). */
@@ -436,11 +522,12 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       report.incidents = triage.incidents;
       const handled = handledIds(await db.listOpenWorkflows(), await db.listIncidents());
       const fresh = triage.incidents.filter((i) => i.state === 'open' && !handled.has(i.incident_id));
+      const triageCalls = triage.toolCalls.filter((t) => t.tool === 'get_incident_evidence' || t.tool === 'group_symptoms');
       await safeEmit('triage', {
         summary: `${triage.incidents.length} incident(s), ${fresh.length} new: ${triage.incidents.map((i) => i.title).join('; ') || 'none'}`,
         actor: 'code',
         evidenceIds: triage.incidents.flatMap((i) => triage.evidenceIdsByIncident[i.incident_id] ?? []),
-        toolCalls: triage.toolCalls.filter((t) => t.tool === 'get_incident_evidence' || t.tool === 'group_symptoms'),
+        toolCalls: triageCalls,
       });
       if (fresh.length === 0) {
         lastSkippedFingerprint = gate.fingerprint;
@@ -451,8 +538,10 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       const wfId = `wf-${batch[0]!.incident_id}`;
       report.new_incident_ids = batch.map((i) => i.incident_id);
       stageRef.stage = 'diagnose';
+      const diag = diagnoseEvent(triage);
       await safeEmit('diagnose', {
-        ...diagnoseEvent(triage),
+        ...diag,
+        toolCalls: withoutRepeats(diag.toolCalls, triageCalls),
         workflowId: wfId,
         incidentId: batch[0]!.incident_id,
         evidenceIds: batch.flatMap((i) => triage.evidenceIdsByIncident[i.incident_id] ?? []),
@@ -510,7 +599,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     started = true;
     stopping = false;
     try {
-      resumeReport = await resumeOpenWorkflows({ db, physics, events, workerId, clock, sleep, leaseMs });
+      resumeReport = await resumeOpenWorkflows({ db, physics, events, workerId, clock, sleep, leaseMs, continueExecute: continueResumed });
       const n = resumeReport.items.length;
       if (n > 0) log(`resume: ${resumeReport.items.map((i) => `${i.workflow_id} ${i.action}`).join(', ')}; duplicates ${resumeReport.duplicates_detected}`);
       await settleResumed(resumeReport);

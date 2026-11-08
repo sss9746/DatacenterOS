@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { ActionCommand } from '@dcos/contracts';
 import { createCoordinator } from '../src/coordinator.js';
 import { createEventPublisher } from '../src/events.js';
-import { classify, resumeOpenWorkflows } from '../src/resume.js';
+import { classify, persistedPlanInvalidReason, resumeOpenWorkflows, type ResumeHandoff } from '../src/resume.js';
 import { KILL_POINTS, WF, killable, makePlan, makeWorld, runKillPoint, type KillPoint } from '../scripts/crash-test.js';
-import { RUN_ID } from './fixtures/index.js';
+import { RUN_ID, loadSignalXid79Dest } from './fixtures/index.js';
 
 const failed = (checks: Array<{ name: string; ok: boolean; detail: string }>) =>
   checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`);
@@ -102,5 +102,65 @@ describe('resume', () => {
     expect(classify(s('claimed'))).toBe('reclaim_after_timeout');
     expect(classify(s('failed', 'SAFETY_REJECTED'))).toBe('blocked');
     expect(classify(s('failed', 'DEST_DIED'))).toBe('needs_operator');
+  });
+});
+
+describe('resume hand-off to the agent loop (continueExecute)', () => {
+  const xidOnDest = (w: ReturnType<typeof makeWorld>) => {
+    const sig = loadSignalXid79Dest(); // gpu-r8-n1-0, one of COOL_DEST
+    w.db.injectSignal({ ...sig, sim_time_ms: w.snap.clock.sim_time_ms + 1_000 });
+  };
+
+  it('persistedPlanInvalidReason: null while valid, names the dead destination after an XID 79', async () => {
+    const w = makeWorld();
+    const plan = makePlan(w.snap);
+    const [ck, mv] = plan.commands as [ActionCommand, ActionCommand];
+    const rec = [
+      { command_key: ck.command_key, ledger_status: 'succeeded', decision: 'skip' as const },
+      { command_key: mv.command_key, ledger_status: null, decision: 'resubmit_same_key' as const },
+    ];
+    expect(await persistedPlanInvalidReason(w.db, w.physics, plan, rec)).toBeNull();
+    xidOnDest(w);
+    const why = await persistedPlanInvalidReason(w.db, w.physics, plan, rec);
+    expect(why).toMatch(/^migrate_restart job-a now fails safety/);
+    expect(why).toContain('DEST_GPU_UNHEALTHY');
+  });
+
+  it('XID while the agent was dead: resume hands the invalid plan over instead of executing it blind', async () => {
+    const w = makeWorld();
+    const plan = makePlan(w.snap);
+    const ck = plan.commands[0]!.command_key;
+    const k = killable(w.db, (m, a, p) => m === 'startAction' && a[0] === ck && p === 'after');
+    const ev1 = createEventPublisher({ db: k.db, runId: RUN_ID, clock: w.clock, redact: (s) => s });
+    const c1 = createCoordinator({ db: k.db, physics: w.physics, events: ev1, workerId: 'worker-1', clock: w.clock, pollMs: 1, sleep: w.sleep });
+    await c1.ensureWorkflow(WF, ['inc-1']);
+    void c1.execute(WF, plan);
+    await k.killed;
+    xidOnDest(w); // lands while nobody is watching
+    w.db.advanceWallMs(60_000);
+
+    const handoffs: ResumeHandoff[] = [];
+    const ev2 = createEventPublisher({ db: w.db, runId: RUN_ID, clock: w.clock, redact: (s) => s, startSeq: 1000 });
+    const report = await resumeOpenWorkflows({
+      db: w.db,
+      physics: w.physics,
+      events: ev2,
+      workerId: 'worker-2',
+      clock: w.clock,
+      sleep: w.sleep,
+      continueExecute: async (h) => {
+        handoffs.push(h);
+        return { escalated: false };
+      },
+    });
+    expect(handoffs).toHaveLength(1);
+    expect(handoffs[0]!.invalidReason).toContain('DEST_GPU_UNHEALTHY');
+    expect(handoffs[0]!.coordinator.isOwner()).toBe(true);
+    expect(handoffs[0]!.reconciled.map((r) => r.decision)).toEqual(['wait', 'resubmit_same_key']);
+    expect(report.items[0]).toMatchObject({ action: 'resumed_execute', note: 'REPLANNED' });
+    // resume itself submitted nothing new: the dead destination was never requested
+    expect(w.db.calls.some((c) => c.method === 'requestAction' && (c.args[0] as ActionCommand).operation === 'migrate_restart')).toBe(false);
+    const ev = w.db.agentEvents.find((e) => e.summary.startsWith('resumed after agent restart'));
+    expect(ev?.summary).toContain('persisted plan is invalid on a fresh snapshot');
   });
 });

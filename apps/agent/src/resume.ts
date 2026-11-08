@@ -5,11 +5,19 @@
 //   safety-rejected -> blocked | absent -> resubmit with the SAME key + payload
 //   claimed by a dead owner -> wait for the claim lease to expire, then reclaim (new fencing token)
 // then hand the persisted plan back to coordinator.execute (which re-checks each key itself) and verify.
+//
+// Agent-loop integration (`continueExecute`): instead of executing the persisted plan blind, resume hands it
+// back to the loop's normal path (replan watcher attached, replan instead of escalate). Before that it checks
+// whether the persisted plan is still valid against a FRESH snapshot: a key the DB safety-rejected, or a
+// not-yet-submitted command that now fails evaluateSafety (e.g. an XID 79 landed on a destination GPU while
+// the agent was dead), makes it invalid -> the loop waits for in-flight actions and runs runReplan(attempt+1).
+// Exactly-once is unchanged: succeeded keys are never resubmitted, running ones are never re-requested.
 
 import type { ActionCommand, ActionStatus, PlanCandidate } from '@dcos/contracts';
 import {
   createCoordinator,
   DEFAULT_LEASE_MS,
+  restampForDependencies,
   type CommandOutcome,
   type Coordinator,
   type ExecutablePlan,
@@ -56,6 +64,29 @@ export interface ResumeDeps {
   clock: { unixMs(): number; simTimeMs(): number };
   sleep?: (ms: number) => Promise<void>;
   leaseMs?: number;
+  /**
+   * Optional agent-loop hook for an `execute`-stage workflow: called after every key was reconciled, with the
+   * coordinator that holds the workflow lease (heartbeat running). It replaces resume's own blind
+   * execute + verify. Without it resume executes the persisted plan itself (standalone crash tests).
+   */
+  continueExecute?: (h: ResumeHandoff) => Promise<ResumeContinuation>;
+}
+
+export interface ResumeHandoff {
+  workflow: WorkflowRecord;
+  coordinator: Coordinator;
+  plan: ExecutablePlan;
+  state: ExecuteState;
+  reconciled: ResumeItem['reconciled'];
+  /** Why the persisted plan can no longer run as-is (fresh-snapshot safety), or null when it is still valid. */
+  invalidReason: string | null;
+}
+
+export interface ResumeContinuation {
+  escalated: boolean;
+  /** Ownership lost (or a graceful stop) before the workflow closed. */
+  aborted?: boolean;
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +142,7 @@ function planFromState(st: ExecuteState, wf: WorkflowRecord): ExecutablePlan {
   return { plan, commands: st.commands.map((c) => structuredClone(c)) };
 }
 
-function resumeSummary(rec: Reconciled[], byKey: Map<string, ActionCommand>): string {
+function resumeSummary(rec: Reconciled[], byKey: Map<string, ActionCommand>, invalidReason: string | null = null): string {
   const phrase: Record<ReconcileDecision, string> = {
     skip: 'already succeeded (skipped)',
     wait: 'still running under DB supervision (waiting)',
@@ -122,6 +153,8 @@ function resumeSummary(rec: Reconciled[], byKey: Map<string, ActionCommand>): st
     needs_operator: 'needs operator reconciliation',
   };
   const parts = rec.map((r) => `${subject(byKey.get(r.command_key))} ${phrase[r.decision]}`);
+  // Event summaries are clipped: lead with the invalidation so it is always visible.
+  if (invalidReason) return `resumed after agent restart: persisted plan is invalid on a fresh snapshot (${invalidReason}), replanning; ${parts.join('; ')}`;
   const next = rec.find((r) => r.decision !== 'skip' && r.decision !== 'blocked');
   const tail = next ? `, continuing to ${subject(byKey.get(next.command_key))}` : ', nothing left to run';
   return `resumed after agent restart: ${parts.join('; ')}${tail}`;
@@ -214,8 +247,8 @@ function waitSimVia(ctx: Ctx): (simMs: number) => Promise<void> {
   };
 }
 
-/** Outcomes rebuilt from the ledger (for a crash during verify). */
-async function outcomesFromLedger(db: DbPort, st: ExecuteState): Promise<CommandOutcome[]> {
+/** Outcomes rebuilt from the ledger (for a crash during verify, or before a replan after resume). */
+export async function outcomesFromLedger(db: DbPort, st: ExecuteState): Promise<CommandOutcome[]> {
   const out: CommandOutcome[] = [];
   for (const c of st.commands) {
     const s = await db.getActionStatus(c.command_key);
@@ -227,6 +260,47 @@ async function outcomesFromLedger(db: DbPort, st: ExecuteState): Promise<Command
     out.push(o);
   }
   return out;
+}
+
+const violationsOf = (s: ActionStatus): string[] => (Array.isArray(s.result.violations) ? s.result.violations.map(String) : []);
+
+/**
+ * First reason the persisted plan cannot run as-is on a fresh snapshot, or null. Checks keys the DB already
+ * safety-rejected, then every not-yet-submitted command with the same local evaluateSafety the coordinator
+ * would run right before submitting it (dependencies that already succeeded are re-stamped the same way).
+ */
+export async function persistedPlanInvalidReason(
+  db: DbPort,
+  physics: PhysicsPort,
+  plan: ExecutablePlan,
+  reconciled: ResumeItem['reconciled'],
+): Promise<string | null> {
+  const byKey = new Map(plan.commands.map((c) => [c.command_key, c]));
+  const decision = new Map(reconciled.map((r) => [r.command_key, r.decision]));
+  for (const r of reconciled) {
+    if (r.decision !== 'blocked') continue;
+    const s = await db.getActionStatus(r.command_key);
+    const v = s ? violationsOf(s) : [];
+    return `${subject(byKey.get(r.command_key))} was safety-rejected${v.length ? ` (${v.join(', ')})` : ''}`;
+  }
+  let snap = await db.getObservedSnapshot();
+  for (const c of plan.commands) {
+    if (decision.get(c.command_key) !== 'resubmit_same_key') continue;
+    const deps = c.depends_on_command_keys
+      .filter((k) => decision.get(k) === 'skip')
+      .map((k) => byKey.get(k))
+      .filter((x): x is ActionCommand => !!x);
+    const cmd = restampForDependencies(c, deps, snap);
+    let d = physics.evaluateSafety(snap, cmd, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] });
+    if (d.decision === 'retry_new_snapshot') {
+      snap = await db.getObservedSnapshot();
+      d = physics.evaluateSafety(snap, cmd, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] });
+    }
+    if (d.decision === 'allow' || (d.decision === 'needs_approval' && c.operation === 'escalate')) continue;
+    const v = d.violations.length > 0 ? d.violations : [d.decision.toUpperCase()];
+    return `${subject(c)} now fails safety (${v.join(', ')})`;
+  }
+  return null;
 }
 
 async function verifyAndClose(ctx: Ctx, coord: Coordinator, wfId: string, plan: ExecutablePlan, result: ExecutionResult) {
@@ -277,12 +351,20 @@ async function resumeOne(ctx: Ctx, wf: WorkflowRecord): Promise<ResumeItem> {
       args_summary: r.command_key,
       result_summary: `${r.ledger_status ?? 'absent'} → ${r.decision}`,
     }));
+    const invalidReason = ctx.continueExecute ? await persistedPlanInvalidReason(ctx.db, ctx.physics, plan, rec) : null;
     await ctx.events.emit('execute', {
       workflowId: wf.workflow_id,
       incidentId: plan.plan.incident_ids[0],
-      summary: resumeSummary(rec, byKey),
+      summary: resumeSummary(rec, byKey, invalidReason),
       toolCalls,
     });
+    if (ctx.continueExecute) {
+      const workflow = coord.lease()?.workflow ?? wf;
+      const c = await ctx.continueExecute({ workflow, coordinator: coord, plan, state, reconciled: rec, invalidReason });
+      const note = c.note ?? (invalidReason ? 'REPLANNED' : undefined);
+      if (c.aborted) return { ...base, stage, action: 'nothing_to_do', reconciled: rec, note: note ? `${note};STOPPED` : 'STOPPED' };
+      return { ...base, stage, action: c.escalated ? 'escalated' : 'resumed_execute', reconciled: rec, ...(note ? { note } : {}) };
+    }
     const result = await coord.execute(wf.workflow_id, plan);
     if (result.aborted) return { ...base, stage, action: 'nothing_to_do', reconciled: rec, note: 'LOST_OWNERSHIP' };
     await coord.updateStage('verify', {});
