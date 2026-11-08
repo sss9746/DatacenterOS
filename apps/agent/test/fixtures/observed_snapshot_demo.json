@@ -1,0 +1,3670 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "run-demo-1",
+  "clock": {
+    "sim_time_ms": 0,
+    "tick_index": 0,
+    "step_ms": 1000,
+    "wall_tick_ms": 1000,
+    "paused": false,
+    "decision_epoch": 0
+  },
+  "resources": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "power-main",
+      "kind": "power_domain",
+      "parent_id": null,
+      "failure_domain_id": "power-main",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "pump-a",
+      "kind": "cooling_pump",
+      "parent_id": null,
+      "failure_domain_id": "loop-a",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "pump-b",
+      "kind": "cooling_pump",
+      "parent_id": null,
+      "failure_domain_id": "loop-b",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "loop-a",
+      "kind": "cooling_loop",
+      "parent_id": null,
+      "failure_domain_id": "loop-a",
+      "profile": "demo_facility",
+      "config": {
+        "cools_racks": [
+          "rack-r2",
+          "rack-r3",
+          "rack-r4"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "loop-b",
+      "kind": "cooling_loop",
+      "parent_id": null,
+      "failure_domain_id": "loop-b",
+      "profile": "demo_facility",
+      "config": {
+        "cools_racks": [
+          "rack-r1",
+          "rack-r5",
+          "rack-r6",
+          "rack-r7",
+          "rack-r8"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "ckpt-store-1",
+      "kind": "checkpoint_store",
+      "parent_id": null,
+      "failure_domain_id": "ckpt-store-1",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r1",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r1-n1",
+      "kind": "node",
+      "parent_id": "rack-r1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r1-n1",
+      "failure_domain_id": "rack-r1",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r1",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r1",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r2",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r2-n1",
+      "kind": "node",
+      "parent_id": "rack-r2",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r2-n1",
+      "failure_domain_id": "rack-r2",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r2",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r2",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r3",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r3-n1",
+      "kind": "node",
+      "parent_id": "rack-r3",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r3-n1",
+      "failure_domain_id": "rack-r3",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r3",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r3",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r4",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r4-n1",
+      "kind": "node",
+      "parent_id": "rack-r4",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r4-n1",
+      "failure_domain_id": "rack-r4",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r4",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r4",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r5",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r5-n1",
+      "kind": "node",
+      "parent_id": "rack-r5",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r5-n1",
+      "failure_domain_id": "rack-r5",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r5",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r5",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r6",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r6-n1",
+      "kind": "node",
+      "parent_id": "rack-r6",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r6-n1",
+      "failure_domain_id": "rack-r6",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r6",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r6",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r7",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r7-n1",
+      "kind": "node",
+      "parent_id": "rack-r7",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r7-n1",
+      "failure_domain_id": "rack-r7",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r7",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r7",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "rack-r8",
+      "kind": "rack",
+      "parent_id": null,
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r8-n1",
+      "kind": "node",
+      "parent_id": "rack-r8",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "power_budget_w": 6400
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-0",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-1",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-2",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-3",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-4",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-5",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-6",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-7",
+      "kind": "gpu",
+      "parent_id": "node-r8-n1",
+      "failure_domain_id": "rack-r8",
+      "profile": "demo_gpu",
+      "config": {
+        "allocatable": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "link-r8",
+      "kind": "network_link",
+      "parent_id": null,
+      "failure_domain_id": "link-r8",
+      "profile": "demo_facility",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "fan-sensor-r3",
+      "kind": "fan_sensor",
+      "parent_id": "rack-r3",
+      "failure_domain_id": "rack-r3",
+      "profile": "pico_fan",
+      "config": {},
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-real-0",
+      "kind": "node",
+      "parent_id": null,
+      "failure_domain_id": "node-real-0",
+      "profile": "brev_real",
+      "config": {
+        "allocatable": false,
+        "hardware_backed": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-real-0",
+      "kind": "gpu",
+      "parent_id": "node-real-0",
+      "failure_domain_id": "node-real-0",
+      "profile": "brev_real",
+      "config": {
+        "allocatable": false,
+        "hardware_backed": true
+      },
+      "enabled": true
+    }
+  ],
+  "dependencies": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-loop-a--pump-a",
+      "consumer_id": "loop-a",
+      "provider_id": "pump-a",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-loop-b--pump-b",
+      "consumer_id": "loop-b",
+      "provider_id": "pump-b",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-0--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-0",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-1--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-1",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-2--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-2",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-3--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-3",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-4--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-4",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-5--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-5",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-6--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-6",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r1-n1-7--node-r1-n1",
+      "consumer_id": "gpu-r1-n1-7",
+      "provider_id": "node-r1-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r1-n1--rack-r1",
+      "consumer_id": "node-r1-n1",
+      "provider_id": "rack-r1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r1--loop-b",
+      "consumer_id": "rack-r1",
+      "provider_id": "loop-b",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r1--power-main",
+      "consumer_id": "rack-r1",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r1--link-r1",
+      "consumer_id": "rack-r1",
+      "provider_id": "link-r1",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-0--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-0",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-1--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-1",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-2--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-2",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-3--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-3",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-4--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-4",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-5--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-5",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-6--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-6",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r2-n1-7--node-r2-n1",
+      "consumer_id": "gpu-r2-n1-7",
+      "provider_id": "node-r2-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r2-n1--rack-r2",
+      "consumer_id": "node-r2-n1",
+      "provider_id": "rack-r2",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r2--loop-a",
+      "consumer_id": "rack-r2",
+      "provider_id": "loop-a",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r2--power-main",
+      "consumer_id": "rack-r2",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r2--link-r2",
+      "consumer_id": "rack-r2",
+      "provider_id": "link-r2",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-0--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-0",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-1--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-1",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-2--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-2",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-3--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-3",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-4--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-4",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-5--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-5",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-6--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-6",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r3-n1-7--node-r3-n1",
+      "consumer_id": "gpu-r3-n1-7",
+      "provider_id": "node-r3-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r3-n1--rack-r3",
+      "consumer_id": "node-r3-n1",
+      "provider_id": "rack-r3",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r3--loop-a",
+      "consumer_id": "rack-r3",
+      "provider_id": "loop-a",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r3--power-main",
+      "consumer_id": "rack-r3",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r3--link-r3",
+      "consumer_id": "rack-r3",
+      "provider_id": "link-r3",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-0--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-0",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-1--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-1",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-2--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-2",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-3--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-3",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-4--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-4",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-5--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-5",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-6--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-6",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r4-n1-7--node-r4-n1",
+      "consumer_id": "gpu-r4-n1-7",
+      "provider_id": "node-r4-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r4-n1--rack-r4",
+      "consumer_id": "node-r4-n1",
+      "provider_id": "rack-r4",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r4--loop-a",
+      "consumer_id": "rack-r4",
+      "provider_id": "loop-a",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r4--power-main",
+      "consumer_id": "rack-r4",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r4--link-r4",
+      "consumer_id": "rack-r4",
+      "provider_id": "link-r4",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-0--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-0",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-1--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-1",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-2--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-2",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-3--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-3",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-4--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-4",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-5--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-5",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-6--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-6",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r5-n1-7--node-r5-n1",
+      "consumer_id": "gpu-r5-n1-7",
+      "provider_id": "node-r5-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r5-n1--rack-r5",
+      "consumer_id": "node-r5-n1",
+      "provider_id": "rack-r5",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r5--loop-b",
+      "consumer_id": "rack-r5",
+      "provider_id": "loop-b",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r5--power-main",
+      "consumer_id": "rack-r5",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r5--link-r5",
+      "consumer_id": "rack-r5",
+      "provider_id": "link-r5",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-0--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-0",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-1--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-1",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-2--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-2",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-3--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-3",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-4--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-4",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-5--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-5",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-6--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-6",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r6-n1-7--node-r6-n1",
+      "consumer_id": "gpu-r6-n1-7",
+      "provider_id": "node-r6-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r6-n1--rack-r6",
+      "consumer_id": "node-r6-n1",
+      "provider_id": "rack-r6",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r6--loop-b",
+      "consumer_id": "rack-r6",
+      "provider_id": "loop-b",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r6--power-main",
+      "consumer_id": "rack-r6",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r6--link-r6",
+      "consumer_id": "rack-r6",
+      "provider_id": "link-r6",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-0--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-0",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-1--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-1",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-2--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-2",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-3--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-3",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-4--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-4",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-5--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-5",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-6--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-6",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r7-n1-7--node-r7-n1",
+      "consumer_id": "gpu-r7-n1-7",
+      "provider_id": "node-r7-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r7-n1--rack-r7",
+      "consumer_id": "node-r7-n1",
+      "provider_id": "rack-r7",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r7--loop-b",
+      "consumer_id": "rack-r7",
+      "provider_id": "loop-b",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r7--power-main",
+      "consumer_id": "rack-r7",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r7--link-r7",
+      "consumer_id": "rack-r7",
+      "provider_id": "link-r7",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-0--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-0",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-1--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-1",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-2--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-2",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-3--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-3",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-4--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-4",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-5--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-5",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-6--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-6",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-gpu-r8-n1-7--node-r8-n1",
+      "consumer_id": "gpu-r8-n1-7",
+      "provider_id": "node-r8-n1",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-node-r8-n1--rack-r8",
+      "consumer_id": "node-r8-n1",
+      "provider_id": "rack-r8",
+      "relation": "hosted_on",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r8--loop-b",
+      "consumer_id": "rack-r8",
+      "provider_id": "loop-b",
+      "relation": "cooled_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r8--power-main",
+      "consumer_id": "rack-r8",
+      "provider_id": "power-main",
+      "relation": "powered_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r8--link-r8",
+      "consumer_id": "rack-r8",
+      "provider_id": "link-r8",
+      "relation": "connected_via",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-rack-r3--fan-sensor-r3",
+      "consumer_id": "rack-r3",
+      "provider_id": "fan-sensor-r3",
+      "relation": "monitored_by",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-job-a--ckpt-store-1",
+      "consumer_id": "job-a",
+      "provider_id": "ckpt-store-1",
+      "relation": "checkpoint_uses",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-job-b--ckpt-store-1",
+      "consumer_id": "job-b",
+      "provider_id": "ckpt-store-1",
+      "relation": "checkpoint_uses",
+      "weight": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "edge_id": "edge-job-c--ckpt-store-1",
+      "consumer_id": "job-c",
+      "provider_id": "ckpt-store-1",
+      "relation": "checkpoint_uses",
+      "weight": 1
+    }
+  ],
+  "gpus": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-0",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-1",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-2",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-3",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-4",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-5",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-6",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r1-n1-7",
+      "node_id": "node-r1-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-0",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-1",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-2",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-3",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-4",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-5",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-6",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r2-n1-7",
+      "node_id": "node-r2-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-0",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-1",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-2",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-3",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-4",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-5",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-6",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r3-n1-7",
+      "node_id": "node-r3-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-0",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-1",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-2",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-3",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-4",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-5",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-6",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r4-n1-7",
+      "node_id": "node-r4-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-0",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-1",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-2",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-3",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-4",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-5",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-6",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r5-n1-7",
+      "node_id": "node-r5-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-0",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 81.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-1",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 82,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-2",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 82.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-3",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 82.9,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-4",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 81.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-5",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 82.2,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-6",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 82.7,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r6-n1-7",
+      "node_id": "node-r6-n1",
+      "availability": "ready",
+      "temp_c": 83,
+      "sm_clock_mhz": 1980,
+      "power_w": 700,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-0",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-1",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-2",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-3",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-4",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-5",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-6",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r7-n1-7",
+      "node_id": "node-r7-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-0",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 69.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-1",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 70,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-2",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 70.3,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-3",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 69.8,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-4",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 70.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-5",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 69.6,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-6",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 70.1,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-r8-n1-7",
+      "node_id": "node-r8-n1",
+      "availability": "ready",
+      "temp_c": 70.4,
+      "sm_clock_mhz": 1980,
+      "power_w": 300,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "gpu-real-0",
+      "node_id": "node-real-0",
+      "availability": "ready",
+      "temp_c": 41,
+      "sm_clock_mhz": 1980,
+      "power_w": 62,
+      "power_limit_w": 700,
+      "clocks_event_reasons": 0,
+      "last_xid_code": null,
+      "last_seen_sim_ms": 0,
+      "version": 1
+    }
+  ],
+  "nodes": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r1-n1",
+      "rack_id": "rack-r1",
+      "availability": "ready",
+      "power_headroom_w": 4000,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r2-n1",
+      "rack_id": "rack-r2",
+      "availability": "ready",
+      "power_headroom_w": 800,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r3-n1",
+      "rack_id": "rack-r3",
+      "availability": "ready",
+      "power_headroom_w": 800,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r4-n1",
+      "rack_id": "rack-r4",
+      "availability": "ready",
+      "power_headroom_w": 800,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r5-n1",
+      "rack_id": "rack-r5",
+      "availability": "ready",
+      "power_headroom_w": 4000,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r6-n1",
+      "rack_id": "rack-r6",
+      "availability": "ready",
+      "power_headroom_w": 800,
+      "thermal_headroom_c": 2,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r7-n1",
+      "rack_id": "rack-r7",
+      "availability": "ready",
+      "power_headroom_w": 4000,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "node-r8-n1",
+      "rack_id": "rack-r8",
+      "availability": "ready",
+      "power_headroom_w": 4000,
+      "thermal_headroom_c": 14.4,
+      "version": 1
+    }
+  ],
+  "cooling": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "pump-a",
+      "operating_state": "normal",
+      "nominal_capacity_w": 60000,
+      "pump_power_w": 2200,
+      "observed_capacity_estimate_w": 60000,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "loop-a",
+      "operating_state": "normal",
+      "nominal_capacity_w": 60000,
+      "pump_power_w": 0,
+      "observed_capacity_estimate_w": 60000,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "pump-b",
+      "operating_state": "normal",
+      "nominal_capacity_w": 100000,
+      "pump_power_w": 3400,
+      "observed_capacity_estimate_w": 100000,
+      "version": 1
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "resource_id": "loop-b",
+      "operating_state": "normal",
+      "nominal_capacity_w": 100000,
+      "pump_power_w": 0,
+      "observed_capacity_estimate_w": 100000,
+      "version": 1
+    }
+  ],
+  "job_specs": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "gpu_profile": "demo_gpu",
+      "checkpoint_duration_ms": 30000,
+      "restart_duration_ms": 120000,
+      "checkpoint_interval_ms": 600000,
+      "work_rate_per_gpu_per_sim_s": 1,
+      "job_id": "job-a",
+      "gpus_required": 16,
+      "placement_policy": "gang_multi_node",
+      "compatible_node_ids": [
+        "node-r1-n1",
+        "node-r2-n1",
+        "node-r3-n1",
+        "node-r4-n1",
+        "node-r5-n1",
+        "node-r6-n1",
+        "node-r7-n1",
+        "node-r8-n1"
+      ],
+      "priority": 80,
+      "preemptible": true,
+      "checkpoint_supported": true,
+      "checkpoint_storage_id": "ckpt-store-1",
+      "total_work_units": 2000000
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "gpu_profile": "demo_gpu",
+      "checkpoint_duration_ms": 30000,
+      "restart_duration_ms": 120000,
+      "checkpoint_interval_ms": 600000,
+      "work_rate_per_gpu_per_sim_s": 1,
+      "job_id": "job-b",
+      "gpus_required": 8,
+      "placement_policy": "same_node",
+      "compatible_node_ids": [
+        "node-r1-n1",
+        "node-r2-n1",
+        "node-r3-n1",
+        "node-r4-n1",
+        "node-r5-n1",
+        "node-r6-n1",
+        "node-r7-n1",
+        "node-r8-n1"
+      ],
+      "priority": 60,
+      "preemptible": true,
+      "checkpoint_supported": true,
+      "checkpoint_storage_id": "ckpt-store-1",
+      "total_work_units": 1000000
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "gpu_profile": "demo_gpu",
+      "checkpoint_duration_ms": 30000,
+      "restart_duration_ms": 120000,
+      "checkpoint_interval_ms": 0,
+      "work_rate_per_gpu_per_sim_s": 1,
+      "job_id": "job-c",
+      "gpus_required": 8,
+      "placement_policy": "same_node",
+      "compatible_node_ids": [
+        "node-r6-n1"
+      ],
+      "priority": 90,
+      "preemptible": false,
+      "checkpoint_supported": false,
+      "checkpoint_storage_id": null,
+      "total_work_units": 1000000
+    }
+  ],
+  "job_states": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "status": "running",
+      "allocated_gpu_ids": [
+        "gpu-r2-n1-0",
+        "gpu-r2-n1-1",
+        "gpu-r2-n1-2",
+        "gpu-r2-n1-3",
+        "gpu-r2-n1-4",
+        "gpu-r2-n1-5",
+        "gpu-r2-n1-6",
+        "gpu-r2-n1-7",
+        "gpu-r3-n1-0",
+        "gpu-r3-n1-1",
+        "gpu-r3-n1-2",
+        "gpu-r3-n1-3",
+        "gpu-r3-n1-4",
+        "gpu-r3-n1-5",
+        "gpu-r3-n1-6",
+        "gpu-r3-n1-7"
+      ],
+      "progress_work_units": 400000,
+      "durable_work_units": 400000,
+      "latest_checkpoint_id": "ckpt-job-a-0",
+      "version": 1,
+      "last_update_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "status": "running",
+      "allocated_gpu_ids": [
+        "gpu-r4-n1-0",
+        "gpu-r4-n1-1",
+        "gpu-r4-n1-2",
+        "gpu-r4-n1-3",
+        "gpu-r4-n1-4",
+        "gpu-r4-n1-5",
+        "gpu-r4-n1-6",
+        "gpu-r4-n1-7"
+      ],
+      "progress_work_units": 200000,
+      "durable_work_units": 200000,
+      "latest_checkpoint_id": "ckpt-job-b-0",
+      "version": 1,
+      "last_update_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "status": "running",
+      "allocated_gpu_ids": [
+        "gpu-r6-n1-0",
+        "gpu-r6-n1-1",
+        "gpu-r6-n1-2",
+        "gpu-r6-n1-3",
+        "gpu-r6-n1-4",
+        "gpu-r6-n1-5",
+        "gpu-r6-n1-6",
+        "gpu-r6-n1-7"
+      ],
+      "progress_work_units": 300000,
+      "durable_work_units": 0,
+      "latest_checkpoint_id": null,
+      "version": 1,
+      "last_update_sim_time_ms": 0
+    }
+  ],
+  "allocations": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-0",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-1",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-2",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-3",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-4",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-5",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-6",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r2-n1-7",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-0",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-1",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-2",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-3",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-4",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-5",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-6",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-a",
+      "gpu_id": "gpu-r3-n1-7",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-0",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-1",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-2",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-3",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-4",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-5",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-6",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-b",
+      "gpu_id": "gpu-r4-n1-7",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-0",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-1",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-2",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-3",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-4",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-5",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-6",
+      "since_sim_time_ms": 0
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "job_id": "job-c",
+      "gpu_id": "gpu-r6-n1-7",
+      "since_sim_time_ms": 0
+    }
+  ],
+  "checkpoints": [
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "checkpoint_id": "ckpt-job-a-0",
+      "job_id": "job-a",
+      "storage_resource_id": "ckpt-store-1",
+      "status": "complete",
+      "progress_work_units": 400000,
+      "requested_sim_time_ms": 0,
+      "complete_sim_time_ms": 0,
+      "accessible": true,
+      "command_key": "seed:job-a:checkpoint:0"
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
+      "checkpoint_id": "ckpt-job-b-0",
+      "job_id": "job-b",
+      "storage_resource_id": "ckpt-store-1",
+      "status": "complete",
+      "progress_work_units": 200000,
+      "requested_sim_time_ms": 0,
+      "complete_sim_time_ms": 0,
+      "accessible": true,
+      "command_key": "seed:job-b:checkpoint:0"
+    }
+  ],
+  "observation_event_ids": []
+}

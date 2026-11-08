@@ -21,7 +21,14 @@
 3. **Cooling + racks strip:** pump-a/pump-b state, loop-a/loop-b, rack headroom bars.
 4. **Jobs timeline:** progress vs. durable work for each job, checkpoint markers (writing/complete), move/restart segments, lost-work highlights.
 5. **Incidents panel:** each incident with linked symptoms and resources and its hypothesis. **Two incidents must be visibly separate.**
-6. **Agent feed (F-NV1):** stage chips (triage → diagnose → plan → safety → execute → replan → verify); for each event, the summary, evidence IDs and **tool calls** (`tool(args) → result`), plus a "Nemotron" badge.
+6. **Agent feed (F-NV1):**
+   - stage chips: triage → diagnose → plan → safety → execute → replan → verify
+   - for each event: the summary, evidence IDs and **tool calls** (`tool(args) → result`)
+   - **every row has an actor badge** (CONTRACTS §0.8):
+     - **NEMOTRON** (NVIDIA green) for diagnosis, grouping, choosing and replanning
+     - **CODE · math** (grey) for `simulate_plan`, `evaluate_safety`, ranking and ledger steps
+
+   Nemotron's conclusion sentence is shown large, e.g. "24 GPUs on racks 2–4 + pump A at 0 kW → one incident. XID 79 on rack 7 → unrelated, separate incident." Judges should see at a glance that Nemotron diagnoses and replans, and the code only computes.
 7. **Action ledger:** `command_key`, operation, status lifecycle, and a **BLOCKED** state with the reason code in plain English (e.g. "rack r6 thermal headroom 2 °C < 7 °C required").
 8. **Judge controls** (admin token, presenter laptop only): degrade pump A, XID 79 on a chosen GPU, XID 48, pause, reset run, speed 1–5×.
 9. **Scoreboard:** reactive vs. threshold vs. Nemotron on identical scenarios. Shows lost work, delay, wasted GPU-seconds, needless moves, unsafe blocked/executed, unfinished jobs, and **the cases where we lose**, from real `evaluation_result` rows. If the Nemotron cache was used, the scoreboard says so.
