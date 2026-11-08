@@ -1,5 +1,3 @@
 packages:
   - "packages/*"
-  - "spacetime/module"
   - "apps/*"
-  - "eval"

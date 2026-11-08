@@ -1,391 +1,329 @@
-# CONTRACTS.md: the single source of truth (v1)
+# DataCenterOS shared contracts (v1.1.0)
 
-**Every lane builds against this file.** If your code disagrees with it, your code is wrong.
+> **Read §0 first.** It adapts the design kit (sections A–E below, written by Kaushik) to this repo: paths, IDs, the Pico hardware, and the names of the functions each lane calls.
+> **If §0 and A–E disagree, §0 wins.**
+> **Only P1 (Suvan) edits this file.** To request a change, open a GitHub issue titled `CONTRACT <lane>: …`. After Gate 0 (9:00 PM), changes are additive only.
 
-- **Owner:** Lane S (Suvan). Only Lane S edits this file, after a contract-change request (§12).
-- **Precedence:** this file **overrides PLAN.md §3** wherever the two differ.
-- **Versioning:** the current version is **v1, frozen at 7:00 PM Saturday**. After the freeze, changes are **additive only**: add fields with defaults and add reducers. Never rename or remove anything.
+## 0. Repo adaptation (v1.1.0)
 
----
+### 0.1 Layout, owners, branches
+| Path | Package | Owner | Branch |
+|---|---|---|---|
+| `packages/contracts/` | `@dcos/contracts`: JSON Schema, examples, validator, **generated TS types**, `validatePayload()` | P1 | `lane/p1-sim` |
+| `packages/physics/` | `@dcos/physics`: pure simulation, `simulatePlan`, `evaluateSafety`, baseline policies, presets, scenarios | P1 | `lane/p1-sim` |
+| `apps/db/` | SpacetimeDB TypeScript module (tables, reducers, scheduled tick) | P2 | `lane/p2-db` |
+| `packages/db-client/` | Generated SpacetimeDB bindings + typed helpers for P3/P4 (§0.6) | P2 | `lane/p2-db` |
+| `apps/agent/` | Node.js (TS) orchestrator: Nemotron via NIM, workflows, tools, `nemotronPolicy` adapter | P3 | `lane/p3-agent` |
+| `apps/web/` | React + Vite + Tailwind + shadcn dashboard | P4 | `lane/p4-web` |
+| `apps/evaluation/` | Scenario × policy harness, writes `evaluation_result` | P4 | `lane/p4-web` |
+| `docs/pitch/`, `docs/devpost.md` | Pitch deck, Devpost text | P4 | `lane/p4-web` |
+| `hardware/` | Pico 2 W firmware, fan gateway, `nvidia-smi` collector (F-NV2) | Everyone (shared) | `lane/hw` |
+| `plans/`, root config, `scripts/` | Plans, contracts, workspace | P1 | `lane/p1-sim` |
 
-## 0. Lanes and file ownership (this is what keeps merges clean)
+- The workspace is `packages/*` and `apps/*`, and everything is **TypeScript**. One exception: `hardware/pico/main.py` is MicroPython running on the board.
+- **The old Python agent plan is cancelled.**
+- **Physics runs in three places, from the same code:**
+  1. in the DB tick (`apps/db` imports `@dcos/physics`; fallback: `pnpm sync:physics` copies the source into `apps/db/src/physics/`)
+  2. in the agent, for `simulatePlan` and `evaluateSafety` (plain Node import)
+  3. in the evaluation harness
 
-| Lane | Person | Owns these paths (only this lane edits them) |
+  There is **no DB procedure** for `simulate_plan`.
+
+### 0.2 Wire schema v1.1.0 (the only change from the kit's 1.0.0)
+- Every payload has `schema_version: "1.1.0"`.
+- **`HardwareSample`** gained a required `sensor_kind` field (`"accelerometer" | "microphone"`) and a required `sound_rms` field (0–1 or `null`). `accel_rms_g` is now nullable.
+- **Why:** our board is a Raspberry Pi Pico 2 W with a Big Sounds microphone module, not an ESP32 + MPU-6050.
+- **Commands:**
+  - Source of truth: `packages/contracts/schema/contracts.schema.json`
+  - Regenerate types: `pnpm contracts:gen`
+  - Validate: `pnpm contracts:validate`
+  - In code: `import type { ActionCommand, … } from '@dcos/contracts'` and `validatePayload('ActionCommand', x)`
+- **Never hand-write a duplicate type.**
+
+### 0.3 Demo preset `gpu_demo_8` (IDs are frozen)
+| Resource | IDs |
+|---|---|
+| Racks | `rack-r1` … `rack-r8` |
+| Nodes (one per rack) | `node-r1-n1` … `node-r8-n1` |
+| GPUs (8 per node, 64 total) | `gpu-r{1..8}-n1-{0..7}`, e.g. `gpu-r3-n1-0` |
+| Cooling | `pump-a` → `loop-a` cools **racks r2–r4**; `pump-b` → `loop-b` cools **r1, r5–r8** |
+| Power | `power-main` (all racks) |
+| Checkpoint storage | `ckpt-store-1` |
+| Fan sensor (hardware) | `fan-sensor-r3` (on `rack-r3`) |
+| Real GPU (F-NV2) | `gpu-real-0`, `profile: "brev_real"`, **never allocatable to jobs** |
+| Network (Tier 2) | `link-r1` … `link-r8` |
+
+Run ID: `run-demo-1`. Dependency edges go `consumer → provider` (`gpu → node → rack → loop → pump`, `rack → power-main`, `job → ckpt-store-1`).
+
+**Jobs at start:**
+| Job | GPUs | Placement | Preemptible | Checkpoint | Purpose in the demo |
+|---|---|---|---|---|---|
+| `job-a` | 16 | `rack-r2` + `rack-r3` | yes | last one 9 sim-min ago | Should **checkpoint + move** |
+| `job-b` | 8 | `rack-r4` | yes | last one 1 sim-min ago | Should **keep running or power-cap** |
+| `job-c` | 8 | `rack-r6` | **no** | — | Makes r6 hot, so a move onto r6 gets **blocked** |
+
+Racks r1, r5, r7 and r8 are free capacity. The existing facility model (`compileTopology`, `step` for racks/pumps/UPS) stays; P1 adds the GPU layer on top, and **the old v0 API keeps passing its 95 tests**.
+
+### 0.4 Simulated defaults (shown in the UI as *simulated, configurable*)
+| Value | Default |
+|---|---|
+| GPU temperature | rack inlet + 35 °C × load (≈70 °C healthy) |
+| Slowdown (throttle) | **85 °C**: SM clock −30%, `clocks_event_reasons` thermal bit |
+| Shutdown | **92 °C**: GPU unavailable; non-elastic job fails |
+| SM clock | 1980 MHz nominal |
+| Power | 700 W per GPU, limit 700 W; power cap = 500 W, clock −15% |
+| Checkpoint | 30 sim-s to write; interval 10 sim-min |
+| Restart after move | 120 sim-s |
+| Planner horizon | 600 sim-s |
+| Tick | `step_ms` 1000; demo speed 1×–5× |
+
+### 0.5 Telemetry metric names
+| Metric | Unit | Meaning |
 |---|---|---|
-| **S: Core engine + integrator** | **Suvan** (Claude Max, the most parallel agents) | `packages/physics/**` (incl. fixtures), `eval/**`, `scripts/sync-physics.mjs`, `plans/CONTRACTS.md`, root files (`package.json`, `pnpm-workspace.yaml`, `.env.example`, `.gitignore`, `README.md`, `CODEOWNERS`), **all merges to `main`** |
-| **B: SpacetimeDB** | Teammate B | `spacetime/module/**`, `scripts/gen-bindings.sh`, the generated `apps/web/src/module_bindings/**`, publishing (`dcos-dev`, `dcos`, local `dcos-eval`), identities and tokens |
-| **C: Agents** | Teammate C | `agents/**` |
-| **D: Frontend + pitch** | Teammate D | `apps/web/**` (except `apps/web/src/module_bindings/**`, which is generated by B), `docs/pitch/**`, `docs/devpost.md` |
-| **A: Hardware + fan ML + QA** | **The whole team, shared.** Claim a task in `plans/status/A.md` before starting it | `hardware/**`, `scripts/demo_check.py`, `qa/**` |
-| Everyone | — | `plans/status/<lane>.md` (your own file only) |
+| `DCGM_FI_DEV_GPU_TEMP_CELSIUS` | degC | Simulated GPU temperature |
+| `DCGM_FI_DEV_SM_CLOCK` | MHz | Simulated SM clock |
+| `DCGM_FI_DEV_POWER_USAGE` | W | Simulated GPU power |
+| `DCGM_FI_DEV_CLOCKS_EVENT_REASONS` | ratio (bitmask) | Throttle reasons |
+| `rack.inlet_temp_c` | degC | Rack inlet temperature |
+| `pump.power_w` | W | Observed pump power |
+| `fan.sound_rms` | ratio | Pico microphone RMS (hardware) |
+| `fan.anomaly_score` | ratio | Gateway anomaly score |
+| `nvidia_smi.temperature_gpu` | degC | Real Brev GPU (`source_kind: "hardware"`, `labels.collector: "nvidia-smi"`) |
+| `nvidia_smi.power_draw` | W | Real Brev GPU power |
+| `nvidia_smi.utilization_gpu` | ratio | Real Brev GPU utilization |
+| `nvidia_smi.clocks_sm` | MHz | Real Brev GPU SM clock |
 
-**Rules:**
-1. **Never edit a path you don't own.** If you need a change there, open a GitHub issue titled `REQUEST <lane>: …` and ping the owner.
-2. **Generated files** (`apps/web/src/module_bindings/**`) are regenerated only by Lane B with `scripts/gen-bindings.sh`. D never hand-edits them.
-3. **Database ownership:** §3 (the database) is implemented by **Lane B**. Lane S still owns the text of this file, so B's §3 changes go through the §12 change process like everyone else's.
-3. A `CODEOWNERS` file (written by S in Phase 0) enforces this table on PRs.
+XIDs are always `SignalEvent`s (`event_type: "xid"`, `xid_code` 48/79/74), never gauges.
+
+### 0.6 Function names each lane calls (frozen)
+**P1, `@dcos/physics` (pure, deterministic):**
+```ts
+buildPreset(presetId: 'gpu_demo_8', runId: string, seed: number): PhysicsWorld
+step(input: SimulationTickInput): PhysicsTickResult            // same code: DB tick, eval, simulatePlan
+toObserved(world: PhysicsWorld): ObservedSnapshot              // strips private faults/hidden state
+simulatePlan(obs: ObservedSnapshot, plan: { commands: ActionCommand[] },
+             opts?: { horizon_s?: number; seed?: number }): PlanMetrics
+evaluateSafety(obs: ObservedSnapshot, cmd: ActionCommand,
+               ctx: { decision_epoch: number; leased_resource_ids: string[] }): SafetyDecision
+reactivePolicy(obs: ObservedSnapshot): ActionCommand[]
+thresholdPolicy(obs: ObservedSnapshot): ActionCommand[]
+loadScenarios(): Scenario[]   // fixtures/scenarios/*.json: { scenario_id, seed, preset_id, faults: FaultInjection[], horizon_s }
+// PlanMetrics = { expected_completion_delay_sim_s, expected_lost_work_units,
+//                 expected_gpu_busy_waste_s, failure_risk_estimate, violations: string[], assumptions: string[] }
+```
+The existing v0 functions (`step` for the facility, `simulate`, `checkAction`) move to the `@dcos/physics/v0` export so the new names don't collide.
+
+**Policy interface** (shared by the evaluation harness and P3): `type Policy = (obs: ObservedSnapshot, ctx: { sim_time_ms: number }) => Promise<ActionCommand[]> | ActionCommand[]`
+
+**P2, `@dcos/db-client`** (wraps the generated bindings; the exact generated casing may differ, but these wrapper names are frozen):
+- **Agent:** `connect(opts)`, `getObservedSnapshot()`, `getEvidence(incidentIds, windowSimMs)`, `getActionStatus(commandKey)`, `requestAction(cmd)`, `claimAction(commandKey, expectedVersion, workerId)`, `startAction(commandKey, fencingToken)`, `cancelAction(…)`, `verifyAction(…)`, `claimWorkflow(…)`, `heartbeatWorkflow(…)`, `updateWorkflow(…)`, `upsertIncident(…)`, `submitPlan(…)`, `publishAgentEvent(…)`
+- **Gateway:** `ingestObservations(batch)`
+- **Admin:** `createRun`, `configureRun`, `pauseRun`, `injectFault`, `publishEvaluationResult`
+
+**P3, `apps/agent`:** exports `nemotronPolicy: Policy` for the harness (same planner, no DB). It runs as `pnpm --filter agent start`.
+
+### 0.7 Safety reason codes (frozen; `SafetyDecision.violations`)
+`DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT`, `DEST_POWER_HEADROOM_INSUFFICIENT`, `DEST_GPU_UNHEALTHY`, `DEST_GPU_BUSY`, `DEST_GPU_LEASED`, `DEST_GPU_COUNT_INSUFFICIENT`, `DEST_NOT_COMPATIBLE`, `CHECKPOINT_NOT_ACCESSIBLE`, `NO_COMPLETED_CHECKPOINT`, `JOB_NOT_PREEMPTIBLE`, `CHECKPOINT_UNSUPPORTED`, `STALE_DECISION_EPOCH`, `STALE_RESOURCE_VERSION`, `CONFLICTING_ACTION`, `EVIDENCE_STALE`, `UNSUPPORTED_OPERATION`, `CORDON_IS_NOT_REPAIR`, `REAL_GPU_NOT_ALLOCATABLE`
+
+`decision` is `allow | deny | needs_approval`.
+
+### 0.8 Additions to the kit's tables (§B)
+- **`agent_event`** gains `tool_calls_json`: `[{ tool, args_summary, result_summary }]`. This is **F-NV1**: the dashboard shows Nemotron's tool calls and a one-line summary for each step. Never store raw chain-of-thought.
+- **`resource`** gains a `gpu-real-0` row. `gpu_current` is updated from `nvidia-smi` telemetry ingested with `source_kind: "hardware"` (**F-NV2**).
+- **Tier 1 tables** (P2 builds these first):
+  - `run`, `resource`, `dependency_edge`
+  - `gpu_current`, `node_current`, `cooling_current`
+  - `job_spec`, `job_current`, `job_gpu_allocation`, `checkpoint`
+  - `telemetry_recent` (keep at most 2,000 rows, write at most 1 Hz per GPU), `signal_event`
+  - `symptom`, `incident`, `incident_symptom`, `incident_resource`
+  - `workflow`, `workflow_incident`, `plan`
+  - `action`, `action_dependency`, `action_event`, `resource_lease`
+  - `agent_event`, `evaluation_result`
+  - `fault_injection_truth` (private), `tick_schedule` (private), **`role_grant`** (private: `identity` → `role`)
+- **Tier 2:** `action_incident` (until then, store `incident_ids_json` on `action`) and `hardware_sensor_mapping` (until then, the gateway maps `pico-fan-r3` → `fan-sensor-r3` itself).
+
+### 0.9 Auth roles (`role_grant`, checked via `ctx.sender` in every write reducer)
+| Role | Who | May call |
+|---|---|---|
+| `admin` | Database owner and P4's judge panel (presenter laptop only) | `create_run`, `configure_run`, `pause_run`, `inject_fault`, `publish_evaluation_result`, `grant_role` |
+| `agent` | P3's orchestrator | workflow, incident, plan and action reducers, `publish_agent_event` |
+| `gateway` | Fan gateway + `nvidia-smi` collector | `ingest_observations` |
+
+The browser can read public tables without a token. **Tokens are handed out by P2 in team chat and never committed.**
+
+### 0.10 Env vars (`.env.example`)
+- `STDB_URI`, `STDB_DB`
+- `STDB_ADMIN_TOKEN`, `STDB_AGENT_TOKEN`, `STDB_GATEWAY_TOKEN`
+- `NIM_BASE_URL`, `NIM_API_KEY`, `NIM_MODEL`
+- `NIM_FALLBACK_BASE_URL`, `NIM_FALLBACK_MODEL`
+- `LLM_MAX_TOKENS`, `LLM_MAX_TOOL_STEPS`, `LLM_TIMEOUT_MS`
+- `FAN_SERIAL_PORT`
+- `VITE_STDB_URI`, `VITE_STDB_DB`, `VITE_DATA_MODE` (`mock | live`)
+- `VITE_ADMIN_TOKEN` (presenter laptop's local build only; **never on Vercel**)
 
 ---
 
-## 1. Constants (use these exact strings everywhere)
+# Design kit contracts (Kaushik, v1.1.0 with §0 adaptations)
+
+**This file replaces the earlier broad `CONTRACTS.md`, which is now in `plans/archive/`.** The attached `contracts.schema.json` is the canonical cross-service **wire schema**; `example-payloads.json` contains five validated examples. No team member changes field names independently. All public JSON uses `snake_case` and `schema_version: "1.0.0"`.
+
+## A. Cross-cutting rules
+
+- **IDs**: opaque stable strings (e.g. `run-demo-1`, `gpu-r3-n1-0`). Never use array index or display name as an identity. A resource remains the same resource across simulated and hardware telemetry.
+- **Units**: Celsius `degC`, watts `W`, SM clock `MHz`, vibration `g`, RPM `rpm`, duration `ms`, normalized score `ratio`, progress `work_units`. Sensor gateway converts before ingest. Metric names use documented DCGM symbols when modeled as DCGM telemetry.
+- **Clock**: `sim_time_ms` is the run's logical time. `observed_unix_ms` is the source measurement timestamp. Leases use actual wall time. `source_seq` increases per source. `event_id` uniquely deduplicates telemetry/signal ingestion.
+- **Source attribution**: `simulator | hardware | replay | dcgm` is required; sources must never be silently mixed or misrepresented as real GPUs.
+- **Staleness**: `quality` indicates `good | estimated | stale | missing | invalid` (hardware uses its own allowed subset). Physical sensor data is never automatically accepted as a GPU/pump failure.
+- **Versioning**: `resource.version` increments for material state changes; `run.decision_epoch` increments for safety-relevant changes. Per-tick gauge samples do not necessarily bump decision epochs. Commands compare expected versions before starting and committing.
+- **Access**: `fault_injection_truth` and scenario future schedule are private; model tools cannot access them. Dashboard may be allowed to show *past selected injections to judges* separately, but those rows must not be included in the agent input.
+- **Command keys**: stable, unique across retry attempts. Same key with a different payload must be rejected as a collision; never silently accept changed semantics under a reused key.
+- **Authoritative state**: only SpacetimeDB reducer transactions mutate live system resources or jobs. Physics computes transitions; it is not a second database.
+
+## B. Relational tables to implement in SpacetimeDB
+
+These are logical field definitions and recommended primary/unique/index constraints. Convert to actual SpacetimeDB TypeScript native columns (`t.string`, `t.u64`, `t.f64`, `t.bool`, etc.) using installed SDK version. Use stringified JSON only for infrequently queried configuration/evidence. Denormalize a few read-only display fields where convenient; avoid duplicate *authoritative* state.
+
+| Table | PK / unique / indexes | Essential columns | Visibility |
+|---|---|---|---|
+| `run` | `run_id` PK | `seed`, `status`, `sim_time_ms`, `tick_index`, `step_ms`, `wall_tick_ms`, `decision_epoch`, `paused`, `profile_version` | public |
+| `resource` | `resource_id` PK; index `(run_id,kind)` and `parent_id` | `run_id`, `kind`, `parent_id`, `failure_domain_id`, `profile`, `config_json`, `current_status`, `version`, `enabled` | public |
+| `dependency_edge` | `edge_id` PK; indexes `consumer_id`, `provider_id` | `run_id`, `consumer_id`, `provider_id`, `relation`, `weight` | public |
+| `gpu_current` | `resource_id` PK | `run_id`, `node_id`, `availability`, `temp_c`, `sm_clock_mhz`, `power_w`, `power_limit_w`, `clocks_event_reasons`, `last_xid_code` (nullable), `last_seen_sim_ms`, `version` | public |
+| `cooling_current` | `resource_id` PK | `run_id`, `operating_state` (observed/alarm-derived), `nominal_capacity_w`, `pump_power_w` (observed), `observed_capacity_estimate_w` (nullable), `version` | public |
+| `node_current` | `resource_id` PK | `run_id`, `rack_id`, `availability`, `power_headroom_w`, `thermal_headroom_c`, `version` | public |
+| `job_spec` | `job_id` PK | `run_id`, `gpus_required`, `placement_policy`, `compatible_node_ids_json`, `gpu_profile`, `priority`, `preemptible`, `checkpoint_supported`, `checkpoint_storage_id`, `checkpoint_duration_ms`, `restart_duration_ms`, `checkpoint_interval_ms`, `total_work_units`, `work_rate_per_gpu_per_sim_s` | public |
+| `job_current` | `job_id` PK; index `(run_id,status)` | `run_id`, `status`, `progress_work_units`, `durable_work_units`, `latest_checkpoint_id`, `last_update_sim_time_ms`, `version` | public |
+| `job_gpu_allocation` | composite unique `(job_id,gpu_id)`; unique GPU assignment for active jobs enforced via reducer | `run_id`, `job_id`, `gpu_id`, `since_sim_time_ms` | public |
+| `checkpoint` | `checkpoint_id` PK; index `job_id` | `run_id`, `job_id`, `storage_resource_id`, `status`, `progress_work_units`, `command_key`, `requested_sim_time_ms`, `complete_sim_time_ms`, `accessible` | public |
+| `telemetry_recent` | `event_id` PK; indexes `(resource_id,sim_time_ms)` | `run_id`, `resource_id`, `source_kind`, `source_id`, `source_seq`, `metric`, `value`, `unit`, `quality`, `sim_time_ms`, `observed_unix_ms`, `labels_json` | public (bounded retention) |
+| `signal_event` | `event_id` PK; indexes `(resource_id,sim_time_ms)` | `run_id`, `resource_id`, `event_type`, `xid_code`, `severity`, `source_kind`, `source_id`, `source_seq`, `sim_time_ms`, `evidence_json` | public |
+| `symptom` | `symptom_id` PK; index `run_id` | `run_id`, `resource_id`, `first_seen_sim_ms`, `last_seen_sim_ms`, `kind`, `severity`, `evidence_event_ids_json`, `status` | public |
+| `incident` | `incident_id` PK; index `(run_id,state)` | `run_id`, `state`, `severity`, `title`, `hypothesis`, `confidence`, `opened_sim_time_ms`, `updated_sim_time_ms`, `version` | public |
+| `incident_symptom` | unique `(incident_id,symptom_id)` | `run_id`, `incident_id`, `symptom_id`, `reason` | public |
+| `incident_resource` | unique `(incident_id,resource_id)` | `run_id`, `incident_id`, `resource_id`, `reason` | public |
+| `workflow` | `workflow_id` PK; index `(run_id,stage)` | `run_id`, `stage`, `state`, `plan_id`, `current_command_key`, `last_processed_event_seq`, `attempt`, `lease_owner`, `lease_expires_unix_ms`, `fencing_token`, `updated_at_unix_ms`, `version` | owner/service-readable; publish safe view |
+| `workflow_incident` | unique `(workflow_id,incident_id)` | `run_id`, `workflow_id`, `incident_id` | public |
+| `plan` | `plan_id` PK; index `workflow_id` | `run_id`, `workflow_id`, `based_on_decision_epoch`, `assumptions_json`, `expected_metrics_json`, `status`, `explanation` | public |
+| `action` | `action_id` PK, `command_key` UNIQUE; indexes `(workflow_id,status)`, `(run_id,status)` | `run_id`, `workflow_id`, `plan_id`, `command_key`, `operation`, `target_resource_id`, `job_id`, `payload_hash`, `args_json`, `expected_versions_json`, `expected_decision_epoch`, `due_sim_time_ms`, `status`, `attempt`, `lease_token`, `result_json`, `reason_code`, `version` | public safe projection; service can access full |
+| `action_incident` | unique `(action_id,incident_id)` | `run_id`, `action_id`, `incident_id` | public |
+| `action_dependency` | unique `(action_id,depends_on_action_id)` | `action_id`, `depends_on_action_id` | public |
+| `action_event` | `action_event_id` PK; index `command_key` | `run_id`, `action_id`, `command_key`, `status`, `sim_time_ms`, `observed_unix_ms`, `reason_code`, `detail_json` | public |
+| `resource_lease` | `resource_id` PK | `run_id`, `action_id`, `workflow_id`, `expires_at_unix_ms`, `fencing_token` | service-readable; optional public safe view |
+| `agent_event` | `agent_event_id` PK; index `workflow_id` | `run_id`, `workflow_id`, `incident_id`, `stage`, `summary`, `evidence_ids_json`, `sim_time_ms`, `observed_unix_ms` | public |
+| `evaluation_result` | unique `(scenario_id,policy,seed)` | `run_id`, `scenario_id`, `policy`, `seed`, `metrics_json`, `policy_version`, `physics_profile_version` | public |
+| `fault_injection_truth` | `fault_id` PK; index `(run_id,start_sim_time_ms)` | full private `FaultInjection` payload; actual active state | **private** |
+| `hardware_sensor_mapping` | `sensor_id` PK | `resource_id`, `calibration_id`, `authorized_source`, `last_source_seq`, `last_observed_unix_ms` | **private** |
+| `tick_schedule` | scheduled primary key | `scheduled_at` configured with SpacetimeDB `onSchedule` | **private** |
+
+**Indexes and joins:** SpacetimeDB uses explicit field/composite indexes; verify supported key types in the installed SDK. `u64` IDs are fine for internal auto-increment row keys but all service boundary IDs remain stable opaque strings. If composite unique keys aren't directly supported for a chosen SDK schema, enforce uniqueness transactionally and optionally store canonical concatenated unique keys.
+
+**MVP simplification:** `gpu_current`, `node_current`, `job_current` are small bounded current-state tables; historical full metric retention is optional. Keep private truth isolated from `get_incident_evidence` and all agent subscriptions.
+
+## C. Reducer / service command signatures (freeze these names)
+
+These are **logical application signatures**, not copy-paste claims about exact generated TypeScript binding method casing. Implement them as SpacetimeDB reducers or service wrappers over reducers; generated bindings determine exact call spelling.
 
 ```ts
-// packages/physics/src/constants.ts   (Lane S). Python copies these into agents/dcos_agents/constants.py (Lane C).
-export const COMPONENT_KINDS = ['utility', 'ups', 'pump', 'rack'] as const;
-export const STATUSES = ['online', 'offline', 'degraded', 'shutdown', 'maintenance'] as const;
-export const FAILURE_KINDS = ['pump_fail', 'utility_loss', 'sensor_freeze', 'load_spike', 'ticket_lie'] as const;
-export const ACTION_KINDS = ['shutdown_component', 'restore_component', 'shed_load', 'migrate_load', 'set_load', 'dispatch_tech'] as const;
-export const ACTION_STATUSES = ['pending', 'approved', 'blocked', 'executed', 'failed'] as const;
-export const SYMPTOMS = ['cooling_margin_negative', 'rack_temp_warning', 'thermal_imbalance', 'fan_vibration_anomaly', 'power_on_ups', 'fan_offline'] as const;
-export const SEVERITIES = ['low', 'high', 'critical'] as const;
-export const INCIDENT_STATUSES = ['new', 'investigating', 'planning', 'awaiting_approval', 'executing', 'resolved', 'failed'] as const;
-export const AGENT_NAMES = ['diagnose', 'plan', 'execute', 'handoff'] as const;
-export const STEP_KINDS = ['thought', 'tool_call', 'tool_result', 'decision'] as const;
-export const FAULT_CLASSES = ['healthy', 'imbalance', 'obstruction', 'unknown'] as const;
-export const ROLES = ['admin', 'presenter', 'agent', 'bridge'] as const;
-export const METRIC_KEYS = ['events_per_s', 'subscribers', 'agent_calls', 'agent_tokens', 'downtime_rack_s', 'unsafe_blocked', 'unsafe_executed'] as const;
+// Admin / judge (authorized caller only)
+create_run(run_id: string, seed: number, preset_id: string): void
+configure_run(run_id: string, config_json: string): void
+pause_run(run_id: string, paused: boolean): void
+inject_fault(fault_json: string): void                  // validates FaultInjection
 
-// Thresholds (°C) and physics constants
-export const T_AMBIENT_C = 22;
-export const T_WARNING_C = 35;
-export const T_DEGRADED_C = 45;
-export const T_SHUTDOWN_C = 55;
-export const PASSIVE_K_PER_S = 0.0005;            // was 0.02 in PLAN.md, which was a bug (a rack with no cooling would plateau at 27 °C)
-// Rack thermal model (authoritative, per rack, per second):
-//   dT/dt = (load_kw − cooling_kw) / thermal_mass_kj_per_c − PASSIVE_K_PER_S × (T − T_AMBIENT_C)
-// Sanity checks for the tests:
-//   6 kW rack with 0 cooling → about 0.1 °C/s, reaching 55 °C in about 5.5 min ("all racks shut down in about 6 min")
-//   fan_health 0.3 on rack_3  → about 4.2 kW deficit, about 0.07 °C/s, reaching the 35 °C warning in about 3 min (that's the fan lead-time window)
-export const DEFAULT_THERMAL_MASS_KJ_PER_C = 60;   // per rack
-export const SAFETY_HORIZON_TICKS = 120;
-export const TECH_REPAIR_TICKS = 60;               // dispatch_tech restores the target after 60 ticks
-export const HISTORY_PER_COMPONENT = 120;          // ring buffer size
-export const FAN_ONLINE_TIMEOUT_TICKS = 5;         // no reading for 5 ticks → fan_offline
-export const REAL_FAN_RACK_ID = 'rack_3';
+// System-owned, scheduled / ingestion
+advance_tick(schedule_row: TickScheduleRow): void       // scheduled, not browser callable
+ingest_observations(batch_json: string): void            // TelemetryEvent[] / SignalEvent[]
+
+// Orchestrator, compare-and-swap workflow state
+claim_workflow(workflow_id: string, worker_id: string,
+  expected_version: number, lease_ms: number): void
+heartbeat_workflow(workflow_id: string, worker_id: string,
+  fencing_token: bigint, lease_ms: number): void
+update_workflow(workflow_id: string, expected_version: number,
+  fencing_token: bigint, stage: string, state_json: string): void
+upsert_incident(incident_json: string, links_json: string): void
+submit_plan(plan_json: string): void
+request_action(action_command_json: string): void
+claim_action(command_key: string, expected_action_version: number,
+  worker_id: string): void
+start_action(command_key: string, fencing_token: bigint): void
+cancel_action(command_key: string, reason_code: string,
+  fencing_token: bigint): void
+verify_action(command_key: string, evidence_json: string): void
+publish_agent_event(agent_event_json: string): void
+
+// Results / benchmark
+publish_evaluation_result(result_json: string): void
 ```
 
-**Component ID format** (generated by the compiler): `util_1…`, `ups_1…`, `pump_A`, `pump_B`, `pump_C…` (pumps get letters), and `rack_1…rack_N`.
+### Reducer implementation invariants
 
-**Default demo facility** (`defaultDemoConfig()`):
-- `util_1` 200 kW
-- `ups_1` 20 kWh / 120 kW max
-- `pump_A` and `pump_B` at 50 kW each
-- `rack_1`–`rack_8` at 6 kW each (48 kW total)
-- `rack_3` is the real fan
+- `inject_fault` validates target resource exists and is valid for that fault kind; do not allow contradictory physical topology mutations via injection.
+- `ingest_observations` rejects missing authorization, source mismatch, malformed units/metric, duplicate event ID or nonmonotonic source sequence; batch inserts atomically.
+- `submit_plan` writes proposal only; `request_action` runs **fresh** safety check and rejects bad `decision_epoch`/resource versions.
+- `claim_action` grabs the *entire* affected resource closure in a single sorted transaction, not only the primary GPU. For `migrate_restart`, lock job, source GPU set, destination GPU set, and affected rack/node reservation records. Build the lock set *inside the trusted reducer*, not from user-supplied IDs.
+- `start_action` does not complete a checkpoint in one transaction. It creates `checkpoint(status='writing')` and assigns `due_sim_time_ms`; later `advance_tick` finishes it iff resource/checkpoint conditions remain valid.
+- On completion of `migrate_restart`, allocation is all-or-nothing; no duplicate GPU assignment. `checkpoint` and `migration` are separate ledger commands connected by `action_dependency`.
+- Reject `command_key` collisions where `payload_hash` differs. Retrying the same command returns the persisted record, regardless of whether a network timeout occurred.
+- Resource `fencing_token` is monotonically incremented for each lease acquisition and checked for delayed work. **Separate short-lived `workflow` worker leases from durable `resource_lease` reservations held by running simulator commands.** Agent process death may expire the workflow lease but must not release a running checkpoint reservation. Lease expiry by itself does not undo an already-running real-world effect.
+- Replan on new relevant `decision_epoch` only; mark old proposed actions superseded and cancel only safe-to-cancel ones. At delayed completion, validate the **affected resources and operation-specific prerequisites** (not every unrelated global epoch change). A completed checkpoint remains valid even if its downstream migration plan becomes stale.
 
----
+## D. Simulation and agent integration types
 
-## 2. Physics package API (`@dcos/physics`, Lane S)
+The canonical JSON Schema contains these `#/$defs` types:
 
-Every function is **pure and deterministic**: no `Math.random`, no `Date.now`, no globals, no I/O. Each one returns a **new** state and never mutates its input.
+`RunClock`, `ResourceSpec`, `DependencyEdge`, `GpuCurrent`, `NodeCurrent`, `CoolingCurrent`, `JobSpec`, `JobState`, `JobGpuAllocation`, `Checkpoint`, `ObservedSnapshot`, `PhysicsWorld`, `SimulationTickInput`, `PhysicsTickResult`, `TelemetryEvent`, `SignalEvent`, `FaultInjection`, `Incident`, `IncidentLink`, `PlanCandidate`, `ActionCommand`, `ActionStatus`, `SafetyDecision`, `HardwareSample`, `EvaluationResult`.
 
-```ts
-// packages/physics/src/types.ts
-export type ComponentKind = typeof COMPONENT_KINDS[number];
-export type Status = typeof STATUSES[number];
-export type FailureKind = typeof FAILURE_KINDS[number];
-export type ActionKind = typeof ACTION_KINDS[number];
-export type Symptom = typeof SYMPTOMS[number];
-export type Severity = typeof SEVERITIES[number];
-export type Rng = () => number;                     // uniform [0,1)
+- **Simulation -> DB:** `SimulationTickInput` (containing private `PhysicsWorld`) -> `PhysicsTickResult` (containing `world_after`, `TelemetryEvent[]`, `SignalEvent[]`, completed/failed commands, and epoch/version updates). The `PhysicsWorld.active_faults_private`, `hidden_physics_state_json`, and `due_faults_private` fields are available **only** to trusted simulation code, never to planning agents. The agent gets `ObservedSnapshot` only.
+- **Agent -> DB:** `Incident`, links, `PlanCandidate`, `ActionCommand`, `ActionStatus` readers, `agent_event` summaries. `ActionCommand` does **not** contain a fencing token: the reducer assigns the token at claim time and stores it in the ledger/lease.
+- **Hardware -> gateway:** `HardwareSample` only; gateway produces `TelemetryEvent` with a resource mapping and the current simulation clock.
+- **Benchmark -> UI:** `EvaluationResult`, same schema for all three policies.
 
-export interface UtilityParams { capacity_kw: number }
-export interface UpsParams { energy_kwh: number; max_output_kw: number }
-export interface PumpParams { capacity_kw: number }
-export interface RackParams { base_load_kw: number; thermal_mass_kj_per_c: number }
+### Example: simulator GPU temperature observation
 
-export interface ComponentState {
-  id: string; kind: ComponentKind; label: string;
-  params: UtilityParams | UpsParams | PumpParams | RackParams;
-  true_status: Status;            // hidden from agents
-  observed_status: Status;        // what telemetry shows
-  true_temp_c: number;            // racks only (others = ambient); hidden
-  observed_temp_c: number;        // equals true unless the sensor is frozen
-  sensor_frozen: boolean;         // hidden
-  sensor_age_s: number;           // observable
-  load_kw: number;                // current IT load (racks); pumps: power draw
-  cooling_kw: number;             // allocated cooling (racks) or output (pumps)
-  ups_energy_kwh: number;         // UPS only, else 0
-  fan_health: number;             // 0..1, real-fan rack only, else 1
-  fan_anomaly: number;            // 0..1, real-fan rack only, else 0
-  fan_online: boolean;            // real-fan rack only, else true
-  fan_fault_class: string;        // last fault_class from the bridge (may carry the "replay:" prefix), else ''
-  fan_rms: number;                // last vibration RMS in g, else 0
-  fan_last_seen_tick: number;
-  repair_eta_tick: number;        // 0 = none; set by dispatch_tech
-  is_real_hardware: boolean;
-  x: number; y: number;           // layout
-}
-export interface Edge { from_id: string; to_id: string; kind: 'power' | 'cooling' }
-export interface Failure { id: number; kind: FailureKind; target_id: string; params: Record<string, number | string>; start_tick: number; active: boolean }
-export interface FacilityState {
-  name: string; template: string; seed: number;
-  tick: number; sim_time_s: number;
-  components: Record<string, ComponentState>;
-  edges: Edge[];
-  failures: Failure[];
-}
-export interface Action { kind: ActionKind; target_id: string; params: { kw?: number; to?: string } }
-export interface Outcome {
-  min_cooling_margin_kw: number; peak_temp_c: number;
-  racks_degraded: number; racks_shutdown: number; downtime_rack_s: number;
-}
-export interface SafetyResult { ok: boolean; reason: string; predicted: Outcome }
-export interface IncidentDraft { symptom: Symptom; component_ids: string[]; severity: Severity }
-export interface TelemetryPoint { component_id: string; tick: number; temp_c: number; power_kw: number; cooling_kw: number }
-export interface FacilityConfig {
-  name: string; template: 'enterprise' | 'ai_compute' | 'edge'; seed: number;
-  components: {
-    utility: { count: number; capacity_kw: number };
-    ups: { count: number; energy_kwh: number; max_output_kw: number };
-    pump: { count: number; capacity_kw: number };
-    rack: { count: number; load_kw: number; real_fan_rack: number };   // 0 = none
-  };
-  redundancy: { cooling: 'N' | 'N+1' };
-}
-```
-
-```ts
-// packages/physics/src/index.ts: the public functions (signatures are frozen)
-export function defaultDemoConfig(): FacilityConfig;
-export function compileTopology(cfg: FacilityConfig): { state: FacilityState; warnings: string[] };
-export function step(s: FacilityState, dtSec: number, rng: Rng): FacilityState;
-export function applyAction(s: FacilityState, a: Action): FacilityState;
-export function applyFailure(s: FacilityState, f: Failure): FacilityState;
-export function setFanReading(s: FacilityState, rackId: string, anomaly: number, tick: number, faultClass?: string, rms?: number): FacilityState;
-export function simulate(s: FacilityState, actions: Action[], ticks: number, rng: Rng): Outcome;
-export function checkAction(s: FacilityState, a: Action, rng: Rng, horizonTicks?: number): SafetyResult;
-export function detect(s: FacilityState, history: TelemetryPoint[], openSymptoms: Symptom[]): IncidentDraft[];
-export function makeRng(seed: number): Rng;          // mulberry32, for eval/tests only
-```
-
-**Physics clarifications (these override PLAN.md §3.4):**
-- **No load halving when a rack is `degraded`.** At 45 °C or above the status is `degraded`, and at 55 °C or above it's `shutdown` (load drops to 0). So a rack with no cooling shuts down in about 6 minutes.
-- **`sensor_age_s`** is the seconds since the last *fresh* sample, so it stays 0 for a healthy sensor and grows only while the sensor is frozen. There's no sensor noise.
-- **Cooling allocation:**
-  - Each rack's cooling share is proportional to its **design (base) load**: `share_i = C × base_load_i / Σ base_load`.
-  - The real-fan rack's share is multiplied by `fan_health`.
-  - A rack whose share is at least its current load cools back toward ambient.
-  - That means `migrate_load` and `shed_load` really do fix an overheating rack.
-- **`facility.status` values:** `normal` (no rack above warning), `degraded` (any rack at warning or degraded), `critical` (any rack shut down).
-- **Lead-time CSV** goes in `hardware/bridge/results/fan_leadtime.csv`. Lane S copies it into `eval/results/`.
-- **The eval reads true state** from the scenario files and physics replays, *not* from private tables (only the module owner can read those). If B's owner token is needed, it's used only on the local `dcos-eval`.
-
-- **`simulate` and `checkAction` hold the last live fan reading** for the whole horizon, because no bridge readings arrive in a counterfactual run. Without this, the fan timeout would "heal" the fan and hide the fault.
-- **`effectiveRackLoad(s, id, view)`** (from `balance.ts`) includes an active `load_spike`'s `extra_kw` in both views. **B uses it for each rack's `telemetry_latest.power_kw`.**
-
-**Merge exceptions** (in addition to §11):
-- **E1:** S may merge the fixtures to `main` at 6:15 PM.
-- **E2:** S may tag `hard-piece` at the 3:00 AM S+B+C check.
-
-**Demo note for D:** the default facility (2 × 50 kW pumps, 48 kW of racks) **meets** N+1, so it produces no warning. To show the compiler's warning in the Builder, load the "AI Hall B" preset (`ai_hall_3pump`, 3 × 30 kW, which shows the ✔ N+1 line), then **change the pump count to 2**. That produces "N+1 NOT met: 2×30 kW minus 30 = 30 kW < 48 kW. Suggest pump capacity ≥ 48 kW." The Pump A trap still uses the default facility.
-
-**`checkAction` reason strings** (C's agents parse these, so keep the prefixes):
-- `OK: ...`
-- `BLOCKED: cooling <X> kW < load <Y> kW`
-- `BLOCKED: <n> racks shut down within <t> s`
-- `BLOCKED: rack <id> exceeds 45 °C`
-
----
-
-## 3. SpacetimeDB database (Lane B)
-
-- **Databases:** `dcos-dev` (development), `dcos` (prod and demo), and `dcos-eval` (local `spacetime start`, for the eval only).
-- **Column names are snake_case, exactly as listed.** The generated TypeScript bindings may camelCase them. **Lane D uses whatever the generated bindings expose; never guess.**
-
-### 3.1 Public tables (clients and agents can read and subscribe)
-| Table | Columns (name: type) | PK |
-|---|---|---|
-| `facility` | `id: u32, name: string, template: string, seed: u64, tick: u64, sim_time_s: f64, status: string` | `id` (always 1) |
-| `component` | `id: string, kind: string, label: string, status: string, params_json: string, is_real_hardware: bool, x: f64, y: f64` | `id` |
-| `edge` | `id: u32 (auto), from_id: string, to_id: string, kind: string` | `id` |
-| `telemetry_latest` | `component_id: string, tick: u64, temp_c: f64, power_kw: f64, cooling_kw: f64, load_kw: f64, ups_energy_kwh: f64, fan_health: f64, fan_anomaly: f64, fan_online: bool, fan_fault_class: string (default ''), fan_rms: f64 (default 0), sensor_age_s: f64` | `component_id` |
-| `telemetry_history` | `id: u64 (auto), component_id: string, tick: u64, temp_c: f64, power_kw: f64, cooling_kw: f64, fan_anomaly: f64 (default 0)` | `id` |
-| `ticket` | `id: u32, component_id: string, title: string, status: string, notes: string, created_tick: u64` | `id` |
-| `shift_note` | `id: u32 (auto), author: string, body: string, verified: bool, tick: u64` | `id` |
-| `incident` | `id: u32 (auto), opened_tick: u64, symptom: string, component_ids: string, severity: string, status: string, hypothesis: string, chosen_plan_json: string, resolved_tick: u64` | `id` |
-| `action` | `id: u32 (auto), request_key: string, requested_by: string, kind: string, target_id: string, params_json: string, status: string, safety_reason: string, predicted_json: string, incident_id: u32, tick: u64` | `id` |
-| `agent_step` | `id: u64 (auto), incident_id: u32, agent: string, step_no: u32, kind: string, tool: string, summary: string, payload_json: string, tick: u64` | `id` |
-| `metric` | `key: string, value: f64` | `key` |
-
-Notes:
-- `telemetry_latest.temp_c` is the **observed** value: a frozen sensor shows its stale reading.
-- `component.status` is the **observed** status.
-- `component_ids` is a CSV string.
-- `params_json`, `chosen_plan_json`, `predicted_json` and `payload_json` are JSON strings. Parse them on read. `payload_json` is at most 4 KB.
-
-### 3.2 Private tables (only reducers and procedures can read them)
-| Table | Columns | PK |
-|---|---|---|
-| `ground_truth` | `component_id: string, true_status: string, true_temp_c: f64, sensor_frozen: bool, state_json: string` (the full ComponentState) | `component_id` |
-| `failure` | `id: u32 (auto), kind: string, target_id: string, params_json: string, start_tick: u64, active: bool` | `id` |
-| `allowlist` | `identity: Identity, role: string` | `identity` |
-| `tick_schedule` | scheduled table, `ScheduleAt.interval(1_000_000n)` → `tick` | auto |
-| `run_config` | `id: u32, paused: bool, speed: u32` | `id` (always 1) |
-
-**Security rule:** the agents' identity is **not** the module owner. Reading `ground_truth` with `STDB_AGENT_TOKEN` must fail; that's tested in Lane C's P0 selftest.
-
-### 3.3 Reducers and procedure (signatures frozen)
-Arguments are given in order. Python sends them as a **JSON array** in exactly this order.
-
-| Name | Args | Allowed roles | Behavior |
-|---|---|---|---|
-| `seed_demo_facility` | `()` | admin, presenter | `compileTopology(defaultDemoConfig())`. Writes all tables, inserts ticket #40 (`pump_A`, "Quarterly bearing check", `completed`; this ticket is accurate) and the shift note (author `human`, `verified=false`): "Night shift: Pump B work done, all good". Clears incidents, actions and agent_steps. Starts the tick |
-| `build_facility` | `(config_json: string)` | admin, presenter | Like seed, but with the given config. Writes each compiler warning as a `shift_note` (author `system`) |
-| `tick` | scheduled | system | ×`speed` steps per call: `step`, then write `ground_truth`, `telemetry_latest` and `telemetry_history` (prune to 120 per component), then `detect` (open new incidents for symptoms that have no open incident), then metrics |
-| `inject_failure` | `(kind: string, target_id: string, params_json: string)` — params per kind: `pump_fail` `{}` (target = pump), `utility_loss` `{}` (target = utility), `sensor_freeze` `{}` (target = rack), `load_spike` `{"extra_kw": 4, "tenant": "Vision team · training job"}` (target = rack; `tenant` is an optional display label, which the UI shows as the noisy neighbor), `ticket_lie` `{}` (target = the component the false ticket claims was repaired) | admin, presenter | Inserts a `failure` and calls `applyFailure`. `ticket_lie` also inserts **ticket #41** (`target_id`, "Repair: <target>", `completed`, notes "Replaced impeller, pump back online"). The physical state is unchanged |
-| `clear_failure` | `(failure_id: u32)` | admin, presenter | `active=false` |
-| `clear_all_failures` | `()` | admin, presenter | Sets every failure to `active=false`. The UI uses this, because failure ids are private |
-| `report_fan_reading` | `(rack_id: string, anomaly: f64, fault_class: string, rms: f64)` | bridge, admin | `setFanReading`. Updates `fan_last_seen_tick` |
-| `request_action` | `(kind: string, target_id: string, params_json: string, requested_by: string, incident_id: u32, request_key: string)` | presenter, agent | Inserts an `action`, then runs `checkAction` on the **true** state and sets `status` to `approved` or `blocked`, plus `safety_reason` and `predicted_json`. Increments `unsafe_blocked` if blocked. **The caller generates `request_key` (a UUID4) and reads the row back with `SELECT * FROM action WHERE request_key = '<key>'`**, because reducers return nothing |
-| `open_incident` | `(symptom: string, component_ids: string, severity: string)` | agent | Inserts an incident with `status=new`. Used by `/agent/ask`, where symptom is `operator_question`. The caller reads it back as the newest incident with that symptom |
-| `bump_metric` | `(key: string, delta: f64)` | agent, bridge | `metric[key] += delta` (inserts the row if it's missing) |
-| `execute_action` | `(action_id: u32)` | presenter, agent | Throws `INVALID: not approved` unless approved. Otherwise `applyAction`, `status=executed` |
-| `update_incident` | `(incident_id: u32, status: string, hypothesis: string, chosen_plan_json: string)` | agent | Sets the fields. If `resolved`, also sets `resolved_tick` |
-| `log_agent_step` | `(incident_id: u32, agent: string, step_no: u32, kind: string, tool: string, summary: string, payload_json: string)` | agent | Inserts a row. Truncates `summary` to 280 characters and `payload_json` to 4 KB |
-| `write_shift_note` | `(body: string, verified: bool)` | agent | author `agent` |
-| `set_run_config` | `(paused: bool, speed: u32)` | admin, presenter | — |
-| `admin_advance` | `(ticks: u32)` | admin | Runs `ticks` steps immediately (eval only). Max 600 per call |
-| `reset_to_seed` | `(config_json: string)` | admin | Clears all run data, rebuilds from the config (an empty string means `defaultDemoConfig()`), sets tick to 0 and leaves the run **paused** (eval) |
-| `tick_manual` | `()` | admin, bridge | Runs one step. **This is the fallback heartbeat** if the scheduled tick fails: it ships disabled and is turned on only under fallback F2 |
-| `simulate_plan_req` *(contingency)* | `(request_id: string, actions_json: string, ticks: u32)` | agent, presenter | **Use only if procedures fail.** It writes the Outcome into the public table `plan_result(request_id: string PK, outcome_json: string, tick: u64)` |
-| `allowlist_add` | `(identity_hex: string, role: string)` | admin (the owner bootstraps the first admin) | — |
-| **`simulate_plan`** (procedure) | `(actions_json: string, ticks: u32)` | agent, presenter | `actions_json` is a JSON **array of Action objects** in the §2 shape: `[{"kind":"shed_load","target_id":"rack_7","params":{"kw":6}}]`, where `params` is an object, not a string. The procedure reads the true state inside the module, then runs `simulate`. **It returns the `Outcome` object** (the HTTP body is that JSON object). It never returns the hidden fields |
-
-**Limits and behavior:**
-- `ticks` is at most 600 for `admin_advance` and `simulate_plan`.
-- `speed` ranges from 1 to 10.
-- `request_key` is at most 64 characters, and a repeated `request_key` does nothing.
-- The module derives randomness from `makeRng(seed × 1_000_003 + tick)` instead of `ctx.random()`, so the eval is reproducible. That's still deterministic, and still free of `Math.random`.
-- `open_incident` read-back: the caller selects incidents with that symptom and takes the **max `id` in Python** (don't rely on SQL `ORDER BY`).
-- **Procedure return value:** if the HTTP body of `simulate_plan` comes back as a JSON *string* rather than an object, parse it twice. `stdb.proc()` handles both cases.
-
-**Error strings** (always thrown as `Error`):
-- `FORBIDDEN: <role required>`
-- `NOT_FOUND: <what>`
-- `INVALID: <why>`
-
----
-
-## 4. HTTP access from Python (Lanes C and A)
-
-- **Base URL:** `STDB_HOST` (Maincloud, believed to be `https://maincloud.spacetimedb.com`; **Lane S confirms it at the booth**. Local is `http://localhost:3000`.)
-- **Header:** `Authorization: Bearer <token>`
-
-| Call | Method + path | Body | Returns |
-|---|---|---|---|
-| New identity | `POST /v1/identity` | — | `{"identity": "<hex>", "token": "<jwt>"}` |
-| Reducer | `POST /v1/database/{db}/call/{reducer}` | JSON array of args | 200 empty, or an error text (non-200) |
-| Procedure | `POST /v1/database/{db}/call/simulate_plan` | `["<actions_json>", 300]` | the Outcome JSON |
-| SQL | `POST /v1/database/{db}/sql` | raw SQL text | `[{"schema": {...}, "rows": [[...], ...]}]` |
-
-**`agents/dcos_agents/stdb.py`** (Lane C owns it; Lane A imports it) must expose:
-```python
-def sql(q: str, *, token: str | None = None) -> list[dict]          # rows zipped with column names; u64 → int
-def call(reducer: str, *args, token: str | None = None) -> None      # raises StdbError(text) on non-200
-def proc(name: str, *args, token: str | None = None) -> dict
-# The token resolves in this order: the token= argument, then env STDB_TOKEN, then env STDB_AGENT_TOKEN.
-# The bridge passes STDB_BRIDGE_TOKEN. demo_check passes the presenter token.
-```
-**The u64/bigint rule:** treat every u64 as a Python `int`. If the HTTP JSON ever returns u64 values as strings, `sql()` converts them. This is tested in C's P0 selftest.
-
----
-
-## 5. Agents service (Lane C) → frontend (Lane D)
-
-Base URL `VITE_AGENT_URL` (default `http://localhost:8787`). CORS allows `*` for the demo.
-
-| Method | Path | Request | Response |
-|---|---|---|---|
-| GET | `/health` | — | `{"ok": true, "llm": "brev-nim" \| "nvidia-hosted" \| "local", "model": "<id>", "stdb": "ok" \| "error", "agent_calls": 0, "agent_tokens": 0, "fallbacks": 0}` |
-| POST | `/agent/ask` | `{"question": "Can I shut down Pump A for maintenance?"}` | `{"incident_id": 12, "answer": "<text>", "action_id": 7, "action_status": "blocked", "evidence": ["<string>", ...]}` |
-| POST | `/agent/run/{incident_id}` | — | `{"started": true}` |
-
-`/agent/ask` creates an incident with symptom `operator_question`. **Exception to the constants list:** this one symptom value is allowed only for incidents created by `/agent/ask`.
-
----
-
-## 6. Agent tools (Lane C). Names are frozen because the UI shows them as chips
-`get_facility_topology`, `get_component_status(id)`, `get_recent_telemetry(id, n=30)`, `get_component_dependencies(id)`, `get_maintenance_logs(id)`, `get_shift_notes()`, `get_active_incidents()`, `simulate_recovery_plan(actions, ticks=300)`, `validate_safety_constraints(action)`, `execute_simulated_action(action_id)`, `verify_service_recovery(component_ids, wait_s=20)`, `write_handoff_note(body)`.
-
-`action` objects passed to tools have the shape: `{"kind": "<ActionKind>", "target_id": "<id>", "params": {"kw": 3, "to": "rack_1"}}`. When sent to `request_action`, `params` is serialized into `params_json`.
-
-**Optional 13th tool:** `find_contradictions()`. It's a deterministic helper that compares tickets and shift notes with live status, and C may add it if the LLM's live answers are unreliable. The UI shows it as a chip like the others.
-
-### 6.1 The `agent_step` payloads that Lane D renders
-- **`kind=tool_call`**, `payload_json` = `{"args": {...}}`
-- **`kind=tool_result`**, `payload_json` = `{"result": ...}` (truncated)
-- **`kind=decision`, `agent=plan`**, `payload_json` = this exact shape (D renders the plan cards from it):
 ```json
-{"plans": [
-  {"name": "Migrate 3 kW off rack_3", "actions": [{"kind":"migrate_load","target_id":"rack_3","params":{"kw":3,"to":"rack_1"}}],
-   "outcome": {"min_cooling_margin_kw": 1.5, "peak_temp_c": 37.2, "racks_degraded": 0, "racks_shutdown": 0, "downtime_rack_s": 0}},
-  {"name": "Shed rack_8", "actions": [...], "outcome": {...}},
-  {"name": "Do nothing", "actions": [], "outcome": {...}}
- ],
- "chosen": 0, "reason": "Lowest downtime with no shutdowns"}
+{
+  "schema_version": "1.0.0",
+  "event_id": "evt-r1-00081",
+  "run_id": "run-demo-1",
+  "resource_id": "gpu-r3-n1-0",
+  "source_kind": "simulator",
+  "source_id": "sim-engine-1",
+  "source_seq": 81,
+  "observed_unix_ms": 1794091200000,
+  "sim_time_ms": 43000,
+  "metric": "DCGM_FI_DEV_GPU_TEMP_CELSIUS",
+  "value": 84.2,
+  "unit": "degC",
+  "quality": "estimated",
+  "labels": {"profile": "demo_gpu", "hardware_backed": "false"}
+}
 ```
 
----
+Note: `source_kind=simulator` should normally use `quality=estimated` rather than implying a measured real NVIDIA GPU temperature. For demo dashboards, label the source explicitly. Physical fan fields should use `metric='fan.vibration_rms_g'`/`unit='g'`; their values must not be passed off as DCGM GPU counters.
 
-## 7. Fan hardware (Lane A)
+### Example: actionable safety decision
 
-- **ESP32 → laptop serial:** 921600 baud, 200 lines/s, `t_ms,ax,ay,az,gx,gy,gz\n` (accel in g, gyro in deg/s).
-- **Bridge → SpacetimeDB:** every **0.5 s**, `call("report_fan_reading", "rack_3", anomaly, fault_class, rms)`.
-  - `anomaly` is 0..1: **0.5 or more means a fault.**
-  - `fault_class` is one of `FAULT_CLASSES`.
-  - `rms` is the vibration RMS in g.
-- **Physics mapping (S):** `fan_health = 1 − clamp((anomaly − 0.3) / 0.6, 0, 1) × 0.7`.
-  - If no reading arrives within `FAN_ONLINE_TIMEOUT_TICKS`, then `fan_online=false` and `fan_health=1`, and `detect` emits `fan_offline`.
-- **Replay mode (the hardware backup):** `fan_bridge.py --replay hardware/bridge/data/<file>.npz` streams a **real recorded** session through the same reducer. The UI shows "REPLAY OF REAL RECORDING" when the bridge passes `fault_class` with a `replay:` prefix, e.g. `replay:imbalance`.
-- **Simulated fan (last-resort tier):** if all hardware fails, the bridge sends `fault_class` with a `sim:` prefix, and the UI labels it "SIMULATED FAN".
-- **Serial extras:**
-  - lines starting with `#` are comments (the bridge ignores them);
-  - lines starting with `M,` are the microphone-fallback format, `M,t_ms,rms,band1..band4`. Both ends are Lane A.
-- **Recordings:** `hardware/bridge/data/` **is committed** (under 10 MB total) so replay works from any clone. S exempts it in `.gitignore`.
-- **Live judge fault:** use **a tape flap stuck on the blade guard** first, and the coin second. Taping on a coin means stopping the motor, and the stop itself shows up as an anomaly.
+```json
+{
+  "schema_version": "1.0.0", "run_id": "run-demo-1", "plan_id": "plan-2",
+  "action_id": "act-13", "decision": "deny", "checked_decision_epoch": 6,
+  "violations": ["DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT"],
+  "checked_resource_ids": ["rack-r6", "node-r6-n1", "job-a"],
+  "evidence": {"required_headroom_c": 7.0, "available_headroom_c": 2.0}
+}
+```
 
----
+## E. Owner/implementer and handoff checklist
 
-## 8. Frontend data needs (Lane D)
-- **Subscriptions:** every public table. Telemetry history is filtered by `component_id` for the selected rack.
-- **Presenter mode:** `?presenter=1`, which connects with `VITE_STDB_PRESENTER_TOKEN`.
-- **Compute utilization (display only, Tier 1):** each rack shows "GPU util %" = `min(100, round(load_kw / 10 × 100))`, treating 10 kW as a rack's nominal maximum, plus the tenant label from the active `load_spike` failure if there is one. The noisy-neighbor story is the existing `load_spike` and `migrate_load` with a tenant label. It's power and heat level only, not GPU scheduling.
-- **Reducers D calls:** `seed_demo_facility`, `build_facility`, `inject_failure`, `clear_all_failures`, `request_action` (generating a UUID `request_key`), `execute_action`, `set_run_config`.
-- **`.gitignore` (S adds these):** `.env*` (except `.env.example`), `spacetime/module/scripts/.identities.env`, `node_modules`, `__pycache__`. **Don't** ignore `hardware/bridge/data/`.
-- **Agent service D calls:** `/health`, `/agent/ask`.
+| Interface | Owner | Reviewer/consumer | Done when |
+|---|---|---|---|
+| `step()` and `simulatePlan()` | Software 1 | Software 2 + 3 + 4 | cross-run deterministic tests, stable output fixtures |
+| `contracts.schema.json` and `CONTRACTS.md` | Software 1 (schema steward) | **all four** | example payload validation succeeds; freeze tag published |
+| tables + reducers + bindings | Software 2 | Software 3 | DB starts, generated SDK compiles, idempotent command test passes |
+| workflow, planning, tool calls | Software 3 | Software 2 | two incidents and resume demonstrated |
+| dashboard subscriptions | Software 4 | Software 2 + 3 | 8x8 heat map + job status from actual DB data |
+| benchmark harness, scoreboard + live judge UI | Software 4 | Software 1 + 2 + 3 | 3 policies on matching seeds; real result events; live subscriptions |
+| `HardwareSample` -> `TelemetryEvent` | All four (optional shared sprint) | Software 2 (gateway contract) | sample validated and accepted by gateway; simulated replay fallback |
 
-## 9. Fixtures (to build against before the real backend exists)
-
-Lane S commits these by **6:15 PM** in `packages/physics/fixtures/`. Lanes C and D mock against them:
-- `facility_default.json`: the result of `compileTopology(defaultDemoConfig())` (a FacilityState)
-- `rows_public.json`: sample rows for every public table, after "pump_B failed + ticket lie + operator asked about pump_A"
-- `agent_steps_example.json`: 10 steps, including one `plan` decision payload (§6.1)
-
-**Eval output** (Lane S): `eval/results/summary.csv`, `eval/results/summary.png`, and **`eval/results/summary.json`**. The JSON shape is `{"n": 50, "strategies": {"none": {...}, "rules": {...}, "agents": {...}}, "fan": {"median_lead_time_s": ..., "false_alarms_per_hour": ...}}`, where each strategy object has the keys `downtime_rack_s`, `unsafe_executed`, `unsafe_blocked`, `root_cause_correct`, `contradictions_caught`, `median_time_to_stabilize_s`. Lane D's Results page reads this file instead of retyping numbers.
-
-## 10. Environment variables (names are frozen)
-`STDB_HOST, STDB_DB, STDB_AGENT_TOKEN, STDB_BRIDGE_TOKEN, STDB_ADMIN_TOKEN, STDB_MODE (live|fixture), NIM_BASE_URL, NIM_MODEL, NVIDIA_API_KEY, NVIDIA_HOSTED_MODEL, LLM_LOCAL_BASE_URL, LLM_LOCAL_MODEL, LLM_MAX_TOKENS, LLM_MAX_STEPS, FAN_SERIAL_PORT, FAN_RACK_ID, VITE_STDB_URI, VITE_STDB_DB, VITE_AGENT_URL, VITE_STDB_PRESENTER_TOKEN, VITE_DATA_MODE (fixture|live|http)`
-
-- **Eval tokens:** the local `dcos-eval` server issues its own identities. Lane B creates a separate eval admin token and an eval agent token, and allow-lists both on `dcos-eval`.
-- **Secrets:** `VITE_STDB_PRESENTER_TOKEN` is **never** set on Vercel, because every `VITE_*` value is public in the JS bundle. Only the demo laptop's local build has it.
-
-## 11. Git and merge protocol
-- **Branches:** `lane/s-core`, `lane/b-spacetime`, `lane/c-agents`, `lane/d-web`, `lane/a-hardware`.
-- **Sub-agent worktree branches** are named `wt/<lane>-<n>-<topic>`, e.g. `wt/s-2-physics-core` or `wt/c-1-stdb`. They're created from your lane branch and merged back into it. (Git can't hold both `lane/c-agents` and `lane/c-agents/x`.)
-- **READMEs:** each lane may write a README inside its own folder (`agents/README.md`, `hardware/README.md`, and so on). The root `README.md` belongs to S, who pastes in the sections the other lanes provide.
-- **Merges to `main`:**
-  - **only at the sync points:** 7:00 PM, 9:00 PM, 11:00 PM, 1:30 AM, 7:30 AM and 9:45 AM;
-  - **only by Lane S**, through a PR from each lane branch.
-  - Order: **S first** (contracts, physics), then **B** (module, publish, bindings regenerated), then C, A and D.
-- **Before opening a PR:** `git fetch && git rebase origin/main`. Then run your lane checks (`pnpm -r build`, `pnpm -F @dcos/physics test`, `uv run pytest`, `pnpm -F web build`).
-- **Commits:** small, `feat(<lane>): ...`, `fix(<lane>): ...`. No secrets: `.env.local` is gitignored.
-- **Lockfile:** any lane may commit `pnpm-lock.yaml` changes caused by its own `pnpm add`. If two PRs conflict on it, S resolves it at merge time by running `pnpm install` on the merged `package.json` files and committing the result.
-- **CORS:** Lane B confirms by 7:00 PM whether Maincloud's HTTP SQL endpoint allows browser calls. If it doesn't, Lane D's polling fallback goes through the agents service (Lane C adds `GET /proxy/sql?q=` as an additive endpoint).
-- **After the 10:00 AM freeze:** only `fix(demo):` commits, approved by Suvan.
-
-## 12. Contract change request
-To change anything here:
-1. Open an issue titled `CONTRACT <lane>: <change>`, giving the reason and the exact diff.
-2. S accepts it (additive only after 7 PM), edits this file, bumps it to `v1.x`, and posts in team chat.
-3. Everyone pulls `main`.
+**Contract change rule:** submit one PR updating schema + fixtures + generated TS types + reducer/interface tests. Never rename or overload a field informally in chat; the next person should be able to integrate by reading this contract alone.

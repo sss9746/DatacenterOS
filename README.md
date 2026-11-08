@@ -1,62 +1,43 @@
 # DataCenterOS
 
-> **Build any data center. Break anything, including the real fan on our table. Watch AI keep it running.**
+> **When a GPU data center starts failing, Nemotron agents keep the training jobs alive.** They decide per job whether to keep running, cap power, or checkpoint and move; keep separate failures separate; and survive their own crash mid-recovery.
 
-HackUTD 2026 "Zero Day". A deterministic data-center physics engine, a live SpacetimeDB digital twin, a team of AI
-agents that diagnose and fix failures behind a safety engine, and a real vibrating fan wired into the simulation.
+HackUTD 2026 "Zero Day", targeting the NMC², NVIDIA and SpacetimeDB tracks.
+- A deterministic GPU-cluster digital twin: 64 GPUs, cooling loops, training jobs with checkpoints, NVIDIA XID faults.
+- It runs live in SpacetimeDB with a durable action ledger.
+- A Nemotron (NVIDIA NIM) orchestrator works behind a hard safety engine.
+- It's evaluated against rule-based baselines on identical seeded scenarios.
 
-> **WIP.** This README is a skeleton. Lane S (Suvan) owns it and pastes in the sections the other lanes provide.
-> Plans live in [`plans/`](plans/README.md); [`plans/CONTRACTS.md`](plans/CONTRACTS.md) is the single source of truth.
+**Plans:** start at [`PLAN.md`](PLAN.md), then [`plans/README.md`](plans/README.md). [`plans/CONTRACTS.md`](plans/CONTRACTS.md) §0 is the single source of shared names.
 
 ## Repo layout & owners
+| Path | Lane | What lives there |
+|---|---|---|
+| `packages/contracts/` | P1 (Suvan) | `@dcos/contracts`: JSON Schema v1.1.0, examples, validator, generated TS types |
+| `packages/physics/` | P1 (Suvan) | `@dcos/physics`: pure simulation, `simulatePlan`, `evaluateSafety`, baseline policies, scenarios (v0 facility API kept under `/v0`) |
+| `apps/db/`, `packages/db-client/` | P2 | SpacetimeDB TypeScript module + generated bindings / typed client / mock |
+| `apps/agent/` | P3 | Node.js orchestrator on NVIDIA NIM (Nemotron), `nemotronPolicy` |
+| `apps/web/`, `apps/evaluation/`, `docs/` | P4 | Dashboard, evaluation harness, pitch, Devpost |
+| `hardware/` | everyone | Pico 2 W fan + gateway; real-GPU `nvidia-smi` collector |
+| `plans/` | P1 | Plans, architecture, contracts, status |
 
-| Path | Lane | Owner | What lives there |
-|---|---|---|---|
-| `packages/physics/` | S | Suvan | `@dcos/physics`: the pure, deterministic engine (compiler, step, actions, failures, simulate, checkAction, detect) + fixtures |
-| `eval/` | S | Suvan | The 50-scenario evaluation (none / rules / agents) and its results |
-| `scripts/sync-physics.mjs` | S | Suvan | Copies the physics source into the SpacetimeDB module (bundling fallback) |
-| `plans/CONTRACTS.md`, root files | S | Suvan | Contracts, workspace, `.env.example`, `.gitignore`, `CODEOWNERS`, this README |
-| `spacetime/module/`, `scripts/gen-bindings.sh`, `apps/web/src/module_bindings/` | B | Teammate B | The SpacetimeDB module, publishing, identities, generated bindings |
-| `agents/` | C | Teammate C | The agents service (diagnose, plan, execute, handoff) on NVIDIA NIM |
-| `apps/web/` (except `module_bindings/`), `docs/pitch/`, `docs/devpost.md` | D | Teammate D | The dashboard, facility builder and pitch |
-| `hardware/`, `scripts/demo_check.py`, `qa/` | A | Whole team (claim in `plans/status/A.md`) | The real fan (ESP32 + IMU), fan ML bridge, QA |
-| `plans/status/<lane>.md` | each | that lane | Status updates |
+Only the owning lane edits a path. Need a change elsewhere? Open an issue titled `REQUEST <lane>: …`.
 
-Only the owning lane edits a path (enforced by `CODEOWNERS`). Need a change elsewhere? Open an issue titled `REQUEST <lane>: …`.
-
-## How to run (WIP)
-
-Requirements: Node 22+, pnpm 10.
-
+## Run
+Requires Node 22+, pnpm 10 and Python 3 (for the schema validator).
 ```bash
 pnpm install
-pnpm -F @dcos/physics build     # builds packages/physics/dist (ES2022 ESM + .d.ts)
-pnpm -F @dcos/physics test      # vitest
-node scripts/sync-physics.mjs --check   # is spacetime/module/src/physics up to date?
+pnpm -r test                 # physics + contracts
+pnpm contracts:gen           # regenerate TS types from the JSON Schema
+pnpm contracts:validate      # pip install jsonschema
 ```
+Copy `.env.example` to `.env.local`. Never commit tokens.
 
-Copy `.env.example` to `.env.local` and fill in the values. Never commit tokens.
-
-## SpacetimeDB module (Lane B)
-
-_TODO: Lane B provides this section._
-
-## Agents service (Lane C)
-
-_TODO: Lane C provides this section._
-
-## Dashboard & builder (Lane D)
-
-_TODO: Lane D provides this section._
-
-## Real fan hardware (Lane A)
-
-_TODO: Lane A provides this section._
-
-## Evaluation (Lane S)
-
-_TODO: results from `eval/results/summary.json`._
+## Sections each lane fills in
+- **SpacetimeDB module (P2):** _TODO_
+- **Agent (P3):** _TODO_
+- **Dashboard + evaluation (P4):** _TODO; results come only from real runs_
+- **Hardware (shared):** _TODO_
 
 ## License
-
 [MIT](LICENSE)
