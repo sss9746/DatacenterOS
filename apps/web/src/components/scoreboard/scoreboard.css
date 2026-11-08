@@ -14,6 +14,9 @@
 #scoreboard th.numeric, #scoreboard td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
 #scoreboard th.numeric { white-space: normal; }
 #scoreboard td.numeric small { text-align: right; }
+/* Row headers keep a readable measure instead of wrapping one word per line. */
+#scoreboard table.sb-dense tbody th, #scoreboard table.sb-narrow th:first-child { min-width: 150px; }
+#scoreboard .loss-list span, #scoreboard .report-details > p, #scoreboard .data-warning { font-size: 12px; }
 /* Tables keep readable column widths and scroll inside their focusable region instead of crushing columns. */
 #scoreboard .table-scroll > table { min-width: 640px; }
 #scoreboard .table-scroll > table.sb-narrow { min-width: 440px; }
