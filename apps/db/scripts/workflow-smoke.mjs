@@ -8,6 +8,10 @@ import { arg, connectCli, jsonArg, sleep } from './stdb.mjs';
 
 const DB = process.argv[2] ?? 'dcos-dev';
 const RUN = 'run-demo-1';
+if (DB === 'dcos') {
+  console.error('this smoke test resets the run; a check never resets prod dcos');
+  process.exit(2);
+}
 const { call, sql, check, expectError, done } = connectCli(DB, process.env.STDB_SERVER ?? 'maincloud');
 const wf = (id) => sql(`SELECT * FROM workflow WHERE workflow_id = '${id}'`)[0];
 const run = () => sql(`SELECT * FROM run WHERE run_id = '${RUN}'`)[0];

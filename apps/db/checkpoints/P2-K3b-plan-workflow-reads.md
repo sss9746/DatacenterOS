@@ -23,11 +23,17 @@ The dashboard can show the selected plan and the persisted handoff from real dat
 SCOPE §5 asks for **chosen and rejected** options. Rejected options exist only in memory (`JobPlan.alternatives`) and aren't saved anywhere, so no read helper can return them. `KARTHIK.md` and TASKS R4.5 ask only for the selected plan. Either the agent saves them in workflow state (Suvan's S3), or the UI shows the selected plan only and SCOPE is noted as narrowed.
 
 ## Done when
-- [ ] Mock tests: `onPlans` matches a submitted plan, and `onWorkflows` still returns a workflow after `done`
-- [ ] Live check on `dcos-r-local`: a submitted plan and a workflow at `done` both appear
-- [ ] `pnpm -r test` and typechecks pass; existing methods unchanged
+- [x] Mock tests: `onPlans` matches a submitted plan, and `onWorkflows` still returns a workflow after `done`
+- [x] Live check on `dcos-r-local`: a submitted plan and a workflow at `done` both appear
+- [x] `pnpm -r test` and typechecks pass; existing methods unchanged
 - [ ] Karthik has the API
 
 ## Architect notes (Codex)
 
 ## Implementation report (Claude)
+**Status: ◐ (2026-11-08). Code done; Karthik still needs telling.** Client-only: no schema change, no republish.
+
+- `onPlans(cb)` returns `PlanRecord[]` and `onWorkflows(cb)` returns every workflow, in mock and live. Unreadable plan rows are dropped, not defaulted.
+- Selected plan: `workflow.plan_id`. Final handoff: `workflow.state.verification`.
+
+**Verified:** `pnpm -r test` 740 pass; live check in `provenance-roundtrip.ts` passes on `dcos-r-local`. Rejected plan options remain open with Suvan.

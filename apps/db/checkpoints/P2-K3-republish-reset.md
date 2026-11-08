@@ -31,8 +31,10 @@ R1's physics and K1/K2 go live on the dev database, and Suvan's R5 harness gets 
 9. Finish with a clean reset. Confirm the role: `spacetime sql -s maincloud dcos-dev "SELECT * FROM role_grant"` lists `0xc200188f…40ca` as `agent`.
 10. Post "releasing dev" and ping Suvan.
 
+**Caution:** every reset deletes `evaluation_result` rows whose `run_id` is `run-demo-1`. Don't run these checks on `dcos-dev` after S6 publishes unless those rows use a different `run_id`.
+
 ## Done when
-- [ ] `controlledReset` refuses prod and fails while a lease is live (tests)
+- [x] `controlledReset` refuses prod and fails while a lease is live (tests)
 - [ ] `dcos-dev` runs a recorded `int/r-sprint` commit
 - [ ] Gate 2, both smokes and the K2 round-trip pass there (closes K1 and K2)
 - [ ] Agent identity still has `agent` after the reset
@@ -41,3 +43,8 @@ R1's physics and K1/K2 go live on the dev database, and Suvan's R5 harness gets 
 ## Architect notes (Codex)
 
 ## Implementation report (Claude)
+**Status: ◐ prepared (2026-11-08). The republish itself waits for R1, K1 and K2 on `int/r-sprint`.**
+
+Steps 1-3 done: `controlledReset` is exported from `@dcos/db-client` (for Suvan's R5 harness), `reset-run.ts` wraps it, and `gate2.ts`, both smokes and the round-trip script refuse `dcos`.
+
+**Verified:** 3 new tests; `reset-run.ts` gave a clean run on `dcos-r-local`; all five scripts refused `dcos` before connecting; `smoke:workflow` passes on `dcos-r-local`.

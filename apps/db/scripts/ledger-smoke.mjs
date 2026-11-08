@@ -9,6 +9,10 @@ import { arg, connectCli, jsonArg, sleep, waitFor } from './stdb.mjs';
 
 const DB = process.argv[2] ?? 'dcos-dev';
 const RUN = 'run-demo-1';
+if (DB === 'dcos') {
+  console.error('this smoke test resets the run; a check never resets prod dcos');
+  process.exit(2);
+}
 const { call, sql, check, expectError, done } = connectCli(DB, process.env.STDB_SERVER ?? 'maincloud');
 const action = (key) => sql(`SELECT * FROM action WHERE command_key = '${key}'`)[0];
 const run = () => sql(`SELECT * FROM run WHERE run_id = '${RUN}'`)[0];

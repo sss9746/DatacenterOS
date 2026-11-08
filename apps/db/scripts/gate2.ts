@@ -14,6 +14,10 @@ import { validatePayload, type ActionCommand, type ActionStatus } from '@dcos/co
 import { connect, isDbError, type DbClient, type DbErrorCode } from '@dcos/db-client';
 
 const DB = process.argv.find((a, i) => i >= 2 && !a.startsWith('--')) ?? 'dcos-dev';
+if (DB === 'dcos') {
+  console.error('gate2 resets the run; a check never resets prod dcos');
+  process.exit(2);
+}
 const URI = process.env.STDB_URI ?? 'wss://maincloud.spacetimedb.com';
 const RUN = 'run-demo-1';
 

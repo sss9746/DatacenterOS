@@ -33,6 +33,7 @@ import {
   type RunConfig,
   type SymptomRecord,
   type WorkflowLease,
+  type PlanRecord,
   type WorkflowRecord,
   type WorkflowStage,
 } from './types.js';
@@ -180,7 +181,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
   const calls: MockCall[] = [];
 
   // --- subscriptions -------------------------------------------------------
-  type Topic = 'gpu' | 'jobs' | 'incidents' | 'actions' | 'agentEvents' | 'evaluation';
+  type Topic = 'gpu' | 'jobs' | 'incidents' | 'actions' | 'agentEvents' | 'evaluation' | 'plans' | 'workflows';
   const subs: Record<Topic, Set<() => void>> = {
     gpu: new Set(),
     jobs: new Set(),
@@ -188,6 +189,8 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
     actions: new Set(),
     agentEvents: new Set(),
     evaluation: new Set(),
+    plans: new Set(),
+    workflows: new Set(),
   };
   const changeSubs = new Set<(c: DbChange) => void>();
   const emit = (...topics: Topic[]) => topics.forEach((t) => subs[t].forEach((fn) => fn()));
@@ -724,6 +727,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       wf.attempt += 1;
       wf.version += 1;
       wf.updated_at_unix_ms = now();
+      emit('workflows');
       return lease(wf);
     },
 
@@ -733,6 +737,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       checkWfLease(wf, fencingToken, workerId);
       wf.lease_expires_unix_ms = now() + leaseMs; // §0.11 #16: no version bump
       wf.updated_at_unix_ms = now();
+      emit('workflows');
       return lease(wf);
     },
 
@@ -753,6 +758,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       }
       wf.version += 1;
       wf.updated_at_unix_ms = now();
+      emit('workflows');
       return clone(wf);
     },
 
@@ -799,6 +805,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       record('submitPlan', [plan]);
       mustValidate('PlanCandidate', plan);
       plans.set(plan.plan_id, clone(plan));
+      emit('plans');
     },
 
     async publishAgentEvent(ev) {
@@ -935,6 +942,8 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       ),
     onAgentEvents: (cb) => subscribe<AgentEventInput[]>('agentEvents', () => agentEvents.map(clone), cb),
     onEvaluation: (cb) => subscribe<EvaluationResult[]>('evaluation', () => [...evaluations.values()].map(clone), cb),
+    onPlans: (cb) => subscribe<PlanRecord[]>('plans', () => [...plans.values()].map((p) => ({ ...clone(p), status: 'proposed' })), cb),
+    onWorkflows: (cb) => subscribe<WorkflowRecord[]>('workflows', () => [...workflows.values()].map(clone), cb),
 
     close() {
       if (autoTimer) clearInterval(autoTimer);

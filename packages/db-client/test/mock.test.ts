@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { validatePayload, type ActionCommand, type FaultInjection, type GpuCurrent, type TelemetryEvent } from '@dcos/contracts';
-import { createMockClient, isDbError, isSafetyRejected, MOCK_FIXTURES, parseDbError, type ActionDetail, type DbChange } from '../src/index.js';
+import { createRequire } from 'node:module';
+import { describe, expect, it, vi } from 'vitest';
+import { validatePayload, type ActionCommand, type EvaluationResult, type FaultInjection, type GpuCurrent, type PlanCandidate, type TelemetryEvent } from '@dcos/contracts';
+import { controlledReset, createMockClient, isDbError, isSafetyRejected, MOCK_FIXTURES, parseDbError, type ActionDetail, type DbChange, type PlanRecord, type WorkflowRecord } from '../src/index.js';
+import { toEvaluation, toPlan } from '../src/live.js';
 
 const manualClock = () => {
   let t = 1_794_091_200_000;
@@ -542,6 +544,125 @@ describe('createMockClient', () => {
       expect((await db.getActionStatus('wf-1:ckpt:job-a'))!.status).toBe('succeeded');
       expect((await db.getObservedSnapshot()).job_states.find((j) => j.job_id === 'job-a')!.version).not.toBe(jobVersion);
       await expect(claimAndStart(db, 'wf-1:mig:job-a')).resolves.toMatchObject({ status: 'running' });
+    });
+  });
+
+  describe('evaluation provenance (K2)', () => {
+    const example = createRequire(import.meta.url)('@dcos/contracts/schema/example-payloads.json').evaluation_result_provenance as EvaluationResult;
+    const legacy = () => {
+      const { provenance: _p, ...rest } = structuredClone(example);
+      return rest as EvaluationResult;
+    };
+    const dbRow = (r: EvaluationResult, metricsJson?: string) => {
+      const { schema_version: _v, run_id, scenario_id, seed, policy, ...metrics } = r;
+      return { resultId: 'r', runId: run_id, scenarioId: scenario_id, seed, policy, metricsJson: metricsJson ?? JSON.stringify(metrics), policyVersion: '', physicsProfileVersion: '' };
+    };
+
+    it('mock: a new row reads back unchanged and an old row has no provenance', async () => {
+      const db = createMockClient();
+      let rows: EvaluationResult[] = [];
+      db.onEvaluation((r) => (rows = r));
+      await db.publishEvaluationResult(structuredClone(example));
+      expect(rows[0]).toEqual(example);
+      await db.publishEvaluationResult(legacy());
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.provenance).toBeUndefined();
+    });
+
+    it.each([
+      ['extra field', { extra: 1 }],
+      ['negative count', { model_requests: -1 }],
+      ['bad trace hash', { trace_sha256: 'nope' }],
+      ['wrong latency model', { latency_model: 'real' }],
+    ])('mock rejects provenance with %s', async (_name, patch) => {
+      const db = createMockClient();
+      const err = await db.publishEvaluationResult({ ...example, provenance: { ...example.provenance!, ...patch } } as EvaluationResult).catch((e) => e);
+      expect(isDbError(err, 'INVALID_PAYLOAD')).toBe(true);
+    });
+
+    it('live read-back keeps provenance, and drops unreadable rows instead of zero-filling', () => {
+      const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      expect(toEvaluation(dbRow(example))).toEqual(example);
+      expect(toEvaluation(dbRow(legacy()))).toEqual(legacy());
+      expect(toEvaluation(dbRow(example, 'not json'))).toBeNull();
+      expect(toEvaluation(dbRow(example, '{}'))).toBeNull();
+      expect(quiet).toHaveBeenCalledTimes(2);
+      quiet.mockRestore();
+    });
+  });
+
+  describe('plan and workflow read helpers (K3b)', () => {
+    const plan: PlanCandidate = {
+      schema_version: '1.1.0', plan_id: 'plan-1', run_id: 'run-demo-1', workflow_id: 'wf-1', incident_ids: ['inc-1'],
+      based_on_decision_epoch: 3, assumptions: ['pump degradation persists'], command_keys: ['cmd-1'],
+      expected_completion_delay_sim_s: 150, expected_lost_work_units: 12, expected_gpu_busy_waste_s: 4, failure_risk_estimate: 0.02,
+      explanation: 'checkpoint then move',
+    };
+
+    it('onPlans returns a submitted plan with its status', async () => {
+      const db = createMockClient();
+      let plans: PlanRecord[] = [];
+      db.onPlans((p) => (plans = p));
+      expect(plans).toEqual([]);
+      await db.submitPlan(plan);
+      expect(plans).toEqual([{ ...plan, status: 'proposed' }]);
+    });
+
+    it('live toPlan rebuilds the wire fields and drops an unreadable row', () => {
+      const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const row = {
+        planId: 'plan-1', runId: 'run-demo-1', workflowId: 'wf-1', basedOnDecisionEpoch: 3, incidentIdsJson: '["inc-1"]', commandKeysJson: '["cmd-1"]',
+        assumptionsJson: '["pump degradation persists"]', explanation: 'checkpoint then move', status: 'proposed',
+        expectedMetricsJson: JSON.stringify({ expected_completion_delay_sim_s: 150, expected_lost_work_units: 12, expected_gpu_busy_waste_s: 4, failure_risk_estimate: 0.02 }),
+      };
+      expect(toPlan(row)).toEqual({ ...plan, status: 'proposed' });
+      expect(toPlan({ ...row, expectedMetricsJson: 'not json' })).toBeNull();
+      quiet.mockRestore();
+    });
+
+    it('onWorkflows keeps a done workflow and its handoff; listOpenWorkflows does not', async () => {
+      const db = createMockClient();
+      let workflows: WorkflowRecord[] = [];
+      db.onWorkflows((w) => (workflows = w));
+      const lease = await db.claimWorkflow('wf-1', 'worker-1', 0, 5_000);
+      expect(workflows.map((w) => w.stage)).toEqual(['idle']);
+      const state = { verification: { verified: true, handoff: 'pump A still needs service' } };
+      await db.updateWorkflow('wf-1', lease.workflow.version, lease.fencing_token, 'done', state);
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0]).toMatchObject({ stage: 'done', state });
+      expect(await db.listOpenWorkflows()).toEqual([]);
+    });
+  });
+
+  describe('controlledReset (K3)', () => {
+    const world = () => {
+      const clock = manualClock();
+      const db = createMockClient({ now: clock.now });
+      const opts = { db: 'dcos-dev', now: clock.now, sleep: async (ms: number) => { clock.advance(ms); db.tick(); } };
+      return { db, clock, opts };
+    };
+
+    it('refuses prod unless explicitly allowed', async () => {
+      const { db, opts } = world();
+      await expect(controlledReset(db, { ...opts, db: 'dcos' })).rejects.toThrow(/refusing to reset prod/);
+      expect(db.calls.some((c) => c.method === 'createRun')).toBe(false);
+      await expect(controlledReset(db, { ...opts, db: 'dcos', allowProd: true })).resolves.toMatchObject({ gpus: 64, jobs: 3 });
+    });
+
+    it('fails without resetting while an agent keeps its lease', async () => {
+      const { db, opts } = world();
+      await db.claimWorkflow('wf-1', 'worker-1', 0, 60_000);
+      await expect(controlledReset(db, { ...opts, leaseWaitMs: 1_000 })).rejects.toThrow(/still heartbeating: wf-1 \(worker-1\)/);
+      expect(db.calls.some((c) => c.method === 'createRun')).toBe(false);
+    });
+
+    it('waits out a dead agent lease, then leaves a clean run', async () => {
+      const { db, opts } = world();
+      await db.claimWorkflow('wf-1', 'worker-1', 0, 5_000);
+      await db.requestAction(checkpointCmd());
+      await expect(controlledReset(db, opts)).resolves.toMatchObject({ run_id: 'run-demo-1', seed: 42, gpus: 64, jobs: 3 });
+      expect(await db.getActionStatus('wf-1:ckpt:job-a')).toBeNull();
+      expect(await db.listOpenWorkflows()).toEqual([]);
     });
   });
 
