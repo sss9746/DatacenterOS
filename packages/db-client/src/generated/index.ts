@@ -34,12 +34,17 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import CancelActionReducer from "./cancel_action_reducer";
+import ClaimActionReducer from "./claim_action_reducer";
 import ConfigureRunReducer from "./configure_run_reducer";
 import CreateRunReducer from "./create_run_reducer";
 import GrantRoleReducer from "./grant_role_reducer";
 import InjectFaultReducer from "./inject_fault_reducer";
 import PauseRunReducer from "./pause_run_reducer";
 import PingReducer from "./ping_reducer";
+import RequestActionReducer from "./request_action_reducer";
+import StartActionReducer from "./start_action_reducer";
+import VerifyActionReducer from "./verify_action_reducer";
 
 // Import all procedure arg schemas
 
@@ -440,12 +445,17 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("cancel_action", CancelActionReducer),
+  __reducerSchema("claim_action", ClaimActionReducer),
   __reducerSchema("configure_run", ConfigureRunReducer),
   __reducerSchema("create_run", CreateRunReducer),
   __reducerSchema("grant_role", GrantRoleReducer),
   __reducerSchema("inject_fault", InjectFaultReducer),
   __reducerSchema("pause_run", PauseRunReducer),
   __reducerSchema("ping", PingReducer),
+  __reducerSchema("request_action", RequestActionReducer),
+  __reducerSchema("start_action", StartActionReducer),
+  __reducerSchema("verify_action", VerifyActionReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

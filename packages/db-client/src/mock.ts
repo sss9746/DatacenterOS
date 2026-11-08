@@ -243,6 +243,7 @@ export function createMockClient(opts: MockClientOptions = {}): MockDbClient {
       job.durable_work_units = job.progress_work_units;
       job.latest_checkpoint_id = checkpointId;
       job.version += 1;
+      bumpEpoch(); // live physics: a completed checkpoint is a material change (decision_epoch + 1)
     } else if (cmd.operation === 'migrate_restart' && job) {
       const dest = (cmd.arguments as { destination_gpu_ids?: string[] }).destination_gpu_ids ?? [];
       snap.allocations = snap.allocations.filter((a) => a.job_id !== job.job_id);

@@ -12,6 +12,7 @@ import { reject } from './auth';
 import { loadWorld, saveWorld } from './run';
 import { pendingFaults, takeDueFaults } from './faults';
 import { projectWorld } from './projection';
+import { actionsToStart, settleActions } from './actions';
 
 /** CONTRACTS §0.8: keep at most 2,000 telemetry rows. */
 export const TELEMETRY_MAX_ROWS = 2000;
@@ -109,12 +110,13 @@ export const advance_tick = spacetimedb.reducer(
         seed: run.seed,
         world,
         due_faults_private: due,
-        requested_action_ids: [], // P2-5: running actions' ids
+        requested_action_ids: actionsToStart(ctx, run.run_id), // started via start_action, not yet in physics
       });
       world = result.world_after; // step bumps decision_epoch itself on material_change
       telemetry = result.telemetry; // only the last step's samples: ≤ 1 per metric per GPU per wall second
       signals.push(...result.signals); // every signal is kept
-      // P2-5: result.completed_command_keys / failed_command_keys → action ledger (revalidated).
+      // Ledger: due times for newly started commands, settle completed/failed ones (physics revalidated them).
+      settleActions(ctx, world, result.completed_command_keys, result.failed_command_keys);
     }
 
     saveWorld(ctx, world);
