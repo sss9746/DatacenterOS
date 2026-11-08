@@ -1,0 +1,1239 @@
+{
+  "meta": {
+    "harness": "live-recovery-test",
+    "commit": "dd61041e3d3dc8150098e47b9db956a750c2e4b0-dirty",
+    "branch": "Prod-Multi-Agent-System",
+    "db": "dcos-dev",
+    "run_id": "run-demo-1",
+    "seed": 42,
+    "speed": 1,
+    "preset_id": "gpu_demo_8",
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "llm_mode": "live_nim",
+    "team_mode": "multi",
+    "reset_performed": true,
+    "started_unix_ms": 1794150965956,
+    "node": "v24.14.0",
+    "platform": "darwin Karthiks-MacBook-Pro.local"
+  },
+  "case": "L3",
+  "title": "L1 + L2: destination Xid then SIGKILL; fresh process sees both incidents",
+  "evidence_label": "live DB + real agent process + live NIM [team mode: multi]",
+  "passed": false,
+  "failure_reasons": [
+    "team: specialist answer consumed by a role: 0 specialist answer(s), none reached a role's model input"
+  ],
+  "started_unix_ms": 1794150967529,
+  "ended_unix_ms": 1794151162003,
+  "sim_start_ms": 601000,
+  "sim_end_ms": 795000,
+  "command_keys": {
+    "checkpoint": "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1",
+    "planned_migrate": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:1",
+    "failed_destination_gpu": "gpu-r1-n1-0",
+    "final_migrate": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2"
+  },
+  "checks": [
+    {
+      "name": "DB sim clock advances without the agent",
+      "ok": true,
+      "detail": "615000 -> 617000 in 1701 ms wall, agent alive=false",
+      "evidence": {
+        "sim_before": 615000,
+        "sim_after": 617000
+      }
+    },
+    {
+      "name": "checkpoint completed by the DB while the agent was dead",
+      "ok": true,
+      "detail": "ckpt-job-a-2 complete at sim 646000; agent alive=false",
+      "evidence": {
+        "checkpoint_id": "ckpt-job-a-2",
+        "complete_sim_time_ms": 646000
+      }
+    },
+    {
+      "name": "workflow reclaimed by fresh process",
+      "ok": true,
+      "detail": "owner agent-Karthiks-MacBook-Pro.local-37203 -> agent-Karthiks-MacBook-Pro.local-37214, token 1 -> 3, attempt 1 -> 2",
+      "evidence": {
+        "workflow_id": "wf-inc-thermal-pump-a-b2",
+        "owner_before": "agent-Karthiks-MacBook-Pro.local-37203",
+        "owner_after": "agent-Karthiks-MacBook-Pro.local-37214",
+        "token_before": "1",
+        "token_after": "3",
+        "attempt_before": 1,
+        "attempt_after": 2
+      }
+    },
+    {
+      "name": "separate incident for the destination GPU fault",
+      "ok": true,
+      "detail": "cooling=inc-thermal-pump-a-b2 gpu=inc-compute-gpu-r1-n1-0-b2 (2 incidents)",
+      "evidence": {
+        "cooling_incident_id": "inc-thermal-pump-a-b2",
+        "gpu_incident_id": "inc-compute-gpu-r1-n1-0-b2",
+        "incident_ids": [
+          "inc-thermal-pump-a-b2",
+          "inc-compute-gpu-r1-n1-0-b2"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint completed exactly once",
+      "ok": true,
+      "detail": "complete_for_key=1 writing_for_key=0 failed_for_key=0 new_complete_for_job-a=1",
+      "evidence": {
+        "command_key": "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1",
+        "ok": true,
+        "completeForKey": 1,
+        "writingForKey": 0,
+        "failedForKey": 0,
+        "newCompleteForJob": 1
+      }
+    },
+    {
+      "name": "same accepted command keys reconciled",
+      "ok": true,
+      "detail": "1 keys retained, 1 added (replan allowed)",
+      "evidence": {
+        "retained": [
+          "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1"
+        ],
+        "added": [
+          "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2"
+        ],
+        "lost": [],
+        "changed_payload": [],
+        "new_keys_for_existing_intent": []
+      }
+    },
+    {
+      "name": "obsolete move cancelled/superseded",
+      "ok": true,
+      "detail": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:1: absent",
+      "evidence": {
+        "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:1",
+        "status": "absent",
+        "reason_code": null
+      }
+    },
+    {
+      "name": "new destination excludes failed GPU",
+      "ok": true,
+      "detail": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2 (succeeded) -> [gpu-r5-n1-0,gpu-r5-n1-1,gpu-r5-n1-2,gpu-r5-n1-3,gpu-r5-n1-4,gpu-r5-n1-5,gpu-r5-n1-6,gpu-r5-n1-7,gpu-r7-n1-0,gpu-r7-n1-1,gpu-r7-n1-2,gpu-r7-n1-3,gpu-r7-n1-4,gpu-r7-n1-5,gpu-r7-n1-6,gpu-r7-n1-7]",
+      "evidence": {
+        "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2",
+        "status": "succeeded",
+        "gpu_ids": [
+          "gpu-r5-n1-0",
+          "gpu-r5-n1-1",
+          "gpu-r5-n1-2",
+          "gpu-r5-n1-3",
+          "gpu-r5-n1-4",
+          "gpu-r5-n1-5",
+          "gpu-r5-n1-6",
+          "gpu-r5-n1-7",
+          "gpu-r7-n1-0",
+          "gpu-r7-n1-1",
+          "gpu-r7-n1-2",
+          "gpu-r7-n1-3",
+          "gpu-r7-n1-4",
+          "gpu-r7-n1-5",
+          "gpu-r7-n1-6",
+          "gpu-r7-n1-7"
+        ],
+        "failed_gpu": "gpu-r1-n1-0"
+      }
+    },
+    {
+      "name": "job-a not allocated to the failed GPU",
+      "ok": true,
+      "detail": "job-a on [gpu-r5-n1-0,gpu-r5-n1-1,gpu-r5-n1-2,gpu-r5-n1-3,gpu-r5-n1-4,gpu-r5-n1-5,gpu-r5-n1-6,gpu-r5-n1-7,gpu-r7-n1-0,gpu-r7-n1-1,gpu-r7-n1-2,gpu-r7-n1-3,gpu-r7-n1-4,gpu-r7-n1-5,gpu-r7-n1-6,gpu-r7-n1-7]"
+    },
+    {
+      "name": "no GPU allocated to two jobs",
+      "ok": true,
+      "detail": "32 allocation rows, all unique",
+      "evidence": {
+        "doubled": {},
+        "inconsistent": []
+      }
+    },
+    {
+      "name": "migrate succeeded and job-a runs on its destination",
+      "ok": true,
+      "detail": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2: succeeded; job-a running on [gpu-r5-n1-0,gpu-r5-n1-1,gpu-r5-n1-2,gpu-r5-n1-3,gpu-r5-n1-4,gpu-r5-n1-5,gpu-r5-n1-6,gpu-r5-n1-7,gpu-r7-n1-0,gpu-r7-n1-1,gpu-r7-n1-2,gpu-r7-n1-3,gpu-r7-n1-4,gpu-r7-n1-5,gpu-r7-n1-6,gpu-r7-n1-7]",
+      "evidence": {
+        "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2",
+        "status": "succeeded",
+        "job_status": "running",
+        "destination": [
+          "gpu-r5-n1-0",
+          "gpu-r5-n1-1",
+          "gpu-r5-n1-2",
+          "gpu-r5-n1-3",
+          "gpu-r5-n1-4",
+          "gpu-r5-n1-5",
+          "gpu-r5-n1-6",
+          "gpu-r5-n1-7",
+          "gpu-r7-n1-0",
+          "gpu-r7-n1-1",
+          "gpu-r7-n1-2",
+          "gpu-r7-n1-3",
+          "gpu-r7-n1-4",
+          "gpu-r7-n1-5",
+          "gpu-r7-n1-6",
+          "gpu-r7-n1-7"
+        ]
+      }
+    },
+    {
+      "name": "workflow recovered or explicitly escalated",
+      "ok": true,
+      "detail": "done",
+      "evidence": {
+        "stage": "done"
+      }
+    },
+    {
+      "name": "fresh process recorded a handoff/verification",
+      "ok": true,
+      "detail": "{\"verified\":true,\"escalate\":false,\"handoff\":\"Recovery verified. job-a running on 16 GPUs in rack-r5,rack-r7; progress 95296→95456 wu over 10000 sim-ms; headroom ≥14.7 C [wf-inc-thermal-pump-a-b2:migra"
+    },
+    {
+      "name": "handoff/verification persisted for wf-inc-thermal-pump-a-b2",
+      "ok": true,
+      "detail": "stage done: verification {\"verified\":true,\"escalate\":false,\"handoff\":\"Recovery verified. job-a running on 16 GPUs in rack-r5,rack-r7; progress 95296→95456 wu over 10000 sim-ms; headroom",
+      "evidence": {
+        "workflow_id": "wf-inc-thermal-pump-a-b2",
+        "stage": "done",
+        "handoff": "verification"
+      }
+    },
+    {
+      "name": "team: Lead decided",
+      "ok": true,
+      "detail": "2/2 round(s) decided by the Lead",
+      "evidence": {
+        "rounds": 2,
+        "lead_rounds": 2,
+        "fallback_rounds": 0,
+        "fallback_round_ids": [],
+        "missing_roles": []
+      }
+    },
+    {
+      "name": "team: specialist answer consumed by a role",
+      "ok": false,
+      "detail": "0 specialist answer(s), none reached a role's model input",
+      "evidence": {
+        "answers": 0,
+        "consumed": []
+      }
+    },
+    {
+      "name": "team: at most 6 model calls per round",
+      "ok": true,
+      "detail": "max 4 calls across 2 round(s)",
+      "evidence": {
+        "calls": [
+          {
+            "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+            "calls_used": 4
+          },
+          {
+            "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+            "calls_used": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "team: covers recorded with their roles",
+      "ok": true,
+      "detail": "cooling covered workload; cooling covered workload",
+      "evidence": {
+        "covers": [
+          "cooling covered workload",
+          "cooling covered workload"
+        ]
+      }
+    }
+  ],
+  "allocation_uniqueness": {
+    "ok": true,
+    "doubled": {}
+  },
+  "checkpoint_count": {
+    "job_id": "job-a",
+    "complete_before": 1,
+    "complete_after": 2
+  },
+  "verification": {
+    "verified": true,
+    "escalate": false,
+    "handoff": "Recovery verified. job-a running on 16 GPUs in rack-r5,rack-r7; progress 95296→95456 wu over 10000 sim-ms; headroom ≥14.7 C [wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2]. Still open: pump-a degraded (est. 9600/24000 W): needs human service; gpu-r1-n1-0 unreachable (XID 79): needs hardware service. Next: service pump-a; inspect/replace gpu-r1-n1-0.",
+    "as_of_sim_time_ms": 795000,
+    "version": 1,
+    "source": "code",
+    "outcome": "recovered",
+    "verification_interval_sim_ms": [
+      785000,
+      795000
+    ],
+    "evidence": {
+      "incident_ids": [
+        "inc-compute-gpu-r1-n1-0-b2",
+        "inc-thermal-pump-a-b2"
+      ],
+      "hypotheses": [
+        "inc-thermal-pump-a-b2: Cooling pump-a degraded — deterministic grouping (LLM unavailable): 2 symptom(s) share degraded provider pump-a degraded",
+        "inc-compute-gpu-r1-n1-0-b2: XID 79 on gpu-r1-n1-0 — deterministic grouping (LLM unavailable): 1 symptom(s) on gpu-r1-n1-0; no degraded shared provider, treated as independent"
+      ],
+      "decision_epoch": 5,
+      "max_gpu_evidence_age_sim_ms": 0
+    },
+    "affected_jobs": [
+      {
+        "job_id": "job-a",
+        "status": "running",
+        "progress_work_units": 95456,
+        "durable_work_units": 95296,
+        "racks": [
+          "rack-r5",
+          "rack-r7"
+        ]
+      }
+    ],
+    "actions": {
+      "completed": [
+        "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2"
+      ],
+      "verified": [
+        "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2"
+      ],
+      "unverified": [],
+      "blocked": [],
+      "failed": [],
+      "not_run": []
+    },
+    "checkpoint_outcome": [],
+    "placement_outcome": [
+      {
+        "job_id": "job-a",
+        "gpu_ids": [
+          "gpu-r5-n1-0",
+          "gpu-r5-n1-1",
+          "gpu-r5-n1-2",
+          "gpu-r5-n1-3",
+          "gpu-r5-n1-4",
+          "gpu-r5-n1-5",
+          "gpu-r5-n1-6",
+          "gpu-r5-n1-7",
+          "gpu-r7-n1-0",
+          "gpu-r7-n1-1",
+          "gpu-r7-n1-2",
+          "gpu-r7-n1-3",
+          "gpu-r7-n1-4",
+          "gpu-r7-n1-5",
+          "gpu-r7-n1-6",
+          "gpu-r7-n1-7"
+        ],
+        "racks": [
+          "rack-r5",
+          "rack-r7"
+        ]
+      }
+    ],
+    "unresolved_infrastructure": [
+      "pump-a degraded (est. 9600/24000 W): needs human service",
+      "gpu-r1-n1-0 unreachable (XID 79): needs hardware service"
+    ],
+    "remaining_risk": "forecast assumes the observed degradation persists and no hidden faults",
+    "next_human_action": "service pump-a; inspect/replace gpu-r1-n1-0",
+    "checks": [
+      {
+        "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2",
+        "operation": "migrate_restart",
+        "ok": true,
+        "note": "job-a running on 16 GPUs in rack-r5,rack-r7; progress 95296→95456 wu over 10000 sim-ms; headroom ≥14.7 C"
+      }
+    ]
+  },
+  "agent_generations": [
+    {
+      "generation": 1,
+      "pid": 37203,
+      "started_unix_ms": 1794150967531,
+      "ended_unix_ms": 1794150981915,
+      "how_ended": "SIGKILL",
+      "exit_code": null,
+      "stderr_tail": [
+        "[out] agent: config {\"STDB_URI\":\"wss://maincloud.spacetimedb.com\",\"STDB_DB\":\"dcos-dev\",\"STDB_AGENT_TOKEN\":\"***\",\"NIM_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"NIM_API_KEY\":\"***\",\"NIM_MODEL\":\"nvidia/nemotron-3.5-lightning-30b-a3b\",\"NIM_FALLBACK_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"LLM_MAX_TOKENS\":16384,\"LLM_MAX_TOOL_STEPS\":8,\"LLM_TIMEOUT_MS\":10000,\"LLM_RETRIES\":1,\"NIM_ENABLE_THINKING\":\"false\",\"DCOS_AGENT_TEAM_MODE\":\"multi\"}",
+        "[out] ℹ️ INFO Connecting to SpacetimeDB WS...",
+        "[out] agent: worker agent-Karthiks-MacBook-Pro.local-37203 on run run-demo-1 (sim t=602.0 s)",
+        "[out] agent: triage: overridden LLM assessment not used: no LLM configured"
+      ]
+    },
+    {
+      "generation": 2,
+      "pid": 37214,
+      "started_unix_ms": 1794151012572,
+      "ended_unix_ms": 1794151162003,
+      "how_ended": "stopped_by_harness",
+      "exit_code": null,
+      "stderr_tail": [
+        "[out] agent: config {\"STDB_URI\":\"wss://maincloud.spacetimedb.com\",\"STDB_DB\":\"dcos-dev\",\"STDB_AGENT_TOKEN\":\"***\",\"NIM_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"NIM_API_KEY\":\"***\",\"NIM_MODEL\":\"nvidia/nemotron-3.5-lightning-30b-a3b\",\"NIM_FALLBACK_BASE_URL\":\"https://integrate.api.nvidia.com/v1\",\"LLM_MAX_TOKENS\":16384,\"LLM_MAX_TOOL_STEPS\":8,\"LLM_TIMEOUT_MS\":10000,\"LLM_RETRIES\":1,\"NIM_ENABLE_THINKING\":\"false\",\"DCOS_AGENT_TEAM_MODE\":\"multi\"}",
+        "[out] ℹ️ INFO Connecting to SpacetimeDB WS...",
+        "[out] agent: worker agent-Karthiks-MacBook-Pro.local-37214 on run run-demo-1 (sim t=646.0 s)",
+        "[out] agent: resume: wf-inc-thermal-pump-a-b2 persisted plan invalid (migrate_restart job-a now fails safety (DEST_POWER_HEADROOM_INSUFFICIENT, DEST_GPU_UNHEALTHY, STALE_DECISION_EPOCH, STALE_RESOURCE_VERSION)); replanning as attempt 2"
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "wall_unix_ms": 1794150967528,
+      "sim_time_ms": null,
+      "event": "controlled reset done",
+      "detail": {
+        "sim_time_after_ms": 601000,
+        "tick_index": 1,
+        "gpus": 64,
+        "jobs": 3,
+        "actions": 0,
+        "speed": 1
+      }
+    },
+    {
+      "wall_unix_ms": 1794150967529,
+      "sim_time_ms": 601000,
+      "event": "case start",
+      "detail": {
+        "sim_time_ms": 601000,
+        "speed": 1
+      }
+    },
+    {
+      "wall_unix_ms": 1794150967532,
+      "sim_time_ms": 601000,
+      "event": "agent generation 1 spawned",
+      "detail": {
+        "pid": 37203,
+        "no_llm": false,
+        "nim_override": null,
+        "team_mode": "multi"
+      }
+    },
+    {
+      "wall_unix_ms": 1794150967566,
+      "sim_time_ms": 601000,
+      "event": "injected pump-a degradation 0.6",
+      "detail": {
+        "fault_id": "l3-pump-601000",
+        "start_sim_time_ms": 602000
+      }
+    },
+    {
+      "wall_unix_ms": 1794150981872,
+      "sim_time_ms": 615000,
+      "event": "checkpoint running",
+      "detail": {
+        "command_key": "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1",
+        "due_sim_time_ms": null,
+        "waited_ms": 14305
+      }
+    },
+    {
+      "wall_unix_ms": 1794150981873,
+      "sim_time_ms": 615000,
+      "event": "planned destination observed",
+      "detail": {
+        "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:1",
+        "source": "workflow_state",
+        "status": "planned",
+        "gpu_ids": [
+          "gpu-r1-n1-0",
+          "gpu-r1-n1-1",
+          "gpu-r1-n1-2",
+          "gpu-r1-n1-3",
+          "gpu-r1-n1-4",
+          "gpu-r1-n1-5",
+          "gpu-r1-n1-6",
+          "gpu-r1-n1-7",
+          "gpu-r5-n1-0",
+          "gpu-r5-n1-1",
+          "gpu-r5-n1-2",
+          "gpu-r5-n1-3",
+          "gpu-r5-n1-4",
+          "gpu-r5-n1-5",
+          "gpu-r5-n1-6",
+          "gpu-r5-n1-7"
+        ]
+      }
+    },
+    {
+      "wall_unix_ms": 1794150981908,
+      "sim_time_ms": 615000,
+      "event": "injected gpu_xid_79 on gpu-r1-n1-0",
+      "detail": {
+        "fault_id": "l3-xid79-gpu-r1-n1-0-616000",
+        "start_sim_time_ms": 616000
+      }
+    },
+    {
+      "wall_unix_ms": 1794150981915,
+      "sim_time_ms": 615000,
+      "event": "agent generation 1 killed",
+      "detail": {
+        "pid": 37203,
+        "how": "SIGKILL",
+        "waited_ms": 7,
+        "sim_at_kill": 615000
+      }
+    },
+    {
+      "wall_unix_ms": 1794151012572,
+      "sim_time_ms": 646000,
+      "event": "agent generation 2 spawned",
+      "detail": {
+        "pid": 37214,
+        "no_llm": false,
+        "nim_override": null,
+        "team_mode": "multi"
+      }
+    },
+    {
+      "wall_unix_ms": 1794151013575,
+      "sim_time_ms": 647000,
+      "event": "workflow reclaimed",
+      "detail": {
+        "workflow_id": "wf-inc-thermal-pump-a-b2",
+        "owner": "agent-Karthiks-MacBook-Pro.local-37214",
+        "attempt": 2,
+        "waited_ms": 1003
+      }
+    },
+    {
+      "wall_unix_ms": 1794151161991,
+      "sim_time_ms": 795000,
+      "event": "workflow settled",
+      "detail": {
+        "workflow_id": "wf-inc-thermal-pump-a-b2",
+        "stage": "done",
+        "waited_ms": 148416
+      }
+    },
+    {
+      "wall_unix_ms": 1794151161994,
+      "sim_time_ms": 795000,
+      "event": "all workflows settled",
+      "detail": {
+        "workflows": [
+          "wf-inc-thermal-pump-a-b2@done"
+        ],
+        "waited_ms": 0
+      }
+    },
+    {
+      "wall_unix_ms": 1794151162003,
+      "sim_time_ms": 795000,
+      "event": "agent generation 2 stopped by harness",
+      "detail": {
+        "pid": 37214
+      }
+    }
+  ],
+  "last_snapshot_summary": {
+    "wall_unix_ms": 1794151161994,
+    "clock": {
+      "sim_time_ms": 795000,
+      "tick_index": 195,
+      "step_ms": 1000,
+      "wall_tick_ms": 1000,
+      "paused": false,
+      "decision_epoch": 5
+    },
+    "jobs": [
+      {
+        "job_id": "job-c",
+        "status": "running",
+        "gpus": [
+          "gpu-r6-n1-0",
+          "gpu-r6-n1-1",
+          "gpu-r6-n1-2",
+          "gpu-r6-n1-3",
+          "gpu-r6-n1-4",
+          "gpu-r6-n1-5",
+          "gpu-r6-n1-6",
+          "gpu-r6-n1-7"
+        ],
+        "progress": 31560,
+        "durable": 0
+      },
+      {
+        "job_id": "job-b",
+        "status": "running",
+        "gpus": [
+          "gpu-r4-n1-0",
+          "gpu-r4-n1-1",
+          "gpu-r4-n1-2",
+          "gpu-r4-n1-3",
+          "gpu-r4-n1-4",
+          "gpu-r4-n1-5",
+          "gpu-r4-n1-6",
+          "gpu-r4-n1-7"
+        ],
+        "progress": 42040,
+        "durable": 40000
+      },
+      {
+        "job_id": "job-a",
+        "status": "running",
+        "gpus": [
+          "gpu-r5-n1-0",
+          "gpu-r5-n1-1",
+          "gpu-r5-n1-2",
+          "gpu-r5-n1-3",
+          "gpu-r5-n1-4",
+          "gpu-r5-n1-5",
+          "gpu-r5-n1-6",
+          "gpu-r5-n1-7",
+          "gpu-r7-n1-0",
+          "gpu-r7-n1-1",
+          "gpu-r7-n1-2",
+          "gpu-r7-n1-3",
+          "gpu-r7-n1-4",
+          "gpu-r7-n1-5",
+          "gpu-r7-n1-6",
+          "gpu-r7-n1-7"
+        ],
+        "progress": 95456,
+        "durable": 95296
+      }
+    ],
+    "checkpoints": [
+      {
+        "id": "ckpt-job-b-1",
+        "job": "job-b",
+        "status": "complete",
+        "key": "preset.gpu_demo_8.ckpt-job-b-1",
+        "complete_at": 540000,
+        "accessible": true
+      },
+      {
+        "id": "ckpt-job-a-1",
+        "job": "job-a",
+        "status": "complete",
+        "key": "preset.gpu_demo_8.ckpt-job-a-1",
+        "complete_at": 60000,
+        "accessible": true
+      },
+      {
+        "id": "ckpt-job-a-2",
+        "job": "job-a",
+        "status": "complete",
+        "key": "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1",
+        "complete_at": 646000,
+        "accessible": true
+      }
+    ],
+    "incidents": [
+      {
+        "id": "inc-thermal-pump-a-b2",
+        "state": "investigating",
+        "severity": "high",
+        "title": "Cooling pump-a degraded"
+      },
+      {
+        "id": "inc-compute-gpu-r1-n1-0-b2",
+        "state": "investigating",
+        "severity": "critical",
+        "title": "XID 79 on gpu-r1-n1-0"
+      }
+    ],
+    "workflows": [
+      {
+        "id": "wf-inc-thermal-pump-a-b2",
+        "stage": "done",
+        "owner": "agent-Karthiks-MacBook-Pro.local-37214",
+        "attempt": 2,
+        "version": 35,
+        "current": null
+      }
+    ],
+    "actions": [
+      {
+        "command_key": "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1",
+        "operation": "checkpoint",
+        "job_id": "job-a",
+        "target": "job-a",
+        "status": "succeeded",
+        "reason_code": null,
+        "attempt": 1,
+        "claimed_by": "agent-Karthiks-MacBook-Pro.local-37203",
+        "due_sim_time_ms": 646000,
+        "depends_on": [],
+        "safety": {
+          "decision": "allow",
+          "violations": []
+        },
+        "start_safety": null,
+        "history": [
+          "requested@615000",
+          "claimed@615000",
+          "running@615000",
+          "succeeded@645000"
+        ]
+      },
+      {
+        "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2",
+        "operation": "migrate_restart",
+        "job_id": "job-a",
+        "target": "job-a",
+        "status": "succeeded",
+        "reason_code": null,
+        "attempt": 1,
+        "claimed_by": "agent-Karthiks-MacBook-Pro.local-37214",
+        "due_sim_time_ms": 785000,
+        "depends_on": [],
+        "destination_gpu_ids": [
+          "gpu-r5-n1-0",
+          "gpu-r5-n1-1",
+          "gpu-r5-n1-2",
+          "gpu-r5-n1-3",
+          "gpu-r5-n1-4",
+          "gpu-r5-n1-5",
+          "gpu-r5-n1-6",
+          "gpu-r5-n1-7",
+          "gpu-r7-n1-0",
+          "gpu-r7-n1-1",
+          "gpu-r7-n1-2",
+          "gpu-r7-n1-3",
+          "gpu-r7-n1-4",
+          "gpu-r7-n1-5",
+          "gpu-r7-n1-6",
+          "gpu-r7-n1-7"
+        ],
+        "safety": {
+          "decision": "allow",
+          "violations": []
+        },
+        "start_safety": null,
+        "history": [
+          "requested@664000",
+          "claimed@664000",
+          "running@664000",
+          "succeeded@784000",
+          "succeeded@795000"
+        ]
+      }
+    ],
+    "agent_events_tail": [
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 614000,
+        "summary": "Lead → Supervisor: job-a:ckpt+move:r1+r5, job-b:keep"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 614000,
+        "summary": "job-a: rank-1 lost_wu 16 vs rank-3 lost 11000 wu if kept on hot racks; rank-1 moves to r1+r5 (loop-b, nominal) with vs_keep -20994 wu gain, far better than staying on rack-r2/3 at 70°C with 15°C head…"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 646000,
+        "summary": "resumed after agent restart: persisted plan is invalid on a fresh snapshot (migrate_restart job-a now fails safety (DEST_POWER_HEADROOM_INSUFFICIENT, DEST_GPU_UNHEALTHY, STALE_DECISION_EPOCH, STALE_R…"
+      },
+      {
+        "stage": "replan",
+        "actor": "code",
+        "sim": 646000,
+        "summary": "deterministic: replanning plan-wf-inc-thermal-pump-a-b2-a1-e1: after restart: migrate_restart job-a now fails safety (DEST_POWER_HEADROOM_INSUFFICIENT, DEST_GPU_UNHEALTHY, STALE_DECISION_EPOCH, STALE…"
+      },
+      {
+        "stage": "replan",
+        "actor": "nemotron",
+        "sim": 663000,
+        "summary": "job-a: rank 1 move to r5+r7 preserves fresh checkpoint; vs_keep shows -12627.9 wu vs keep running (kept would lose far more if moved job-b to r1+r5 first per priority ordering) | job-b: rank 1 keep r…"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 663000,
+        "summary": "Cooling → Lead: Cooling degradation confirmed: pump-a operating at 40% nominal capacity (9.6 kW vs 24 kW observed), and loop-a degraded. Rack-r2, rack-r3, rack-r4 on loop-a have avg temps 70+ C with …"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 663000,
+        "summary": "Cooling → Workload: Which job is running on rack-r2 that is generating the heat observed at 70+ C avg?"
+      },
+      {
+        "stage": "plan",
+        "actor": "code",
+        "sim": 663000,
+        "summary": "Supervisor → Workload: finding rejected: 1 unknown evidence id(s), 1 unknown resource id(s)"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 663000,
+        "summary": "Cooling covering for Workload: Cooling confirmed degraded: pump-a at 40% nominal (9.6 kW observed vs 24 kW), loop-a degraded. Rack-r2, rack-r3, rack-r4 on loop-a avg 70+ C with ~14.7 C min headroom. …"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 663000,
+        "summary": "Lead → Supervisor: job-a:ckpt-reuse+move:r5+r7, job-b:keep"
+      },
+      {
+        "stage": "plan",
+        "actor": "nemotron",
+        "sim": 663000,
+        "summary": "new plan plan-wf-inc-thermal-pump-a-b2-a2-e3: job-a -> job-a move to r5+r7 (reusing fresh checkpoint ckpt-job-a-2) (Nemotron); job-b -> job-b keep running (Nemotron)"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 664000,
+        "summary": "migrate_restart job-a → gpu-r5-n1-0 +15 running"
+      },
+      {
+        "stage": "execute",
+        "actor": "code",
+        "sim": 785000,
+        "summary": "migrate_restart job-a → gpu-r5-n1-0 +15 succeeded"
+      },
+      {
+        "stage": "verify",
+        "actor": "code",
+        "sim": 795000,
+        "summary": "verified: 1/1 checks passed over 10000 sim-ms; still open: pump-a degraded (est. 9600/24000 W): needs human service"
+      },
+      {
+        "stage": "verify",
+        "actor": "code",
+        "sim": 795000,
+        "summary": "handoff: Recovery verified. job-a running on 16 GPUs in rack-r5,rack-r7; progress 95296→95456 wu over 10000 sim-ms; headroom ≥14.7 C [wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2]. Still open: pu…"
+      }
+    ],
+    "unhealthy_gpus": [
+      {
+        "id": "gpu-r1-n1-0",
+        "availability": "unreachable",
+        "last_xid": 79
+      }
+    ]
+  },
+  "ledger": [
+    {
+      "command_key": "wf-inc-thermal-pump-a-b2:checkpoint:job-a:1",
+      "operation": "checkpoint",
+      "job_id": "job-a",
+      "target": "job-a",
+      "status": "succeeded",
+      "reason_code": null,
+      "attempt": 1,
+      "claimed_by": "agent-Karthiks-MacBook-Pro.local-37203",
+      "due_sim_time_ms": 646000,
+      "depends_on": [],
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "start_safety": null,
+      "history": [
+        "requested@615000",
+        "claimed@615000",
+        "running@615000",
+        "succeeded@645000"
+      ]
+    },
+    {
+      "command_key": "wf-inc-thermal-pump-a-b2:migrate_restart:job-a:2",
+      "operation": "migrate_restart",
+      "job_id": "job-a",
+      "target": "job-a",
+      "status": "succeeded",
+      "reason_code": null,
+      "attempt": 1,
+      "claimed_by": "agent-Karthiks-MacBook-Pro.local-37214",
+      "due_sim_time_ms": 785000,
+      "depends_on": [],
+      "destination_gpu_ids": [
+        "gpu-r5-n1-0",
+        "gpu-r5-n1-1",
+        "gpu-r5-n1-2",
+        "gpu-r5-n1-3",
+        "gpu-r5-n1-4",
+        "gpu-r5-n1-5",
+        "gpu-r5-n1-6",
+        "gpu-r5-n1-7",
+        "gpu-r7-n1-0",
+        "gpu-r7-n1-1",
+        "gpu-r7-n1-2",
+        "gpu-r7-n1-3",
+        "gpu-r7-n1-4",
+        "gpu-r7-n1-5",
+        "gpu-r7-n1-6",
+        "gpu-r7-n1-7"
+      ],
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "start_safety": null,
+      "history": [
+        "requested@664000",
+        "claimed@664000",
+        "running@664000",
+        "succeeded@784000",
+        "succeeded@795000"
+      ]
+    }
+  ],
+  "team": {
+    "lead_rounds": 2,
+    "fallback_rounds": 0,
+    "malformed_workflows": [],
+    "rounds": [
+      {
+        "workflow_id": "wf-inc-thermal-pump-a-b2",
+        "trace": {
+          "version": 2,
+          "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+          "snapshot_sim_ms": 602000,
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "calls_used": 4,
+          "wall_ms": 8609,
+          "outcome": "lead",
+          "messages": [
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a1:e1:m1",
+              "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+              "from": "cooling",
+              "to": "lead",
+              "kind": "finding",
+              "reply_to": null,
+              "summary": "Pump-a degraded at 9600W observed of 24000W nominal; loop-a degraded. Rack-r2/3/4 on loop-a have avg ~70°C and only ~15°C thermal headroom, far below safe levels. Rack-r6 on loop-b is also hot at 82°C with 2.8°C headroom. Loop-b and its racks (r1,r5,r7,r8) are nominal.",
+              "evidence_ids": [
+                "sig.602000.pump-a.equipment_alarm",
+                "sym-cooling_degraded-loop-a-b2",
+                "sym-cooling_degraded-pump-a-b2",
+                "tel.602000.pump-a.pump.power_w"
+              ],
+              "resource_ids": [
+                "pump-a",
+                "loop-a",
+                "rack-r2",
+                "rack-r3",
+                "rack-r4",
+                "rack-r6"
+              ],
+              "consumed_by": [
+                "lead"
+              ],
+              "t_ms": 2550
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a1:e1:m2",
+              "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+              "from": "cooling",
+              "to": "workload",
+              "kind": "question",
+              "reply_to": null,
+              "summary": "Which jobs are running on rack-r6 and rack-r2/3/4, and do they have checkpoint coverage?",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [],
+              "t_ms": 2550
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a1:e1:m3",
+              "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+              "from": "supervisor",
+              "to": "workload",
+              "kind": "objection",
+              "reply_to": null,
+              "summary": "finding rejected: invalid arguments (no_question_reason)",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [],
+              "t_ms": 2580
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a1:e1:m4",
+              "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+              "from": "cooling",
+              "to": "lead",
+              "kind": "cover",
+              "reply_to": null,
+              "summary": "Cooling: pump-a degraded 9600W/24000W, loop-a degraded; rack-r2/3/4 avg ~70°C with ~15°C headroom, rack-r6 avg 82°C with 2.8°C headroom. Workload: job-a on rack-r2/3 no checkpoint since sim_time 60000ms; job-b on rack-r4 no checkpoint since sim_time 540000ms; job-c on rack-r6 has no checkpoint and is on the hottest rack. Cooling failure explains the incident; hot racks risk job loss without check…",
+              "evidence_ids": [
+                "sig.602000.pump-a.equipment_alarm",
+                "sym-cooling_degraded-loop-a-b2",
+                "sym-cooling_degraded-pump-a-b2",
+                "tel.602000.pump-a.pump.power_w"
+              ],
+              "resource_ids": [
+                "pump-a",
+                "loop-a",
+                "rack-r2",
+                "rack-r3",
+                "rack-r4",
+                "rack-r6"
+              ],
+              "consumed_by": [
+                "lead"
+              ],
+              "t_ms": 6232
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a1:e1:m5",
+              "round_id": "wf-inc-thermal-pump-a-b2:a1:e1",
+              "from": "lead",
+              "to": "supervisor",
+              "kind": "decision",
+              "reply_to": null,
+              "summary": "job-a:ckpt+move:r1+r5, job-b:keep",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [],
+              "t_ms": 8609
+            }
+          ],
+          "covers": [
+            {
+              "failed_role": "workload",
+              "covered_by": "cooling"
+            }
+          ],
+          "missing_roles": [],
+          "status": "closed",
+          "phase": "closed",
+          "started_unix_ms": 1794150972433,
+          "budget": {
+            "max_calls": 6,
+            "round_ms": 30000,
+            "call_timeout_ms": 12000
+          },
+          "calls": [
+            {
+              "role": "cooling",
+              "phase": "findings",
+              "started_ms": 2,
+              "ended_ms": 2549,
+              "status": "ok"
+            },
+            {
+              "role": "workload",
+              "phase": "findings",
+              "started_ms": 3,
+              "ended_ms": 2579,
+              "status": "rejected"
+            },
+            {
+              "role": "cooling",
+              "phase": "cover",
+              "started_ms": 2580,
+              "ended_ms": 6232,
+              "status": "ok"
+            },
+            {
+              "role": "lead",
+              "phase": "decide",
+              "started_ms": 6233,
+              "ended_ms": 8608,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      {
+        "workflow_id": "wf-inc-thermal-pump-a-b2",
+        "trace": {
+          "version": 2,
+          "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+          "snapshot_sim_ms": 647000,
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "calls_used": 4,
+          "wall_ms": 13272,
+          "outcome": "lead",
+          "messages": [
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a2:e3:m1",
+              "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+              "from": "cooling",
+              "to": "lead",
+              "kind": "finding",
+              "reply_to": null,
+              "summary": "Cooling degradation confirmed: pump-a operating at 40% nominal capacity (9.6 kW vs 24 kW observed), and loop-a degraded. Rack-r2, rack-r3, rack-r4 on loop-a have avg temps 70+ C with min thermal headroom ~14.7 C, indicating severe thermal stress. Rack-r6 on loop-b also critically hot (avg 82 C, headroom 2.8 C). The XID incident on gpu-r1-n1-0 maps to rack-r1 (loop-b, nominal temps), so cooling is…",
+              "evidence_ids": [
+                "sig.602000.pump-a.equipment_alarm",
+                "sym-cooling_degraded-pump-a-b2",
+                "sym-cooling_degraded-loop-a-b2",
+                "tel.647000.pump-a.pump.power_w"
+              ],
+              "resource_ids": [
+                "pump-a",
+                "loop-a",
+                "rack-r2",
+                "rack-r3",
+                "rack-r4",
+                "rack-r6"
+              ],
+              "consumed_by": [
+                "lead"
+              ],
+              "t_ms": 4349
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a2:e3:m2",
+              "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+              "from": "cooling",
+              "to": "workload",
+              "kind": "question",
+              "reply_to": null,
+              "summary": "Which job is running on rack-r2 that is generating the heat observed at 70+ C avg?",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [],
+              "t_ms": 4349
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a2:e3:m3",
+              "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+              "from": "supervisor",
+              "to": "workload",
+              "kind": "objection",
+              "reply_to": null,
+              "summary": "finding rejected: 1 unknown evidence id(s), 1 unknown resource id(s)",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [],
+              "t_ms": 7322
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a2:e3:m4",
+              "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+              "from": "cooling",
+              "to": "lead",
+              "kind": "cover",
+              "reply_to": null,
+              "summary": "Cooling confirmed degraded: pump-a at 40% nominal (9.6 kW observed vs 24 kW), loop-a degraded. Rack-r2, rack-r3, rack-r4 on loop-a avg 70+ C with ~14.7 C min headroom. Rack-r6 on loop-b avg 82 C with 2.8 C headroom. Job-a spans rack-r2/rack-r3 (loop-a) and job-b spans rack-r4 (loop-a). The XID on gpu-r1-n1-0 is on rack-r1 (loop-b, nominal temps), so cooling degradation does not explain the GPU XI…",
+              "evidence_ids": [
+                "sig.602000.pump-a.equipment_alarm",
+                "sym-cooling_degraded-pump-a-b2",
+                "sym-cooling_degraded-loop-a-b2",
+                "tel.647000.pump-a.pump.power_w",
+                "sig.616000.gpu-r1-n1-0.xid_error",
+                "sym-gpu_xid-gpu-r1-n1-0-b2",
+                "tel.647000.gpu-r1-n1-0.DCGM_FI_DEV_GPU_TEMP_CELSIUS"
+              ],
+              "resource_ids": [
+                "pump-a",
+                "loop-a",
+                "rack-r2",
+                "rack-r3",
+                "rack-r4",
+                "rack-r6",
+                "gpu-r1-n1-0",
+                "job-a",
+                "job-b"
+              ],
+              "consumed_by": [
+                "lead"
+              ],
+              "t_ms": 10977
+            },
+            {
+              "id": "wf-inc-thermal-pump-a-b2:a2:e3:m5",
+              "round_id": "wf-inc-thermal-pump-a-b2:a2:e3",
+              "from": "lead",
+              "to": "supervisor",
+              "kind": "decision",
+              "reply_to": null,
+              "summary": "job-a:ckpt-reuse+move:r5+r7, job-b:keep",
+              "evidence_ids": [],
+              "resource_ids": [],
+              "consumed_by": [],
+              "t_ms": 13272
+            }
+          ],
+          "covers": [
+            {
+              "failed_role": "workload",
+              "covered_by": "cooling"
+            }
+          ],
+          "missing_roles": [],
+          "status": "closed",
+          "phase": "closed",
+          "started_unix_ms": 1794151016820,
+          "budget": {
+            "max_calls": 6,
+            "round_ms": 30000,
+            "call_timeout_ms": 12000
+          },
+          "calls": [
+            {
+              "role": "cooling",
+              "phase": "findings",
+              "started_ms": 2,
+              "ended_ms": 4348,
+              "status": "ok"
+            },
+            {
+              "role": "workload",
+              "phase": "findings",
+              "started_ms": 3,
+              "ended_ms": 7322,
+              "status": "rejected"
+            },
+            {
+              "role": "cooling",
+              "phase": "cover",
+              "started_ms": 7323,
+              "ended_ms": 10977,
+              "status": "ok"
+            },
+            {
+              "role": "lead",
+              "phase": "decide",
+              "started_ms": 10978,
+              "ended_ms": 13271,
+              "status": "ok"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "configured_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "llm_mode": "live_nim",
+    "events": {
+      "codeEvents": 10,
+      "nemotronEvents": 11,
+      "fallbackNotices": 2,
+      "unattributed": 0
+    },
+    "log": {
+      "nemotron_ok": 0,
+      "nemotron_failed": 0,
+      "endpoint_failovers": 0
+    },
+    "team": {
+      "models": [
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "lead_rounds": 2,
+      "fallback_rounds": 0
+    }
+  },
+  "error": null
+}
