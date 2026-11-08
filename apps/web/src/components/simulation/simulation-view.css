@@ -1,7 +1,7 @@
 /* Topology explorer. Type floor for projection: nothing below 11px. State is carried by whole-surface tints and
    1px borders, never by a thick accent edge. */
 .sim-view { --sim-cyan: #83b8c8; --sim-amber: #e2b071; --sim-amber-text: #f0c58f; --sim-red: #df8a8d; margin: 0 0 20px; overflow: hidden; border: 1px solid #3d5360; border-radius: 10px; background: #16232d; color: #e9f0f3; }
-.sim-view-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 24px; border-bottom: 1px solid #344957; background: #1a2a35; }
+.sim-view-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 24px; border-bottom: 1px solid #344957; background: #1a2a35; }
 .sim-view-title { display: flex; align-items: flex-start; gap: 12px; }
 .sim-view-title svg { margin-top: 2px; color: var(--sim-cyan); }
 .sim-view-title h2 { font-size: 18px; letter-spacing: -.02em; }
@@ -13,14 +13,14 @@
 .sim-view-health .sim-count-fault { color: #f3b7b9; font-weight: 600; }
 .sim-view-health .sim-count-fault::before { background: var(--sim-red); }
 
-.sim-explore { padding: 18px 24px 22px; }
-.sim-step { display: flex; align-items: baseline; gap: 12px; margin: 0 0 10px; }
+.sim-explore { padding: 16px 24px 20px; }
+.sim-step { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
 .sim-step > span { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 50%; background: #375b69; color: #f3f9fa; font-size: 12px; font-weight: 700; }
 .sim-step strong { display: block; font-size: 14px; }
 .sim-step p { margin-top: 1px; color: #adbec8; font-size: 12px; }
 
 /* Step 1: pumps */
-.sim-cooling { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+.sim-cooling { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .sim-cooling-route { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; padding: 11px 14px; border: 1px solid #3f5a68; border-radius: 6px; background: #223845; color: #edf3f5; text-align: left; cursor: pointer; transition: background-color 160ms ease-out, border-color 160ms ease-out; }
 .sim-cooling-route:hover { background: #294353; }
 .sim-cooling-route > svg { color: var(--sim-cyan); }
@@ -74,7 +74,7 @@
 .sim-loop-segment.is-degraded i { border-color: var(--sim-amber); border-width: 2px; border-top: 0; }
 .sim-loop-segment.is-degraded span { color: var(--sim-amber-text); font-weight: 650; }
 
-.sim-impact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 12px 0 20px; padding: 11px 14px; border: 1px solid #3f5a68; border-radius: 6px; background: #203440; }
+.sim-impact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 10px 0 16px; padding: 10px 14px; border: 1px solid #3f5a68; border-radius: 6px; background: #203440; }
 .sim-impact strong { font-size: 13px; }
 .sim-impact span { color: #c2d1d8; font-size: 12px; }
 .sim-impact.is-degraded { border-color: #a07a44; background: #2f2a22; }
@@ -119,6 +119,17 @@
 .sim-more[open] > summary { border-bottom: 1px solid var(--line); }
 .sim-more > .panel { border: 0; border-radius: 0 0 8px 8px; }
 
+/* Wide screens: all eight cards on one row beside the inspector, so the whole explorer fits one 1440×900 viewport. */
+@media (min-width: 1251px) {
+  .sim-detail { grid-template-columns: minmax(0, 1fr) 250px; }
+  .sim-gpu-list { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 7px; }
+  .sim-gpu { min-height: 90px; padding: 7px 8px; }
+  .sim-gpu-card { height: 44px; padding-right: 6px; }
+  .sim-gpu-board { height: 36px; gap: 6px; padding: 4px 6px; }
+  .sim-gpu-fan { width: 24px; height: 24px; }
+  .sim-gpu-connector { top: 8px; height: 24px; }
+  .sim-gpu-caption { gap: 4px; }
+}
 @media (max-width: 1250px) {
   .sim-racks { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .sim-loop-band { display: none; } /* cabinets wrap to two rows; each affected cabinet already carries its loop note */
