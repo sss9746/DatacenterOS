@@ -1,0 +1,21 @@
+{
+  "name": "db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:physics": "pnpm --filter @dcos/physics build",
+    "build": "pnpm build:physics && spacetime build",
+    "publish:dev": "pnpm build:physics && spacetime publish -s maincloud dcos-dev --yes=remote",
+    "generate": "pnpm build:physics && spacetime generate --lang typescript --out-dir ../../packages/db-client/src/generated --module-path .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dcos/contracts": "workspace:*",
+    "@dcos/physics": "workspace:*",
+    "spacetimedb": "2.14.*"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2"
+  }
+}
