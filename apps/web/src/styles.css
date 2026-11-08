@@ -204,7 +204,9 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .hero-cluster > .sim-view { margin: 0; }
 /* The room sticks beside the cluster while the left column scrolls; it owns its internal scroll (§4). */
 .hero-room { min-width: 0; display: flex; flex-direction: column; align-self: start; position: sticky; top: calc(var(--masthead-h) + 16px); }
-.hero-room > * { flex: 1; min-height: 560px; max-height: calc(100vh - var(--masthead-h) - 32px); }
+.hero-room > * { flex: 1; min-height: 560px; max-height: calc(100vh - var(--masthead-h) - 32px - var(--demo-bar-h, 0px)); }
+/* The sticky demo bar covers the bottom of the viewport, so the sticky room leaves room for its collapsed summary. */
+.main:has(> #presenter) { --demo-bar-h: 58px; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; align-items: start; }
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(330px, 1fr); gap: 20px; align-items: start; }
 .activity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; align-items: start; }
