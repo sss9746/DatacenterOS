@@ -153,6 +153,28 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.5)(lightningcss@1.33.0)
 
+  hardware/fan-gateway:
+    dependencies:
+      '@dcos/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@dcos/db-client':
+        specifier: workspace:*
+        version: link:../../packages/db-client
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.5)(lightningcss@1.33.0)
+
   hardware/nvidia-smi-collector:
     dependencies:
       '@dcos/contracts':
