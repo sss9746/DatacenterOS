@@ -122,6 +122,20 @@ test('local physics: pump degradation heats loop A, XID 79 fails a job, and the 
   await expect(page.locator('[data-gpu="gpu-r3-n1-0"]')).toHaveAttribute('aria-label', /XID 79/);
   await go(page, 'Training jobs');
   await expect(page.locator('#jobs')).toContainText('failed');
+  await expect(page.locator('[data-job-timeline="job-a"]')).toContainText('Rolled back to checkpoint');
+  // The in-browser deterministic planner (not Nemotron) cordons the GPU and moves job-a from its checkpoint; the real
+  // physics restarts it over 120 sim-s as we advance, and the card's step timeline follows it.
+  await page.getByRole('button', { name: 'Run recovery (in-browser planner)' }).click();
+  await expect(page.locator('.demo-recovery-log')).toContainText('migrate_restart job-a');
+  await page.getByRole('button', { name: 'Advance 30 sim-s' }).click();
+  await expect(page.locator('[data-job-timeline="job-a"]')).toContainText('Restarting');
+  await expect(page.locator('[data-job-timeline="job-a"] .jobcard-chip.is-to')).toHaveText('R1+R2');
+  await go(page, 'Cluster overview');
+  await expect(page.locator('[data-move-arc="job-a"] text')).toContainText('job-a → R1+R2 · from checkpoint ckpt-job-a-1');
+  await expect(page.locator('[data-move-role="is-move-dest"]')).toHaveCount(16);
+  for (let i = 0; i < 4; i++) await page.getByRole('button', { name: 'Advance 30 sim-s' }).click();
+  await go(page, 'Training jobs');
+  await expect(page.locator('[data-job-timeline="job-a"]')).toContainText(/Resumed from checkpoint ckpt-job-a-1 .* · lost [\d,]+ wu/);
   // The drawer travels with the page; the blocked probe is in the workflows ledger.
   await go(page, 'Workflows');
   await expect(page.locator('#ledger')).toContainText('BLOCKED');

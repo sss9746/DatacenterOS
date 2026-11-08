@@ -1,5 +1,5 @@
 import { useId, useState, useSyncExternalStore, type ReactNode, type SyntheticEvent } from 'react';
-import { FastForward, SlidersHorizontal } from 'lucide-react';
+import { FastForward, Route, SlidersHorizontal } from 'lucide-react';
 import type { ActionStatus, ObservedSnapshot } from '@dcos/contracts';
 import type { ActionDetail, PlanRecord, WorkflowRecord } from '@dcos/db-client';
 import type { DashboardStore } from '../../data/dashboard';
@@ -35,7 +35,7 @@ export interface DemoControlsProps {
   snapshot: ObservedSnapshot;
 }
 
-type Step = 'pump' | 'probe' | 'xid' | 'reset' | 'advance';
+type Step = 'pump' | 'probe' | 'xid' | 'reset' | 'advance' | 'recover';
 interface Note { text: string; failure: boolean }
 
 const MODE_HINT: Record<ControlsMode, string> = {
@@ -111,6 +111,12 @@ export function DemoControls({ store, canAdmin, open, onOpenChange, selectedGpuI
     return 'Advanced the local physics simulation by 30 sim-seconds.';
   });
 
+  const runRecovery = () => run('recover', async () => {
+    if (!local) throw new Error('The recovery preview is only available in the local physics simulation.');
+    await local.runRecoveryPreview();
+    return 'In-browser preview · deterministic thresholdPolicy from @dcos/physics · not Nemotron, not the live agent. Press Advance: a checkpoint takes 30 sim-s, a restart on new GPUs 120 sim-s, both executed by the real physics step.';
+  });
+
   const reset = () => run('reset', async () => {
     if (mode === 'live') await store.client.createRun('run-demo-1', 42, 'gpu_demo_8');
     setConfirmReset(false); setProbe(null); onReset();
@@ -145,7 +151,13 @@ export function DemoControls({ store, canAdmin, open, onOpenChange, selectedGpuI
       </ol>
       <div className="demo-foot">
         {local && <Button variant="secondary" size="sm" disabled={Boolean(disabledReason) || Boolean(live?.clock.paused)} onClick={() => void advance()}><FastForward size={14} aria-hidden="true"/>Advance 30 sim-s</Button>}
+        {local && <Button variant="secondary" size="sm" disabled={Boolean(disabledReason) || Boolean(live?.clock.paused)} onClick={() => void runRecovery()} title="Runs @dcos/physics' deterministic thresholdPolicy in this browser and executes it through the local ledger + physics. Not the live agent, not Nemotron."><Route size={14} aria-hidden="true"/>Run recovery (in-browser planner)</Button>}
         {notes.advance && <p role={notes.advance.failure ? 'alert' : 'status'} className={`demo-note ${notes.advance.failure ? 'demo-note-error' : ''}`}>{notes.advance.text}</p>}
+        {notes.recover && <p role={notes.recover.failure ? 'alert' : 'status'} className={`demo-note ${notes.recover.failure ? 'demo-note-error' : ''}`}>{notes.recover.text}</p>}
+        {local && local.recoveryPreview.log.length > 0 && <ol className="demo-recovery-log" aria-label="Recovery preview log (in-browser deterministic planner, not Nemotron)">
+          <li className="demo-recovery-log-head">Recovery preview · in-browser · deterministic · not Nemotron</li>
+          {local.recoveryPreview.log.slice(-6).map((line, i) => <li key={`${i}-${line}`} className={/BLOCKED|FAILED|error/.test(line) ? 'is-blocked' : ''}>{line}</li>)}
+        </ol>}
         <p className="demo-process-note">Killing the agent process is done from the presenter terminal; the browser never gets process control.</p>
       </div>
       <details className="demo-advanced">

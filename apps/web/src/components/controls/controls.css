@@ -51,6 +51,9 @@
 .demo-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 12px; }
 .demo-foot .demo-note { flex: 1 1 240px; }
 .demo-process-note { flex: 1 1 100%; margin: 0; font-size: 11px; color: var(--muted); }
+.demo-recovery-log { flex: 1 1 100%; list-style: none; margin: 0; padding: 8px 10px; border-radius: 4px; border: 1px dashed #4a5c6e; background: var(--surface); font-size: 11px; line-height: 1.5; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.demo-recovery-log-head { font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: #c3d3df; }
+.demo-recovery-log li.is-blocked { color: var(--danger); }
 
 .demo-advanced { margin-top: 10px; border-top: 1px dashed var(--line); }
 .demo-advanced > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 0; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--foreground); }
