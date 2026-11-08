@@ -31,7 +31,7 @@ import {
   type ResumeReport,
 } from './resume.js';
 import { DEFAULT_TRIAGE_WINDOW_MS, diagnoseEvent, extractSymptoms, groupSymptoms, runTriage, SYMPTOM_BUCKET_MS } from './triage.js';
-import { verifyRecovery, type VerificationReport } from './verify.js';
+import { buildOperatorHandoff, verifyRecovery, type VerificationReport } from './verify.js';
 
 // ---------------------------------------------------------------------------------------------- types
 
@@ -343,19 +343,46 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     return r;
   }
 
+  /**
+   * Durable handoff for a workflow closed WITHOUT a verified execution (no-action plan, or an escalation before/instead
+   * of executing). Same persisted shape as verify's, so a fresh connection reads every close the same way (R3).
+   */
+  async function closingHandoff(ids: string[], outcome: 'recovered' | 'operator_review', reason: string, jobIds: string[], headline?: string) {
+    const [snapshot, incidents] = await Promise.all([db.getObservedSnapshot(), db.listIncidents().catch(() => [] as Incident[])]);
+    const sim = snapshot.clock.sim_time_ms;
+    return buildOperatorHandoff({
+      snapshot,
+      incidents,
+      incidentIds: ids,
+      checks: [],
+      outcomes: [],
+      aborted: false,
+      jobIds,
+      interval: [sim, sim],
+      outcome,
+      reason,
+      ...(headline ? { headline } : {}),
+    });
+  }
+
   async function escalate(wfId: string, coord: Coordinator, ids: string[], stage: AgentStage, reason: string, report: LoopTickReport): Promise<void> {
-    await coord.updateStage('escalated', { escalation_reason: reason });
+    const verification = await closingHandoff(ids, 'operator_review', `escalated to operator: ${reason}`, jobsOf(report)).catch(() => null);
+    await coord.updateStage('escalated', { escalation_reason: reason, ...(verification ? { verification } : {}) });
     await safeEmit(stage, { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: `escalated to operator: ${reason}` });
     await setIncidentState(ids, 'escalated');
     report.escalated = true;
   }
 
-  async function closeNoAction(wfId: string, coord: Coordinator, ids: string[]): Promise<void> {
-    const handoff = 'No recovery action needed: affected jobs keep running; incident stays under monitoring.';
-    await coord.updateStage('done', { verification: { verified: true, escalate: false, handoff, as_of_sim_time_ms: clock.simTimeMs() } });
-    await safeEmit('verify', { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: handoff });
+  async function closeNoAction(wfId: string, coord: Coordinator, ids: string[], report: LoopTickReport): Promise<void> {
+    const headline = 'No recovery action needed: affected jobs keep running; incident stays under monitoring.';
+    const verification = await closingHandoff(ids, 'recovered', 'no command executed', jobsOf(report), headline);
+    await coord.updateStage('done', { verification });
+    await safeEmit('verify', { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: verification.handoff });
     await setIncidentState(ids, 'monitoring');
   }
+
+  /** Jobs the tick's plans looked at (for the handoff's affected-jobs list). */
+  const jobsOf = (report: LoopTickReport): string[] => [...new Set(report.plans.flatMap((p) => p.job_plans.map((j) => j.job_id)))];
 
   const workflowIncidents = (coord: Coordinator, r: PlanResult): string[] => [
     ...new Set([...(coord.lease()?.workflow.incident_ids ?? []), ...r.plan.incident_ids]),
@@ -387,7 +414,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
       stageRef.stage = 'plan';
       let current = start.plan ?? (await plan(wfId, incidents, attempt, coord));
       report.plans.push(current);
-      if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current));
+      if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
       if (deps.requireApproval && current.job_plans.some((p) => p.needs_approval)) {
         return escalate(wfId, coord, workflowIncidents(coord, current), 'plan', 'planner flagged needs_approval', report);
       }
@@ -447,13 +474,13 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         current = out.new_plan;
         report.plans.push(current);
         await publishPlan(wfId, current, out);
-        if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current));
+        if (current.commands.length === 0) return closeNoAction(wfId, coord, workflowIncidents(coord, current), report);
         w.reset(current);
       }
       stageRef.stage = 'verify';
       await coord.updateStage('verify', {});
       const v = await verifyRecovery(
-        { db, events, waitSim: (simMs) => waitSim(simMs, coord), persist: (stage, patch) => coord.updateStage(stage, patch) },
+        { db, events, physics, waitSim: (simMs) => waitSim(simMs, coord), persist: (stage, patch) => coord.updateStage(stage, patch) },
         { workflowId: wfId, plan: current, result: exec },
       );
       report.verification = v;

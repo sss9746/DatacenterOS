@@ -26,7 +26,7 @@ import {
 } from './coordinator.js';
 import type { EventPublisher } from './events.js';
 import { isDbError, isSafetyRejected, type DbPort, type PhysicsPort, type ToolCallSummary, type WorkflowRecord } from './ports.js';
-import { verifyRecovery, DEFAULT_PROGRESS_WINDOW_SIM_MS } from './verify.js';
+import { verifyRecovery, DEFAULT_PROGRESS_WINDOW_SIM_MS, readHandoff, type OperatorHandoff } from './verify.js';
 
 // ---------------------------------------------------------------------------
 // Frozen API
@@ -48,6 +48,8 @@ export interface ResumeItem {
   reconciled: Array<{ command_key: string; ledger_status: string | null; decision: ReconcileDecision }>;
   /** Extra context (e.g. LEASE_HELD_BY_LIVE_WORKER). Optional, additive to the frozen shape. */
   note?: string;
+  /** The persisted operator handoff of a closed (done / escalated) workflow, as this fresh connection reads it. */
+  handoff?: OperatorHandoff | null;
 }
 
 export interface ResumeReport {
@@ -313,6 +315,7 @@ async function verifyAndClose(ctx: Ctx, coord: Coordinator, wfId: string, plan: 
     {
       db: ctx.db,
       events: ctx.events,
+      physics: ctx.physics,
       waitSim: waitSimVia(ctx),
       persist: (stage, patch) => coord.updateStage(stage, patch),
       progressWindowSimMs: DEFAULT_PROGRESS_WINDOW_SIM_MS,
@@ -323,7 +326,11 @@ async function verifyAndClose(ctx: Ctx, coord: Coordinator, wfId: string, plan: 
 
 async function resumeOne(ctx: Ctx, wf: WorkflowRecord): Promise<ResumeItem> {
   const base = { workflow_id: wf.workflow_id, stage: wf.stage, reconciled: [] as Reconciled[] };
-  if (wf.stage === 'escalated' || wf.stage === 'done') return { ...base, action: 'nothing_to_do', note: 'WAITING_FOR_OPERATOR' };
+  if (wf.stage === 'escalated' || wf.stage === 'done') {
+    // Closed by a previous process: the durable handoff is what a fresh connection has to go on (R3 resume path).
+    const handoff = await readHandoff(ctx.db, wf.workflow_id).catch(() => null);
+    return { ...base, action: 'nothing_to_do', note: 'WAITING_FOR_OPERATOR', handoff };
+  }
 
   const coord = createCoordinator({ db: ctx.db, physics: ctx.physics, events: ctx.events, workerId: ctx.workerId, clock: ctx.clock, sleep: ctx.sleep, leaseMs: ctx.leaseMs });
   if (!(await acquire(ctx, coord, wf))) return { ...base, action: 'nothing_to_do', note: LEASE_HELD_BY_LIVE_WORKER };
