@@ -1,0 +1,45 @@
+/* Training jobs: paper-and-ink restyle with a per-job progress ring (durable = full job colour, work = 35% tint).
+   Tokens carry fallbacks because styles.css is rewritten in parallel. */
+#jobs { --jb-ink: var(--ink, #1F2A1E); --jb-muted: var(--ink-muted, #5B6650); --jb-sage: var(--sage, #7F886A); --jb-inset: var(--paper-inset, #EDE4CE); --jb-paper: var(--paper, #FAF6EC); --jb-orange-ink: var(--orange-ink, #A8380F); --jb-amber-ink: var(--amber-ink, #7A5A12); --jb-fail: var(--heat-fail, #5B2C1F);
+  --jb-mono: var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace); --jb-display: var(--font-display, "Bricolage Grotesque", "Inter", system-ui, sans-serif);
+  --jb-ease: var(--ease-out, cubic-bezier(.2,.7,.2,1)); --jb-slow: var(--t-slow, 600ms);
+  background: var(--jb-paper); color: var(--jb-ink); border: 1px solid color-mix(in srgb, var(--jb-sage) 45%, transparent); border-radius: var(--r-panel, 14px); }
+#jobs .panel-heading h2 { color: var(--jb-ink); font-family: var(--jb-display); font-size: 19px; font-weight: 650; letter-spacing: -.015em; }
+#jobs .panel-footnote { color: var(--jb-muted); font-size: 12.5px; }
+#jobs .jobs-legend { display: flex; gap: 16px; align-items: center; padding: 0 20px 12px; font-size: 12px; color: var(--jb-muted); }
+#jobs .jobs-legend span { display: flex; align-items: center; gap: 5px; }
+#jobs .progress-key { display: inline-block; width: 12px; height: 6px; border-radius: 2px; background: color-mix(in srgb, var(--job-a, #3E503C) 35%, var(--jb-paper)); }
+#jobs .job { --job-color: var(--job-a, #3E503C); padding: 16px 20px 18px; border-top: 1px solid color-mix(in srgb, var(--jb-sage) 45%, transparent); color: var(--jb-ink); }
+#jobs .job-b { --job-color: var(--job-b, #8A6A2F); }
+#jobs .job-c { --job-color: var(--job-c, #5A6E8C); }
+#jobs .job.is-failed { box-shadow: inset 3px 0 var(--orange, #FF6F3D); }
+#jobs .job-heading { display: flex; align-items: center; gap: 10px; }
+#jobs .job-heading .badge { margin-left: auto; }
+#jobs .job h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 600; font-family: var(--jb-mono); }
+#jobs .job h3 i { width: 8px; height: 8px; border-radius: 2px; background: var(--job-color); }
+#jobs .job-ring { width: 36px; height: 36px; flex: 0 0 auto; transform: rotate(-90deg); }
+#jobs .job-ring circle { fill: none; stroke-width: 4; stroke-linecap: butt; }
+#jobs .job-ring-track { stroke: var(--jb-inset); }
+#jobs .job-ring-work { stroke: color-mix(in srgb, var(--job-color) 35%, var(--jb-paper)); transition: stroke-dashoffset var(--jb-slow) var(--jb-ease); }
+#jobs .job-ring-durable { stroke: var(--job-color); transition: stroke-dashoffset var(--jb-slow) var(--jb-ease); }
+#jobs .job-ring.is-bumping { animation: job-ring-bump 700ms var(--jb-ease) 1; }
+@keyframes job-ring-bump { 0% { transform: rotate(-90deg) scale(1); } 40% { transform: rotate(-90deg) scale(1.18); } 100% { transform: rotate(-90deg) scale(1); } }
+#jobs .job-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; margin-top: 8px; color: var(--jb-muted); font-size: 12.5px; }
+#jobs .job-meta > span { display: inline-flex; gap: 4px; align-items: center; }
+#jobs .progress-label { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin: 12px 0 7px; }
+#jobs .progress-label strong { font-family: var(--jb-display); font-size: 24px; font-weight: 700; line-height: 1; letter-spacing: -.02em; }
+#jobs .progress-label strong small { font-size: 13px; font-weight: 600; margin-left: 2px; color: var(--jb-muted); }
+#jobs .progress-label > span { font-family: var(--jb-mono); font-size: 12px; color: var(--jb-muted); }
+#jobs .job-progress { position: relative; height: 8px; border-radius: 4px; background: var(--jb-inset); }
+#jobs .job-progress i { display: block; position: absolute; left: 0; top: 0; height: 100%; max-width: 100%; border-radius: 4px; transition: width var(--jb-slow) var(--jb-ease); }
+#jobs .work-progress { background: color-mix(in srgb, var(--job-color) 35%, var(--jb-paper)); }
+#jobs .durable-progress { background: var(--job-color); }
+#jobs .checkpoint-marker { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--jb-ink); transform: translateX(-50%); transition: left var(--jb-slow) var(--jb-ease); }
+#jobs .checkpoint-line { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--jb-muted); font-size: 12.5px; }
+#jobs .checkpoint-line > span:first-child { display: flex; align-items: center; gap: 4px; }
+#jobs .job-loss { margin: 8px 0 0; font-size: 12.5px; font-weight: 600; color: var(--jb-orange-ink); }
+#jobs .job-notice { margin: 8px 0 0; font-size: 12.5px; color: var(--jb-amber-ink); }
+#jobs .job-history, #jobs .job-history > span { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#jobs .job-history { margin-top: 10px; font-size: 12px; color: var(--jb-muted); }
+#jobs .job-history small { display: block; font-size: 12px; font-family: var(--jb-mono); }
+@media (prefers-reduced-motion: reduce) { #jobs .job-ring, #jobs .job-ring circle, #jobs .job-progress i, #jobs .checkpoint-marker { animation: none !important; transition-duration: 160ms !important; } }

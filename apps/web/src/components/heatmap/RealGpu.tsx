@@ -2,6 +2,7 @@ import { Cpu } from 'lucide-react';
 import type { Evidence } from '@dcos/db-client';
 import { Badge } from '../ui/panel';
 import { number } from '../../lib/utils';
+import './real-gpu.css';
 
 const METRICS: ReadonlyArray<readonly [metric: string, label: string, unit: string]> = [
   ['nvidia_smi.temperature_gpu', 'Temperature', '°C'], ['nvidia_smi.power_draw', 'Power', 'W'],
@@ -12,14 +13,18 @@ const STALE_AFTER_MS = 15_000;
 
 /** The one real GPU (gpu-real-0, nvidia-smi over hardware). Mock mode has no collector, so it shows the offline state. */
 export function RealGpu({ evidence, now }: { evidence: Evidence | null; now: number }) {
-  const samples = evidence?.telemetry.filter((row) => row.resource_id === 'gpu-real-0' && row.source_kind === 'hardware' && row.labels.collector === 'nvidia-smi') ?? [];
+  const rows = evidence?.telemetry.filter((row) => row.resource_id === 'gpu-real-0' && row.labels.collector === 'nvidia-smi') ?? [];
+  const hardware = rows.filter((row) => row.source_kind === 'hardware');
+  // A recording only shows when no live readings exist, and it never claims to be live.
+  const samples = hardware.length ? hardware : rows.filter((row) => row.source_kind === 'replay');
+  const replay = hardware.length === 0 && samples.length > 0;
   const latestMs = samples.reduce((max, row) => Math.max(max, row.observed_unix_ms), 0);
   const ageS = latestMs ? Math.max(0, Math.round((now - latestMs) / 1000)) : null;
-  const live = ageS !== null && ageS * 1000 <= STALE_AFTER_MS;
+  const live = !replay && ageS !== null && ageS * 1000 <= STALE_AFTER_MS;
   return <section className={`real-gpu ${samples.length ? live ? 'is-live' : 'is-stale' : 'is-offline'}`} aria-labelledby="real-gpu-heading">
-    <div className="real-gpu-title"><Cpu size={20} aria-hidden="true"/><h2 id="real-gpu-heading">Real NVIDIA GPU <span>· Brev</span></h2><Badge tone="real">REAL</Badge></div>
+    <div className="real-gpu-title"><Cpu size={20} aria-hidden="true"/><h2 id="real-gpu-heading">Real NVIDIA GPU <span>· Brev</span></h2>{replay ? <Badge>REPLAY</Badge> : <Badge tone="real">REAL</Badge>}</div>
     {samples.length ? <>
-      <p className="real-gpu-pulse"><i className="pulse-dot" aria-hidden="true"/>{live ? 'Live' : 'Stale'} · updated {ageS} s ago</p>
+      <p className="real-gpu-pulse"><i className="pulse-dot" aria-hidden="true"/>{replay ? 'REPLAY OF REAL RECORDING' : live ? 'Live' : 'Stale'} · updated {ageS} s ago</p>
       <dl className="real-gpu-metrics">{METRICS.map(([metric, label, unit]) => {
         const sample = samples.filter((row) => row.metric === metric).sort((a, b) => b.observed_unix_ms - a.observed_unix_ms)[0];
         const stale = sample && (now - sample.observed_unix_ms > STALE_AFTER_MS || !['good', 'estimated'].includes(sample.quality));

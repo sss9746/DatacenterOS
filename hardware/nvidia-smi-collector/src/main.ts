@@ -1,9 +1,12 @@
 // nvidia-smi collector: real Brev GPU -> TelemetryEvents for gpu-real-0 (observation only; never mutates the GPU).
-//   pnpm --filter nvidia-smi-collector start -- --dry-run                     # print JSON, no DB
+//   (no `--` after `start`: pnpm would hand it to parseArgs, which then ignores the flags)
+//   pnpm --filter nvidia-smi-collector start --db dcos-r-local --fake         # invented numbers, local test DB only
+//   pnpm --filter nvidia-smi-collector start --dry-run                        # print JSON, no DB
 //   pnpm --filter nvidia-smi-collector start -- --db dcos-dev                 # live ingest (gateway token)
 //   pnpm --filter nvidia-smi-collector start -- --dry-run --record ../recordings/brev-l4.jsonl
 //   pnpm --filter nvidia-smi-collector start -- --db dcos-dev --replay ../recordings/brev-l4.jsonl
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -22,7 +25,8 @@ import {
 import { sshExec, sshStreamLines } from './ssh.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const ALLOWED_DBS = ['dcos-dev', 'dcos'] as const;
+const ALLOWED_DBS = ['dcos-dev', 'dcos', 'dcos-r-local'] as const;
+const LOCAL_DB = 'dcos-r-local'; // private test DB: token file in ~/.dcos-tokens, and the only DB --fake may write to
 const REPLAY_LABEL = 'REPLAY OF REAL RECORDING';
 const REPLAY_MAX_GAP_MS = 5_000;
 
@@ -35,6 +39,7 @@ interface Options {
   dryRun: boolean;
   record: string | undefined;
   replay: string | undefined;
+  fake: boolean;
   runId: string;
   sourceId: string;
 }
@@ -47,6 +52,7 @@ function readOptions(): Options {
       'dry-run': { type: 'boolean', default: false },
       record: { type: 'string' },
       replay: { type: 'string' },
+      fake: { type: 'boolean', default: false },
       'run-id': { type: 'string', default: process.env.DCOS_RUN_ID ?? 'run-demo-1' },
       'source-id': { type: 'string', default: DEFAULT_SOURCE_ID },
     },
@@ -58,10 +64,13 @@ function readOptions(): Options {
     dryRun: values['dry-run']!,
     record: values.record,
     replay: values.replay,
+    fake: values.fake!,
     runId: values['run-id']!,
     sourceId: values['source-id']!,
   };
   if (opts.record && opts.replay) throw new Error('--record and --replay are mutually exclusive');
+  if (opts.fake && opts.db !== LOCAL_DB) throw new Error(`--fake generates invented numbers and is only allowed with --db ${LOCAL_DB}`);
+  if (opts.fake && (opts.record || opts.replay)) throw new Error('--fake cannot be combined with --record or --replay');
   if (!opts.dryRun && !opts.db) throw new Error('pass --dry-run, or --db dcos-dev|dcos for live ingest');
   if (opts.db && !(ALLOWED_DBS as readonly string[]).includes(opts.db)) {
     throw new Error(`--db must be one of ${ALLOWED_DBS.join(', ')}`);
@@ -78,12 +87,18 @@ async function makeSink(opts: Options): Promise<Send> {
     };
   }
   // .env.local fills gaps; real env wins. Values are never logged.
-  const envFile = resolve(REPO_ROOT, '.env.local');
+  // The local DB is the exception: only its token file counts, so shell settings can't redirect it.
+  const envFile = opts.db === LOCAL_DB ? resolve(homedir(), '.dcos-tokens/dcos-r-local.local.env') : resolve(REPO_ROOT, '.env.local');
+  if (opts.db === LOCAL_DB) {
+    if (!existsSync(envFile)) throw new Error(`missing token file ${envFile.replace(homedir(), '~')}`);
+    delete process.env.STDB_URI;
+    delete process.env.STDB_GATEWAY_TOKEN;
+  }
   if (existsSync(envFile)) process.loadEnvFile(envFile);
   const uri = process.env.STDB_URI;
   const token = process.env.STDB_GATEWAY_TOKEN;
   const missing = [!uri && 'STDB_URI', !token && 'STDB_GATEWAY_TOKEN'].filter(Boolean);
-  if (missing.length) throw new Error(`missing env in .env.local: ${missing.join(', ')}`);
+  if (missing.length) throw new Error(`missing env in ${envFile.replace(homedir(), '~')}: ${missing.join(', ')}`);
   log(`connecting to ${opts.db} as gateway`);
   const db = await connect({ uri: uri!, db: opts.db!, token, runId: opts.runId });
   log('connected');
@@ -185,10 +200,35 @@ async function runReplay(opts: Options, send: Send): Promise<void> {
   log(`${REPLAY_LABEL}: done`);
 }
 
+/** Local-only test feed (guarded to dcos-r-local in readOptions). Invented numbers, labeled FAKE TEST GPU, never real. */
+async function runFake(opts: Options, send: Send): Promise<void> {
+  log('FAKE feed: invented numbers for the private local DB only');
+  const nextSeq = createSeq();
+  const clock = createMonotonicClock();
+  for (let i = 0; ; i++) {
+    const load = Math.min(1, Math.max(0, Math.sin(i / 20) * 0.5 + 0.5)); // smooth 0..1 so the tile visibly moves
+    const parsed: ParsedRow = {
+      gpuName: 'FAKE TEST GPU',
+      values: new Map([
+        ['nvidia_smi.temperature_gpu', { value: 35 + 40 * load, unit: 'C' }],
+        ['nvidia_smi.power_draw', { value: 40 + 260 * load, unit: 'W' }],
+        ['nvidia_smi.utilization_gpu', { value: load, unit: 'ratio' }],
+        ['nvidia_smi.clocks_sm', { value: 1000 + 1000 * load, unit: 'MHz' }],
+        ['nvidia_smi.power_limit', { value: 350, unit: 'W' }],
+      ]),
+    };
+    const batch = validOnly(rowToEvents(parsed, { runId: opts.runId, sourceId: opts.sourceId, sourceKind: 'hardware', observedUnixMs: clock(), nextSeq, host: 'fake-local', extraLabels: { synthetic: 'FAKE TEST DATA' } }));
+    log(`[FAKE] ${summarize(batch)} -> ${batch.length} events`);
+    await send(batch);
+    await sleep(1000);
+  }
+}
+
 async function main(): Promise<void> {
   const opts = readOptions();
   const send = await makeSink(opts);
-  if (opts.replay) await runReplay(opts, send);
+  if (opts.fake) await runFake(opts, send);
+  else if (opts.replay) await runReplay(opts, send);
   else await runLive(opts, send);
   process.exit(0);
 }

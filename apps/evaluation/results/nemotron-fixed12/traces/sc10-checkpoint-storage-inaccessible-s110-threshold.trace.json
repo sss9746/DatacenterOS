@@ -1,0 +1,65 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "nemotron-fixed12",
+  "run_id": "nemotron-fixed12-sc10-checkpoint-storage-inaccessible-s110",
+  "scenario_id": "sc10-checkpoint-storage-inaccessible",
+  "seed": 110,
+  "policy": "threshold",
+  "horizon_sim_s": 600,
+  "gate": "safety",
+  "ticks": 600,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1200000,
+  "duplicate_commands_ignored": 491,
+  "retry_dropped": 0,
+  "commands": [
+    {
+      "command_key": "threshold.job-a.escalate.checkpoint_unavailable.after.ckpt-job-a-1",
+      "action_id": "threshold.job-a.escalate.checkpoint_unavailable.after.ckpt-job-a-1",
+      "operation": "escalate",
+      "job_id": "job-a",
+      "target_resource_id": "job-a",
+      "issued_sim_time_ms": 929000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 930000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 931000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    },
+    {
+      "command_key": "threshold.job-b.escalate.checkpoint_unavailable.after.ckpt-job-b-1",
+      "action_id": "threshold.job-b.escalate.checkpoint_unavailable.after.ckpt-job-b-1",
+      "operation": "escalate",
+      "job_id": "job-b",
+      "target_resource_id": "job-b",
+      "issued_sim_time_ms": 930000,
+      "safety": {
+        "decision": "allow",
+        "violations": []
+      },
+      "disposition": "executed",
+      "requested_sim_time_ms": 931000,
+      "outcome": {
+        "status": "succeeded",
+        "reason_code": null,
+        "sim_time_ms": 932000
+      },
+      "dependency_reason": null,
+      "preemptive": false,
+      "unnecessary": false,
+      "recovery": null,
+      "unsafe_executed": []
+    }
+  ]
+}

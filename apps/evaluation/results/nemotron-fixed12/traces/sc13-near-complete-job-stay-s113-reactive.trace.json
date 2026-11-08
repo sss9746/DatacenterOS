@@ -1,0 +1,16 @@
+{
+  "kind": "dcos-command-trace",
+  "batch_id": "nemotron-fixed12",
+  "run_id": "nemotron-fixed12-sc13-near-complete-job-stay-s113",
+  "scenario_id": "sc13-near-complete-job-stay",
+  "seed": 113,
+  "policy": "reactive",
+  "horizon_sim_s": 420,
+  "gate": "safety",
+  "ticks": 420,
+  "start_sim_time_ms": 600000,
+  "end_sim_time_ms": 1020000,
+  "duplicate_commands_ignored": 0,
+  "retry_dropped": 0,
+  "commands": []
+}

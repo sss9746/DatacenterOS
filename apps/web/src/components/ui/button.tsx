@@ -3,10 +3,11 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 
+/** Looks live in styles.css (§5): default forest/cream · secondary paper + forest border · ghost ink-muted · destructive orange/ink. */
 const buttonVariants = cva('button', {
   variants: {
     variant: { default: 'button-default', secondary: 'button-secondary', ghost: 'button-ghost', destructive: 'button-destructive' },
-    size: { default: '', sm: 'button-sm', icon: 'button-icon' },
+    size: { default: '', sm: 'button-sm', lg: 'button-lg', icon: 'button-icon' },
   },
   defaultVariants: { variant: 'default', size: 'default' },
 });
