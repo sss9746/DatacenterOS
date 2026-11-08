@@ -10,6 +10,272 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const Action = __t.object("Action", {
+  actionId: __t.string(),
+  commandKey: __t.string(),
+  runId: __t.string(),
+  workflowId: __t.string(),
+  planId: __t.string(),
+  operation: __t.string(),
+  targetResourceId: __t.string(),
+  jobId: __t.option(__t.string()),
+  payloadHash: __t.string(),
+  argsJson: __t.string(),
+  incidentIdsJson: __t.string(),
+  dependsOnCommandKeysJson: __t.string(),
+  expectedVersionsJson: __t.string(),
+  expectedDecisionEpoch: __t.u32(),
+  requestedSimTimeMs: __t.u32(),
+  dueSimTimeMs: __t.option(__t.u32()),
+  status: __t.string(),
+  attempt: __t.u32(),
+  claimedBy: __t.option(__t.string()),
+  leaseToken: __t.u64(),
+  resultJson: __t.string(),
+  reasonCode: __t.option(__t.string()),
+  updatedSimTimeMs: __t.u32(),
+  version: __t.u32(),
+});
+export type Action = __Infer<typeof Action>;
+
+export const ActionDependency = __t.object("ActionDependency", {
+  depId: __t.string(),
+  runId: __t.string(),
+  actionId: __t.string(),
+  dependsOnActionId: __t.string(),
+});
+export type ActionDependency = __Infer<typeof ActionDependency>;
+
+export const ActionEvent = __t.object("ActionEvent", {
+  actionEventId: __t.u64(),
+  runId: __t.string(),
+  actionId: __t.string(),
+  commandKey: __t.string(),
+  status: __t.string(),
+  simTimeMs: __t.u32(),
+  observedUnixMs: __t.f64(),
+  reasonCode: __t.option(__t.string()),
+  detailJson: __t.string(),
+});
+export type ActionEvent = __Infer<typeof ActionEvent>;
+
+export const AgentEvent = __t.object("AgentEvent", {
+  agentEventId: __t.string(),
+  runId: __t.string(),
+  workflowId: __t.option(__t.string()),
+  incidentId: __t.option(__t.string()),
+  stage: __t.string(),
+  summary: __t.string(),
+  evidenceIdsJson: __t.string(),
+  toolCallsJson: __t.string(),
+  actor: __t.string(),
+  simTimeMs: __t.u32(),
+  observedUnixMs: __t.f64(),
+});
+export type AgentEvent = __Infer<typeof AgentEvent>;
+
+export const Checkpoint = __t.object("Checkpoint", {
+  checkpointId: __t.string(),
+  runId: __t.string(),
+  jobId: __t.string(),
+  storageResourceId: __t.string(),
+  status: __t.string(),
+  progressWorkUnits: __t.f64(),
+  commandKey: __t.string(),
+  requestedSimTimeMs: __t.u32(),
+  completeSimTimeMs: __t.option(__t.u32()),
+  accessible: __t.bool(),
+});
+export type Checkpoint = __Infer<typeof Checkpoint>;
+
+export const CoolingCurrent = __t.object("CoolingCurrent", {
+  resourceId: __t.string(),
+  runId: __t.string(),
+  operatingState: __t.string(),
+  nominalCapacityW: __t.f64(),
+  pumpPowerW: __t.f64(),
+  observedCapacityEstimateW: __t.option(__t.f64()),
+  version: __t.u32(),
+});
+export type CoolingCurrent = __Infer<typeof CoolingCurrent>;
+
+export const DependencyEdge = __t.object("DependencyEdge", {
+  edgeId: __t.string(),
+  runId: __t.string(),
+  consumerId: __t.string(),
+  providerId: __t.string(),
+  relation: __t.string(),
+  weight: __t.f64(),
+});
+export type DependencyEdge = __Infer<typeof DependencyEdge>;
+
+export const EvaluationResult = __t.object("EvaluationResult", {
+  resultId: __t.string(),
+  runId: __t.string(),
+  scenarioId: __t.string(),
+  policy: __t.string(),
+  seed: __t.u32(),
+  metricsJson: __t.string(),
+  policyVersion: __t.string(),
+  physicsProfileVersion: __t.string(),
+});
+export type EvaluationResult = __Infer<typeof EvaluationResult>;
+
+export const FaultInjectionTruth = __t.object("FaultInjectionTruth", {
+  faultId: __t.string(),
+  runId: __t.string(),
+  targetResourceId: __t.string(),
+  kind: __t.string(),
+  startSimTimeMs: __t.u32(),
+  faultJson: __t.string(),
+  active: __t.bool(),
+});
+export type FaultInjectionTruth = __Infer<typeof FaultInjectionTruth>;
+
+export const GpuCurrent = __t.object("GpuCurrent", {
+  resourceId: __t.string(),
+  runId: __t.string(),
+  nodeId: __t.string(),
+  availability: __t.string(),
+  tempC: __t.f64(),
+  smClockMhz: __t.f64(),
+  powerW: __t.f64(),
+  powerLimitW: __t.f64(),
+  clocksEventReasons: __t.u32(),
+  lastXidCode: __t.option(__t.u32()),
+  lastSeenSimMs: __t.u32(),
+  version: __t.u32(),
+});
+export type GpuCurrent = __Infer<typeof GpuCurrent>;
+
+export const Incident = __t.object("Incident", {
+  incidentId: __t.string(),
+  runId: __t.string(),
+  state: __t.string(),
+  severity: __t.string(),
+  title: __t.string(),
+  hypothesis: __t.option(__t.string()),
+  confidence: __t.f64(),
+  openedSimTimeMs: __t.u32(),
+  updatedSimTimeMs: __t.u32(),
+  version: __t.u32(),
+});
+export type Incident = __Infer<typeof Incident>;
+
+export const IncidentResource = __t.object("IncidentResource", {
+  linkId: __t.string(),
+  runId: __t.string(),
+  incidentId: __t.string(),
+  resourceId: __t.string(),
+  reason: __t.string(),
+});
+export type IncidentResource = __Infer<typeof IncidentResource>;
+
+export const IncidentSymptom = __t.object("IncidentSymptom", {
+  linkId: __t.string(),
+  runId: __t.string(),
+  incidentId: __t.string(),
+  symptomId: __t.string(),
+  reason: __t.string(),
+});
+export type IncidentSymptom = __Infer<typeof IncidentSymptom>;
+
+export const JobCurrent = __t.object("JobCurrent", {
+  jobId: __t.string(),
+  runId: __t.string(),
+  status: __t.string(),
+  progressWorkUnits: __t.f64(),
+  durableWorkUnits: __t.f64(),
+  latestCheckpointId: __t.option(__t.string()),
+  lastUpdateSimTimeMs: __t.u32(),
+  version: __t.u32(),
+});
+export type JobCurrent = __Infer<typeof JobCurrent>;
+
+export const JobGpuAllocation = __t.object("JobGpuAllocation", {
+  allocationId: __t.string(),
+  runId: __t.string(),
+  jobId: __t.string(),
+  gpuId: __t.string(),
+  sinceSimTimeMs: __t.u32(),
+});
+export type JobGpuAllocation = __Infer<typeof JobGpuAllocation>;
+
+export const JobSpec = __t.object("JobSpec", {
+  jobId: __t.string(),
+  runId: __t.string(),
+  gpusRequired: __t.u32(),
+  placementPolicy: __t.string(),
+  compatibleNodeIdsJson: __t.string(),
+  gpuProfile: __t.string(),
+  priority: __t.i32(),
+  preemptible: __t.bool(),
+  checkpointSupported: __t.bool(),
+  checkpointStorageId: __t.option(__t.string()),
+  checkpointDurationMs: __t.u32(),
+  restartDurationMs: __t.u32(),
+  checkpointIntervalMs: __t.u32(),
+  totalWorkUnits: __t.f64(),
+  workRatePerGpuPerSimS: __t.f64(),
+});
+export type JobSpec = __Infer<typeof JobSpec>;
+
+export const NodeCurrent = __t.object("NodeCurrent", {
+  resourceId: __t.string(),
+  runId: __t.string(),
+  rackId: __t.string(),
+  availability: __t.string(),
+  powerHeadroomW: __t.f64(),
+  thermalHeadroomC: __t.f64(),
+  version: __t.u32(),
+});
+export type NodeCurrent = __Infer<typeof NodeCurrent>;
+
+export const Plan = __t.object("Plan", {
+  planId: __t.string(),
+  runId: __t.string(),
+  workflowId: __t.string(),
+  basedOnDecisionEpoch: __t.u32(),
+  incidentIdsJson: __t.string(),
+  commandKeysJson: __t.string(),
+  assumptionsJson: __t.string(),
+  expectedMetricsJson: __t.string(),
+  status: __t.string(),
+  explanation: __t.string(),
+});
+export type Plan = __Infer<typeof Plan>;
+
+export const Resource = __t.object("Resource", {
+  resourceId: __t.string(),
+  runId: __t.string(),
+  kind: __t.string(),
+  parentId: __t.option(__t.string()),
+  failureDomainId: __t.string(),
+  profile: __t.string(),
+  configJson: __t.string(),
+  currentStatus: __t.string(),
+  version: __t.u32(),
+  enabled: __t.bool(),
+});
+export type Resource = __Infer<typeof Resource>;
+
+export const ResourceLease = __t.object("ResourceLease", {
+  resourceId: __t.string(),
+  runId: __t.string(),
+  actionId: __t.string(),
+  workflowId: __t.string(),
+  expiresAtUnixMs: __t.f64(),
+  fencingToken: __t.u64(),
+});
+export type ResourceLease = __Infer<typeof ResourceLease>;
+
+export const RoleGrant = __t.object("RoleGrant", {
+  identity: __t.identity(),
+  role: __t.string(),
+  grantedBy: __t.identity(),
+});
+export type RoleGrant = __Infer<typeof RoleGrant>;
+
 export const Run = __t.object("Run", {
   runId: __t.string(),
   seed: __t.u32(),
@@ -24,4 +290,93 @@ export const Run = __t.object("Run", {
   profileVersion: __t.string(),
 });
 export type Run = __Infer<typeof Run>;
+
+export const SignalEvent = __t.object("SignalEvent", {
+  eventId: __t.string(),
+  runId: __t.string(),
+  resourceId: __t.string(),
+  eventType: __t.string(),
+  xidCode: __t.option(__t.u32()),
+  severity: __t.string(),
+  sourceKind: __t.string(),
+  sourceId: __t.string(),
+  sourceSeq: __t.f64(),
+  simTimeMs: __t.u32(),
+  observedUnixMs: __t.f64(),
+  message: __t.string(),
+  evidenceJson: __t.string(),
+});
+export type SignalEvent = __Infer<typeof SignalEvent>;
+
+export const Symptom = __t.object("Symptom", {
+  symptomId: __t.string(),
+  runId: __t.string(),
+  resourceId: __t.string(),
+  firstSeenSimMs: __t.u32(),
+  lastSeenSimMs: __t.u32(),
+  kind: __t.string(),
+  severity: __t.string(),
+  evidenceEventIdsJson: __t.string(),
+  status: __t.string(),
+});
+export type Symptom = __Infer<typeof Symptom>;
+
+export const TelemetryRecent = __t.object("TelemetryRecent", {
+  eventId: __t.string(),
+  runId: __t.string(),
+  resourceId: __t.string(),
+  sourceKind: __t.string(),
+  sourceId: __t.string(),
+  sourceSeq: __t.f64(),
+  metric: __t.string(),
+  value: __t.f64(),
+  unit: __t.string(),
+  quality: __t.string(),
+  simTimeMs: __t.u32(),
+  observedUnixMs: __t.f64(),
+  labelsJson: __t.string(),
+});
+export type TelemetryRecent = __Infer<typeof TelemetryRecent>;
+
+export const TickSchedule = __t.object("TickSchedule", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  runId: __t.string(),
+});
+export type TickSchedule = __Infer<typeof TickSchedule>;
+
+export const Workflow = __t.object("Workflow", {
+  workflowId: __t.string(),
+  runId: __t.string(),
+  stage: __t.string(),
+  stateJson: __t.string(),
+  planId: __t.option(__t.string()),
+  currentCommandKey: __t.option(__t.string()),
+  lastProcessedEventSeq: __t.f64(),
+  attempt: __t.u32(),
+  leaseOwner: __t.option(__t.string()),
+  leaseExpiresUnixMs: __t.f64(),
+  fencingToken: __t.u64(),
+  updatedAtUnixMs: __t.f64(),
+  version: __t.u32(),
+});
+export type Workflow = __Infer<typeof Workflow>;
+
+export const WorkflowIncident = __t.object("WorkflowIncident", {
+  linkId: __t.string(),
+  runId: __t.string(),
+  workflowId: __t.string(),
+  incidentId: __t.string(),
+});
+export type WorkflowIncident = __Infer<typeof WorkflowIncident>;
+
+export const WorldState = __t.object("WorldState", {
+  runId: __t.string(),
+  presetId: __t.string(),
+  seed: __t.u32(),
+  worldJson: __t.string(),
+  version: __t.u32(),
+  configJson: __t.string(),
+});
+export type WorldState = __Infer<typeof WorldState>;
 

@@ -34,17 +34,320 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import ConfigureRunReducer from "./configure_run_reducer";
+import CreateRunReducer from "./create_run_reducer";
+import GrantRoleReducer from "./grant_role_reducer";
+import PauseRunReducer from "./pause_run_reducer";
 import PingReducer from "./ping_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import ActionRow from "./action_table";
+import ActionDependencyRow from "./action_dependency_table";
+import ActionEventRow from "./action_event_table";
+import AgentEventRow from "./agent_event_table";
+import CheckpointRow from "./checkpoint_table";
+import CoolingCurrentRow from "./cooling_current_table";
+import DependencyEdgeRow from "./dependency_edge_table";
+import EvaluationResultRow from "./evaluation_result_table";
+import GpuCurrentRow from "./gpu_current_table";
+import IncidentRow from "./incident_table";
+import IncidentResourceRow from "./incident_resource_table";
+import IncidentSymptomRow from "./incident_symptom_table";
+import JobCurrentRow from "./job_current_table";
+import JobGpuAllocationRow from "./job_gpu_allocation_table";
+import JobSpecRow from "./job_spec_table";
+import NodeCurrentRow from "./node_current_table";
+import PlanRow from "./plan_table";
+import ResourceRow from "./resource_table";
+import ResourceLeaseRow from "./resource_lease_table";
 import RunRow from "./run_table";
+import SignalEventRow from "./signal_event_table";
+import SymptomRow from "./symptom_table";
+import TelemetryRecentRow from "./telemetry_recent_table";
+import WorkflowRow from "./workflow_table";
+import WorkflowIncidentRow from "./workflow_incident_table";
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  action: __table({
+    name: 'action',
+    indexes: [
+      { accessor: 'action_id', name: 'action_action_id_idx_btree', algorithm: 'btree', columns: [
+        'actionId',
+      ] },
+      { accessor: 'command_key', name: 'action_command_key_idx_btree', algorithm: 'btree', columns: [
+        'commandKey',
+      ] },
+      { accessor: 'by_run_status', name: 'action_run_id_status_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+        'status',
+      ] },
+      { accessor: 'by_workflow_status', name: 'action_workflow_id_status_idx_btree', algorithm: 'btree', columns: [
+        'workflowId',
+        'status',
+      ] },
+    ],
+    constraints: [
+      { name: 'action_action_id_key', constraint: 'unique', columns: ['actionId'] },
+      { name: 'action_command_key_key', constraint: 'unique', columns: ['commandKey'] },
+    ],
+  }, ActionRow),
+  actionDependency: __table({
+    name: 'action_dependency',
+    indexes: [
+      { accessor: 'action_id', name: 'action_dependency_action_id_idx_btree', algorithm: 'btree', columns: [
+        'actionId',
+      ] },
+      { accessor: 'dep_id', name: 'action_dependency_dep_id_idx_btree', algorithm: 'btree', columns: [
+        'depId',
+      ] },
+      { accessor: 'depends_on_action_id', name: 'action_dependency_depends_on_action_id_idx_btree', algorithm: 'btree', columns: [
+        'dependsOnActionId',
+      ] },
+    ],
+    constraints: [
+      { name: 'action_dependency_dep_id_key', constraint: 'unique', columns: ['depId'] },
+    ],
+  }, ActionDependencyRow),
+  actionEvent: __table({
+    name: 'action_event',
+    indexes: [
+      { accessor: 'action_event_id', name: 'action_event_action_event_id_idx_btree', algorithm: 'btree', columns: [
+        'actionEventId',
+      ] },
+      { accessor: 'command_key', name: 'action_event_command_key_idx_btree', algorithm: 'btree', columns: [
+        'commandKey',
+      ] },
+    ],
+    constraints: [
+      { name: 'action_event_action_event_id_key', constraint: 'unique', columns: ['actionEventId'] },
+    ],
+  }, ActionEventRow),
+  agentEvent: __table({
+    name: 'agent_event',
+    indexes: [
+      { accessor: 'agent_event_id', name: 'agent_event_agent_event_id_idx_btree', algorithm: 'btree', columns: [
+        'agentEventId',
+      ] },
+      { accessor: 'run_id', name: 'agent_event_run_id_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+    ],
+    constraints: [
+      { name: 'agent_event_agent_event_id_key', constraint: 'unique', columns: ['agentEventId'] },
+    ],
+  }, AgentEventRow),
+  checkpoint: __table({
+    name: 'checkpoint',
+    indexes: [
+      { accessor: 'checkpoint_id', name: 'checkpoint_checkpoint_id_idx_btree', algorithm: 'btree', columns: [
+        'checkpointId',
+      ] },
+      { accessor: 'job_id', name: 'checkpoint_job_id_idx_btree', algorithm: 'btree', columns: [
+        'jobId',
+      ] },
+    ],
+    constraints: [
+      { name: 'checkpoint_checkpoint_id_key', constraint: 'unique', columns: ['checkpointId'] },
+    ],
+  }, CheckpointRow),
+  coolingCurrent: __table({
+    name: 'cooling_current',
+    indexes: [
+      { accessor: 'resource_id', name: 'cooling_current_resource_id_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'cooling_current_resource_id_key', constraint: 'unique', columns: ['resourceId'] },
+    ],
+  }, CoolingCurrentRow),
+  dependencyEdge: __table({
+    name: 'dependency_edge',
+    indexes: [
+      { accessor: 'consumer_id', name: 'dependency_edge_consumer_id_idx_btree', algorithm: 'btree', columns: [
+        'consumerId',
+      ] },
+      { accessor: 'edge_id', name: 'dependency_edge_edge_id_idx_btree', algorithm: 'btree', columns: [
+        'edgeId',
+      ] },
+      { accessor: 'provider_id', name: 'dependency_edge_provider_id_idx_btree', algorithm: 'btree', columns: [
+        'providerId',
+      ] },
+    ],
+    constraints: [
+      { name: 'dependency_edge_edge_id_key', constraint: 'unique', columns: ['edgeId'] },
+    ],
+  }, DependencyEdgeRow),
+  evaluationResult: __table({
+    name: 'evaluation_result',
+    indexes: [
+      { accessor: 'result_id', name: 'evaluation_result_result_id_idx_btree', algorithm: 'btree', columns: [
+        'resultId',
+      ] },
+    ],
+    constraints: [
+      { name: 'evaluation_result_result_id_key', constraint: 'unique', columns: ['resultId'] },
+    ],
+  }, EvaluationResultRow),
+  gpuCurrent: __table({
+    name: 'gpu_current',
+    indexes: [
+      { accessor: 'resource_id', name: 'gpu_current_resource_id_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'gpu_current_resource_id_key', constraint: 'unique', columns: ['resourceId'] },
+    ],
+  }, GpuCurrentRow),
+  incident: __table({
+    name: 'incident',
+    indexes: [
+      { accessor: 'incident_id', name: 'incident_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+      { accessor: 'by_run_state', name: 'incident_run_id_state_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+        'state',
+      ] },
+    ],
+    constraints: [
+      { name: 'incident_incident_id_key', constraint: 'unique', columns: ['incidentId'] },
+    ],
+  }, IncidentRow),
+  incidentResource: __table({
+    name: 'incident_resource',
+    indexes: [
+      { accessor: 'incident_id', name: 'incident_resource_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+      { accessor: 'link_id', name: 'incident_resource_link_id_idx_btree', algorithm: 'btree', columns: [
+        'linkId',
+      ] },
+      { accessor: 'resource_id', name: 'incident_resource_resource_id_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'incident_resource_link_id_key', constraint: 'unique', columns: ['linkId'] },
+    ],
+  }, IncidentResourceRow),
+  incidentSymptom: __table({
+    name: 'incident_symptom',
+    indexes: [
+      { accessor: 'incident_id', name: 'incident_symptom_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+      { accessor: 'link_id', name: 'incident_symptom_link_id_idx_btree', algorithm: 'btree', columns: [
+        'linkId',
+      ] },
+      { accessor: 'symptom_id', name: 'incident_symptom_symptom_id_idx_btree', algorithm: 'btree', columns: [
+        'symptomId',
+      ] },
+    ],
+    constraints: [
+      { name: 'incident_symptom_link_id_key', constraint: 'unique', columns: ['linkId'] },
+    ],
+  }, IncidentSymptomRow),
+  jobCurrent: __table({
+    name: 'job_current',
+    indexes: [
+      { accessor: 'job_id', name: 'job_current_job_id_idx_btree', algorithm: 'btree', columns: [
+        'jobId',
+      ] },
+      { accessor: 'by_run_status', name: 'job_current_run_id_status_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+        'status',
+      ] },
+    ],
+    constraints: [
+      { name: 'job_current_job_id_key', constraint: 'unique', columns: ['jobId'] },
+    ],
+  }, JobCurrentRow),
+  jobGpuAllocation: __table({
+    name: 'job_gpu_allocation',
+    indexes: [
+      { accessor: 'allocation_id', name: 'job_gpu_allocation_allocation_id_idx_btree', algorithm: 'btree', columns: [
+        'allocationId',
+      ] },
+      { accessor: 'gpu_id', name: 'job_gpu_allocation_gpu_id_idx_btree', algorithm: 'btree', columns: [
+        'gpuId',
+      ] },
+      { accessor: 'job_id', name: 'job_gpu_allocation_job_id_idx_btree', algorithm: 'btree', columns: [
+        'jobId',
+      ] },
+    ],
+    constraints: [
+      { name: 'job_gpu_allocation_allocation_id_key', constraint: 'unique', columns: ['allocationId'] },
+    ],
+  }, JobGpuAllocationRow),
+  jobSpec: __table({
+    name: 'job_spec',
+    indexes: [
+      { accessor: 'job_id', name: 'job_spec_job_id_idx_btree', algorithm: 'btree', columns: [
+        'jobId',
+      ] },
+    ],
+    constraints: [
+      { name: 'job_spec_job_id_key', constraint: 'unique', columns: ['jobId'] },
+    ],
+  }, JobSpecRow),
+  nodeCurrent: __table({
+    name: 'node_current',
+    indexes: [
+      { accessor: 'resource_id', name: 'node_current_resource_id_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'node_current_resource_id_key', constraint: 'unique', columns: ['resourceId'] },
+    ],
+  }, NodeCurrentRow),
+  plan: __table({
+    name: 'plan',
+    indexes: [
+      { accessor: 'plan_id', name: 'plan_plan_id_idx_btree', algorithm: 'btree', columns: [
+        'planId',
+      ] },
+      { accessor: 'workflow_id', name: 'plan_workflow_id_idx_btree', algorithm: 'btree', columns: [
+        'workflowId',
+      ] },
+    ],
+    constraints: [
+      { name: 'plan_plan_id_key', constraint: 'unique', columns: ['planId'] },
+    ],
+  }, PlanRow),
+  resource: __table({
+    name: 'resource',
+    indexes: [
+      { accessor: 'resource_id', name: 'resource_resource_id_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+      ] },
+      { accessor: 'by_run_kind', name: 'resource_run_id_kind_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+        'kind',
+      ] },
+    ],
+    constraints: [
+      { name: 'resource_resource_id_key', constraint: 'unique', columns: ['resourceId'] },
+    ],
+  }, ResourceRow),
+  resourceLease: __table({
+    name: 'resource_lease',
+    indexes: [
+      { accessor: 'resource_id', name: 'resource_lease_resource_id_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'resource_lease_resource_id_key', constraint: 'unique', columns: ['resourceId'] },
+    ],
+  }, ResourceLeaseRow),
   run: __table({
     name: 'run',
     indexes: [
@@ -56,10 +359,90 @@ const tablesSchema = __schema({
       { name: 'run_run_id_key', constraint: 'unique', columns: ['runId'] },
     ],
   }, RunRow),
+  signalEvent: __table({
+    name: 'signal_event',
+    indexes: [
+      { accessor: 'event_id', name: 'signal_event_event_id_idx_btree', algorithm: 'btree', columns: [
+        'eventId',
+      ] },
+      { accessor: 'by_resource_time', name: 'signal_event_resource_id_sim_time_ms_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+        'simTimeMs',
+      ] },
+    ],
+    constraints: [
+      { name: 'signal_event_event_id_key', constraint: 'unique', columns: ['eventId'] },
+    ],
+  }, SignalEventRow),
+  symptom: __table({
+    name: 'symptom',
+    indexes: [
+      { accessor: 'run_id', name: 'symptom_run_id_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+      { accessor: 'symptom_id', name: 'symptom_symptom_id_idx_btree', algorithm: 'btree', columns: [
+        'symptomId',
+      ] },
+    ],
+    constraints: [
+      { name: 'symptom_symptom_id_key', constraint: 'unique', columns: ['symptomId'] },
+    ],
+  }, SymptomRow),
+  telemetryRecent: __table({
+    name: 'telemetry_recent',
+    indexes: [
+      { accessor: 'event_id', name: 'telemetry_recent_event_id_idx_btree', algorithm: 'btree', columns: [
+        'eventId',
+      ] },
+      { accessor: 'by_resource_time', name: 'telemetry_recent_resource_id_sim_time_ms_idx_btree', algorithm: 'btree', columns: [
+        'resourceId',
+        'simTimeMs',
+      ] },
+    ],
+    constraints: [
+      { name: 'telemetry_recent_event_id_key', constraint: 'unique', columns: ['eventId'] },
+    ],
+  }, TelemetryRecentRow),
+  workflow: __table({
+    name: 'workflow',
+    indexes: [
+      { accessor: 'by_run_stage', name: 'workflow_run_id_stage_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+        'stage',
+      ] },
+      { accessor: 'workflow_id', name: 'workflow_workflow_id_idx_btree', algorithm: 'btree', columns: [
+        'workflowId',
+      ] },
+    ],
+    constraints: [
+      { name: 'workflow_workflow_id_key', constraint: 'unique', columns: ['workflowId'] },
+    ],
+  }, WorkflowRow),
+  workflowIncident: __table({
+    name: 'workflow_incident',
+    indexes: [
+      { accessor: 'incident_id', name: 'workflow_incident_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+      { accessor: 'link_id', name: 'workflow_incident_link_id_idx_btree', algorithm: 'btree', columns: [
+        'linkId',
+      ] },
+      { accessor: 'workflow_id', name: 'workflow_incident_workflow_id_idx_btree', algorithm: 'btree', columns: [
+        'workflowId',
+      ] },
+    ],
+    constraints: [
+      { name: 'workflow_incident_link_id_key', constraint: 'unique', columns: ['linkId'] },
+    ],
+  }, WorkflowIncidentRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("configure_run", ConfigureRunReducer),
+  __reducerSchema("create_run", CreateRunReducer),
+  __reducerSchema("grant_role", GrantRoleReducer),
+  __reducerSchema("pause_run", PauseRunReducer),
   __reducerSchema("ping", PingReducer),
 );
 
@@ -67,22 +450,174 @@ const reducersSchema = __reducers(
 const proceduresSchema = __procedures(
 );
 
+type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "tables"> & {
+  tables: typeof tablesSchema.schemaType.tables & {
+    /** @deprecated Use `actionDependency` instead. This alias will be removed in the next major version. */
+    readonly "action_dependency": Omit<typeof tablesSchema.schemaType.tables["actionDependency"], "accessorName"> & { readonly accessorName: "action_dependency" };
+    /** @deprecated Use `actionEvent` instead. This alias will be removed in the next major version. */
+    readonly "action_event": Omit<typeof tablesSchema.schemaType.tables["actionEvent"], "accessorName"> & { readonly accessorName: "action_event" };
+    /** @deprecated Use `agentEvent` instead. This alias will be removed in the next major version. */
+    readonly "agent_event": Omit<typeof tablesSchema.schemaType.tables["agentEvent"], "accessorName"> & { readonly accessorName: "agent_event" };
+    /** @deprecated Use `coolingCurrent` instead. This alias will be removed in the next major version. */
+    readonly "cooling_current": Omit<typeof tablesSchema.schemaType.tables["coolingCurrent"], "accessorName"> & { readonly accessorName: "cooling_current" };
+    /** @deprecated Use `dependencyEdge` instead. This alias will be removed in the next major version. */
+    readonly "dependency_edge": Omit<typeof tablesSchema.schemaType.tables["dependencyEdge"], "accessorName"> & { readonly accessorName: "dependency_edge" };
+    /** @deprecated Use `evaluationResult` instead. This alias will be removed in the next major version. */
+    readonly "evaluation_result": Omit<typeof tablesSchema.schemaType.tables["evaluationResult"], "accessorName"> & { readonly accessorName: "evaluation_result" };
+    /** @deprecated Use `gpuCurrent` instead. This alias will be removed in the next major version. */
+    readonly "gpu_current": Omit<typeof tablesSchema.schemaType.tables["gpuCurrent"], "accessorName"> & { readonly accessorName: "gpu_current" };
+    /** @deprecated Use `incidentResource` instead. This alias will be removed in the next major version. */
+    readonly "incident_resource": Omit<typeof tablesSchema.schemaType.tables["incidentResource"], "accessorName"> & { readonly accessorName: "incident_resource" };
+    /** @deprecated Use `incidentSymptom` instead. This alias will be removed in the next major version. */
+    readonly "incident_symptom": Omit<typeof tablesSchema.schemaType.tables["incidentSymptom"], "accessorName"> & { readonly accessorName: "incident_symptom" };
+    /** @deprecated Use `jobCurrent` instead. This alias will be removed in the next major version. */
+    readonly "job_current": Omit<typeof tablesSchema.schemaType.tables["jobCurrent"], "accessorName"> & { readonly accessorName: "job_current" };
+    /** @deprecated Use `jobGpuAllocation` instead. This alias will be removed in the next major version. */
+    readonly "job_gpu_allocation": Omit<typeof tablesSchema.schemaType.tables["jobGpuAllocation"], "accessorName"> & { readonly accessorName: "job_gpu_allocation" };
+    /** @deprecated Use `jobSpec` instead. This alias will be removed in the next major version. */
+    readonly "job_spec": Omit<typeof tablesSchema.schemaType.tables["jobSpec"], "accessorName"> & { readonly accessorName: "job_spec" };
+    /** @deprecated Use `nodeCurrent` instead. This alias will be removed in the next major version. */
+    readonly "node_current": Omit<typeof tablesSchema.schemaType.tables["nodeCurrent"], "accessorName"> & { readonly accessorName: "node_current" };
+    /** @deprecated Use `resourceLease` instead. This alias will be removed in the next major version. */
+    readonly "resource_lease": Omit<typeof tablesSchema.schemaType.tables["resourceLease"], "accessorName"> & { readonly accessorName: "resource_lease" };
+    /** @deprecated Use `signalEvent` instead. This alias will be removed in the next major version. */
+    readonly "signal_event": Omit<typeof tablesSchema.schemaType.tables["signalEvent"], "accessorName"> & { readonly accessorName: "signal_event" };
+    /** @deprecated Use `telemetryRecent` instead. This alias will be removed in the next major version. */
+    readonly "telemetry_recent": Omit<typeof tablesSchema.schemaType.tables["telemetryRecent"], "accessorName"> & { readonly accessorName: "telemetry_recent" };
+    /** @deprecated Use `workflowIncident` instead. This alias will be removed in the next major version. */
+    readonly "workflow_incident": Omit<typeof tablesSchema.schemaType.tables["workflowIncident"], "accessorName"> & { readonly accessorName: "workflow_incident" };
+  };
+};
+
 /** The remote SpacetimeDB module schema, both runtime and type information. */
 const REMOTE_MODULE = {
   versionInfo: {
     cliVersion: "2.14.1" as const,
   },
-  tables: tablesSchema.schemaType.tables,
+  tables: tablesSchema.schemaType.tables as __SchemaWithTableAccessorAliases["tables"],
   reducers: reducersSchema.reducersType.reducers,
   ...proceduresSchema,
 } satisfies __RemoteModule<
-  typeof tablesSchema.schemaType,
+  __SchemaWithTableAccessorAliases,
   typeof reducersSchema.reducersType,
   typeof proceduresSchema
 >;
 
+const tableAccessorAliases = {
+  "action_dependency": "actionDependency",
+  "action_event": "actionEvent",
+  "agent_event": "agentEvent",
+  "cooling_current": "coolingCurrent",
+  "dependency_edge": "dependencyEdge",
+  "evaluation_result": "evaluationResult",
+  "gpu_current": "gpuCurrent",
+  "incident_resource": "incidentResource",
+  "incident_symptom": "incidentSymptom",
+  "job_current": "jobCurrent",
+  "job_gpu_allocation": "jobGpuAllocation",
+  "job_spec": "jobSpec",
+  "node_current": "nodeCurrent",
+  "resource_lease": "resourceLease",
+  "signal_event": "signalEvent",
+  "telemetry_recent": "telemetryRecent",
+  "workflow_incident": "workflowIncident",
+} as const;
+
+function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
+  const out = Object.create(Object.getPrototypeOf(target)) as T & Record<string, unknown>;
+  Object.defineProperties(out, Object.getOwnPropertyDescriptors(target));
+  for (const [deprecatedAccessor, targetAccessor] of Object.entries(tableAccessorAliases)) {
+    if (deprecatedAccessor in out) {
+      continue;
+    }
+    Object.defineProperty(out, deprecatedAccessor, {
+      enumerable: true,
+      configurable: false,
+      get: () => out[targetAccessor],
+    });
+  }
+  return freeze ? Object.freeze(out) : out;
+}
+
+type __DbViewBase = __DbConnectionImpl<typeof REMOTE_MODULE>["db"];
+export type DbView = __DbViewBase & {
+  /** @deprecated Use `actionDependency` instead. This alias will be removed in the next major version. */
+  readonly "action_dependency": __DbViewBase["actionDependency"];
+  /** @deprecated Use `actionEvent` instead. This alias will be removed in the next major version. */
+  readonly "action_event": __DbViewBase["actionEvent"];
+  /** @deprecated Use `agentEvent` instead. This alias will be removed in the next major version. */
+  readonly "agent_event": __DbViewBase["agentEvent"];
+  /** @deprecated Use `coolingCurrent` instead. This alias will be removed in the next major version. */
+  readonly "cooling_current": __DbViewBase["coolingCurrent"];
+  /** @deprecated Use `dependencyEdge` instead. This alias will be removed in the next major version. */
+  readonly "dependency_edge": __DbViewBase["dependencyEdge"];
+  /** @deprecated Use `evaluationResult` instead. This alias will be removed in the next major version. */
+  readonly "evaluation_result": __DbViewBase["evaluationResult"];
+  /** @deprecated Use `gpuCurrent` instead. This alias will be removed in the next major version. */
+  readonly "gpu_current": __DbViewBase["gpuCurrent"];
+  /** @deprecated Use `incidentResource` instead. This alias will be removed in the next major version. */
+  readonly "incident_resource": __DbViewBase["incidentResource"];
+  /** @deprecated Use `incidentSymptom` instead. This alias will be removed in the next major version. */
+  readonly "incident_symptom": __DbViewBase["incidentSymptom"];
+  /** @deprecated Use `jobCurrent` instead. This alias will be removed in the next major version. */
+  readonly "job_current": __DbViewBase["jobCurrent"];
+  /** @deprecated Use `jobGpuAllocation` instead. This alias will be removed in the next major version. */
+  readonly "job_gpu_allocation": __DbViewBase["jobGpuAllocation"];
+  /** @deprecated Use `jobSpec` instead. This alias will be removed in the next major version. */
+  readonly "job_spec": __DbViewBase["jobSpec"];
+  /** @deprecated Use `nodeCurrent` instead. This alias will be removed in the next major version. */
+  readonly "node_current": __DbViewBase["nodeCurrent"];
+  /** @deprecated Use `resourceLease` instead. This alias will be removed in the next major version. */
+  readonly "resource_lease": __DbViewBase["resourceLease"];
+  /** @deprecated Use `signalEvent` instead. This alias will be removed in the next major version. */
+  readonly "signal_event": __DbViewBase["signalEvent"];
+  /** @deprecated Use `telemetryRecent` instead. This alias will be removed in the next major version. */
+  readonly "telemetry_recent": __DbViewBase["telemetryRecent"];
+  /** @deprecated Use `workflowIncident` instead. This alias will be removed in the next major version. */
+  readonly "workflow_incident": __DbViewBase["workflowIncident"];
+};
+
+type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
+export type Tables = __TablesBase & {
+  /** @deprecated Use `actionDependency` instead. This alias will be removed in the next major version. */
+  readonly "action_dependency": __TablesBase["actionDependency"];
+  /** @deprecated Use `actionEvent` instead. This alias will be removed in the next major version. */
+  readonly "action_event": __TablesBase["actionEvent"];
+  /** @deprecated Use `agentEvent` instead. This alias will be removed in the next major version. */
+  readonly "agent_event": __TablesBase["agentEvent"];
+  /** @deprecated Use `coolingCurrent` instead. This alias will be removed in the next major version. */
+  readonly "cooling_current": __TablesBase["coolingCurrent"];
+  /** @deprecated Use `dependencyEdge` instead. This alias will be removed in the next major version. */
+  readonly "dependency_edge": __TablesBase["dependencyEdge"];
+  /** @deprecated Use `evaluationResult` instead. This alias will be removed in the next major version. */
+  readonly "evaluation_result": __TablesBase["evaluationResult"];
+  /** @deprecated Use `gpuCurrent` instead. This alias will be removed in the next major version. */
+  readonly "gpu_current": __TablesBase["gpuCurrent"];
+  /** @deprecated Use `incidentResource` instead. This alias will be removed in the next major version. */
+  readonly "incident_resource": __TablesBase["incidentResource"];
+  /** @deprecated Use `incidentSymptom` instead. This alias will be removed in the next major version. */
+  readonly "incident_symptom": __TablesBase["incidentSymptom"];
+  /** @deprecated Use `jobCurrent` instead. This alias will be removed in the next major version. */
+  readonly "job_current": __TablesBase["jobCurrent"];
+  /** @deprecated Use `jobGpuAllocation` instead. This alias will be removed in the next major version. */
+  readonly "job_gpu_allocation": __TablesBase["jobGpuAllocation"];
+  /** @deprecated Use `jobSpec` instead. This alias will be removed in the next major version. */
+  readonly "job_spec": __TablesBase["jobSpec"];
+  /** @deprecated Use `nodeCurrent` instead. This alias will be removed in the next major version. */
+  readonly "node_current": __TablesBase["nodeCurrent"];
+  /** @deprecated Use `resourceLease` instead. This alias will be removed in the next major version. */
+  readonly "resource_lease": __TablesBase["resourceLease"];
+  /** @deprecated Use `signalEvent` instead. This alias will be removed in the next major version. */
+  readonly "signal_event": __TablesBase["signalEvent"];
+  /** @deprecated Use `telemetryRecent` instead. This alias will be removed in the next major version. */
+  readonly "telemetry_recent": __TablesBase["telemetryRecent"];
+  /** @deprecated Use `workflowIncident` instead. This alias will be removed in the next major version. */
+  readonly "workflow_incident": __TablesBase["workflowIncident"];
+};
+
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */
-export const tables: __QueryBuilder<typeof tablesSchema.schemaType> = __makeQueryBuilder(tablesSchema.schemaType);
+const tablesBase: __TablesBase = __makeQueryBuilder(tablesSchema.schemaType);
+export const tables: Tables = __withTableAccessorAliases(tablesBase, true) as Tables;
 
 /** The reducers available in this remote SpacetimeDB module. */
 export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reducers);
@@ -91,13 +626,13 @@ export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reduc
 export const procedures = __convertToAccessorMap(proceduresSchema.procedures);
 
 /** The context type returned in callbacks for all possible events. */
-export type EventContext = __EventContextInterface<typeof REMOTE_MODULE>;
+export type EventContext = Omit<__EventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for reducer events. */
-export type ReducerEventContext = __ReducerEventContextInterface<typeof REMOTE_MODULE>;
+export type ReducerEventContext = Omit<__ReducerEventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for subscription events. */
-export type SubscriptionEventContext = __SubscriptionEventContextInterface<typeof REMOTE_MODULE>;
+export type SubscriptionEventContext = Omit<__SubscriptionEventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for error events. */
-export type ErrorContext = __ErrorContextInterface<typeof REMOTE_MODULE>;
+export type ErrorContext = Omit<__ErrorContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The subscription handle type to manage active subscriptions created from a {@link SubscriptionBuilder}. */
 export type SubscriptionHandle = __SubscriptionHandleImpl<typeof REMOTE_MODULE>;
 
@@ -109,6 +644,13 @@ export class DbConnectionBuilder extends __DbConnectionBuilder<DbConnection> {}
 
 /** The typed database connection to manage connections to the remote SpacetimeDB instance. This class has type information specific to the generated module. */
 export class DbConnection extends __DbConnectionImpl<typeof REMOTE_MODULE> {
+  declare db: DbView;
+
+  constructor(config: __DbConnectionConfig<typeof REMOTE_MODULE>) {
+    super(config);
+    this.db = __withTableAccessorAliases(this.db) as DbView;
+  }
+
   /** Creates a new {@link DbConnectionBuilder} to configure and connect to the remote SpacetimeDB instance. */
   static builder = (): DbConnectionBuilder => {
     return new DbConnectionBuilder(REMOTE_MODULE, (config: __DbConnectionConfig<typeof REMOTE_MODULE>) => new DbConnection(config));

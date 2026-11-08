@@ -1,30 +1,21 @@
-// DataCenterOS SpacetimeDB module (lane P2). Tables and reducers grow in P2-3..P2-9;
-// see apps/db/checkpoints/. Column names are snake_case to match @dcos/contracts.
-import { schema, table, t } from 'spacetimedb/server';
+// DataCenterOS SpacetimeDB module (lane P2). Entry point: re-exports the schema (default export)
+// and every reducer. Tables live in schema.ts; see apps/db/checkpoints/ for what each file owns.
+import { validatePayload } from '@dcos/contracts';
 import { makeRng } from '@dcos/physics';
+import spacetimedb from './schema';
 
-const run = table(
-  { name: 'run', public: true },
-  {
-    run_id: t.string().primaryKey(),
-    seed: t.u32(),
-    status: t.string(),
-    sim_time_ms: t.u32(),
-    tick_index: t.u32(),
-    step_ms: t.u32(),
-    wall_tick_ms: t.u32(),
-    decision_epoch: t.u32(),
-    paused: t.bool(),
-    speed: t.u8(),
-    profile_version: t.string(),
-  }
-);
-
-const spacetimedb = schema({ run });
 export default spacetimedb;
+export { init, grant_role } from './auth';
+export { create_run, pause_run, configure_run } from './run';
+export { advance_tick } from './tick';
 
-// Gate 0 smoke test: proves the module runs and that @dcos/physics bundles into it.
+// Smoke test: proves the module runs, @dcos/physics bundles, and @dcos/contracts' validator
+// (ajv) works inside the SpacetimeDB runtime.
 export const ping = spacetimedb.reducer((_ctx) => {
   const rng = makeRng(42);
-  console.info(`pong: physics rng sample ${rng()}`);
+  const ok = validatePayload('RunClock', {
+    sim_time_ms: 0, tick_index: 0, step_ms: 1000, wall_tick_ms: 1000, paused: false, decision_epoch: 0,
+  });
+  const bad = validatePayload('RunClock', { sim_time_ms: -1 });
+  console.info(`pong: physics rng ${rng()}; validatePayload ok=${ok.ok} bad=${bad.ok}`);
 });
