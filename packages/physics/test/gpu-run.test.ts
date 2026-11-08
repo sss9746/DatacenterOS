@@ -144,9 +144,9 @@ describe('runScenario: checkpoint + move test policy', () => {
   it('runs each command_key once although the policy re-issues it every tick (idempotency)', async () => {
     const d = await runScenarioDetailed(sc('sc03-severe-pump'), ckptMove, { policy_name: 'threshold' });
     expect(d.duplicate_commands_ignored).toBeGreaterThan(100);
-    expect(d.commands.map((c) => [c.command_key, c.disposition, c.outcome?.ok])).toEqual([
-      ['ckm-ckpt-job-a', 'executed', true],
-      ['ckm-move-job-a', 'executed', true],
+    expect(d.commands.map((c) => [c.command_key, c.disposition, c.outcome?.status])).toEqual([
+      ['ckm-ckpt-job-a', 'executed', 'succeeded'],
+      ['ckm-move-job-a', 'executed', 'succeeded'],
     ]);
     // the move was requested only after its checkpoint completed
     const [ck, mv] = d.commands;
@@ -210,7 +210,7 @@ describe('runScenario: the safety gate', () => {
 
   it('gate none: a move physics cannot start (r6 busy) is not executed, so not counted', async () => {
     const d = await runScenarioDetailed(sc('sc03-severe-pump'), unsafeR6, { policy_name: 'nemotron', gate: 'none' });
-    expect(d.commands[0]).toMatchObject({ disposition: 'physics_rejected', outcome: { ok: false, reason_code: 'DEST_GPU_BUSY' } });
+    expect(d.commands[0]).toMatchObject({ disposition: 'physics_rejected', outcome: { status: 'failed', reason_code: 'DEST_GPU_BUSY' } });
     expect(d.result.unsafe_actions_executed).toBe(0);
   });
 

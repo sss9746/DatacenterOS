@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { validatePayload, type ActionCommand, type GpuCurrent, type ObservedSnapshot, type PhysicsWorld } from '@dcos/contracts';
 import {
   THRESHOLD_TEMP_C,
+  argumentProblems,
   enqueueCommands,
   evaluateSafety,
   loadScenarios,
@@ -36,6 +37,10 @@ const nodeOf = (gpuId: string) => gpuId.replace(/^gpu-(r\d+-n1)-\d+$/, 'node-$1'
 function expectValid(cmds: ActionCommand[]): void {
   for (const c of cmds) {
     expect(validatePayload('ActionCommand', c), c.command_key).toEqual({ ok: true });
+    // §0.11 #1 arguments by operation (migrate_restart always uses destination_gpu_ids; escalate carries a reason)
+    expect(argumentProblems(c), c.command_key).toEqual([]);
+    if (c.operation === 'migrate_restart') expect(Object.keys(c.arguments)).toEqual(['destination_gpu_ids']);
+    if (c.operation === 'escalate') expect(typeof c.arguments.reason).toBe('string');
     expect(c.action_id).toBe(c.command_key);
   }
   expect(new Set(keys(cmds)).size).toBe(cmds.length); // unique within one call
@@ -226,7 +231,10 @@ describe('reactivePolicy', () => {
       operation: 'migrate_restart', target_resource_id: 'job-a', job_id: 'job-a', incident_ids: ['inc.reactive.gpu-r3-n1-5'],
       workflow_id: 'wf.reactive.gpu-r3-n1-5', plan_id: 'plan.reactive.gpu-r3-n1-5',
     });
-    expect(restart.arguments.from_checkpoint_id).toBe('ckpt-job-a-1');
+    // §0.11 #1: exactly the contract arguments (the restart reads the job's latest checkpoint, ckpt-job-a-1)
+    expect(restart.arguments).toEqual({ destination_gpu_ids: dest(restart) });
+    expect(cordon.arguments).toEqual({});
+    expect(job(obs, 'job-a').latest_checkpoint_id).toBe('ckpt-job-a-1');
     const d = dest(restart);
     expect(d).toHaveLength(16);
     expect(new Set(d).size).toBe(16);

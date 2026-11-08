@@ -1,6 +1,6 @@
 // P1-5: actions inside step(): checkpoint, migrate_restart, power_cap, pause_job, cordon_gpu, keep_running, escalate.
 import { describe, expect, it } from 'vitest';
-import { validatePayload, type ActionCommand, type ObservedSnapshot, type PhysicsTickResult, type PhysicsWorld } from '@dcos/contracts';
+import { validatePayload, type ActionCommand, type ActionStatus, type ObservedSnapshot, type PhysicsTickResult, type PhysicsWorld } from '@dcos/contracts';
 import { commandOutcome, enqueueCommands, inFlightCommands, step } from '../src/index.js';
 import { T0, demoWorld, fault, gpusOn, runUntil, tickInput, type RunOpts } from './gpu-helpers.js';
 
@@ -60,7 +60,9 @@ describe('checkpoint', () => {
     expect(job(s, 'job-b').progress_work_units).toBe(40_640); // no training progress during the synchronous write
     expect(s.checkpoints.find((c) => c.checkpoint_id === 'ckpt-job-b-2')).toMatchObject({ status: 'complete', complete_sim_time_ms: T0 + 50_000, accessible: true });
     expect(job(world.observable, 'job-b').progress_work_units).toBe(40_640 + 8 * 2);
-    expect(commandOutcome(world, ck.command_key)).toEqual({ ok: true, reason_code: null, sim_time_ms: T0 + 50_000 });
+    // CONTRACTS §0.12 #4 shape: { status, reason_code? }
+    expect(commandOutcome(world, ck.command_key)).toEqual({ status: 'succeeded' });
+    expect(commandOutcome(at(results, 30_000).world_after, ck.command_key)).toEqual({ status: 'running' });
   });
 
   it('an XID mid-write fails the job and the checkpoint never becomes durable', () => {
@@ -205,7 +207,7 @@ describe('power_cap, pause_job, keep_running, escalate', () => {
   });
 
   it('escalate and keep_running on a running job complete next tick and change nothing physical', () => {
-    const esc = cmd('escalate', 'pump-a');
+    const esc = cmd('escalate', 'pump-a', { arguments: { reason: 'pump alarm' } });
     const keep = cmd('keep_running', 'job-a', { job_id: 'job-a' });
     const { results } = run(12_000, [[10_000, esc], [10_000, keep]]);
     expect(at(results, 10_000).completed_command_keys).toEqual([]);
@@ -256,11 +258,85 @@ describe('cordon_gpu', () => {
   });
 });
 
+describe('commandOutcome / inFlightCommands (CONTRACTS §0.12 #4 / #5, frozen)', () => {
+  it('commandOutcome is null before the start, running in flight, then succeeded / failed + reason_code', () => {
+    const ck = cmd('checkpoint', 'job-b', { job_id: 'job-b' });
+    const bad = cmd('pause_job', 'job-zzz', { job_id: 'job-zzz' });
+    const { results } = run(52_000, [[20_000, ck], [20_000, bad]]);
+    expect(commandOutcome(at(results, 19_000).world_after, ck.command_key)).toBeNull(); // enqueued, not requested yet
+    expect(commandOutcome(at(results, 19_000).world_after, 'ck-never-seen')).toBeNull();
+    expect(commandOutcome(at(results, 20_000).world_after, ck.command_key)).toEqual({ status: 'running' });
+    expect(commandOutcome(at(results, 49_000).world_after, ck.command_key)).toEqual({ status: 'running' });
+    expect(commandOutcome(at(results, 50_000).world_after, ck.command_key)).toEqual({ status: 'succeeded' });
+    expect(commandOutcome(at(results, 20_000).world_after, bad.command_key)).toEqual({ status: 'failed', reason_code: 'JOB_NOT_FOUND' });
+    // every status is an ActionStatus value
+    const statuses: ActionStatus['status'][] = ['running', 'succeeded', 'failed'];
+    for (const r of results) {
+      for (const k of [ck.command_key, bad.command_key]) {
+        const o = commandOutcome(r.world_after, k);
+        if (o) expect(statuses).toContain(o.status);
+        if (o && o.status !== 'failed') expect(o).not.toHaveProperty('reason_code');
+      }
+    }
+  });
+
+  it('inFlightCommands returns at least { command_key, due_sim_time_ms } per running command', () => {
+    const ck = cmd('checkpoint', 'job-a', { job_id: 'job-a' });
+    const mv = cmd('migrate_restart', 'job-b', { job_id: 'job-b', arguments: { destination_gpu_ids: gpusOn(7) } });
+    const cap = cmd('power_cap', 'job-c', { job_id: 'job-c', arguments: { power_limit_w: 500 } });
+    const { results } = run(21_000, [[20_000, ck], [20_000, mv], [20_000, cap]]);
+    const flights = inFlightCommands(at(results, 20_000).world_after);
+    for (const f of flights) {
+      expect(typeof f.command_key).toBe('string');
+      expect(Number.isInteger(f.due_sim_time_ms)).toBe(true);
+    }
+    const due = Object.fromEntries(flights.map((f) => [f.command_key, f.due_sim_time_ms]));
+    // §0.12 #5: checkpoint = start + 30 s, migrate_restart = start + 120 s, everything else = the next tick
+    expect(due).toEqual({ [ck.command_key]: T0 + 50_000, [mv.command_key]: T0 + 140_000, [cap.command_key]: T0 + 21_000 });
+    expect(inFlightCommands(at(results, 21_000).world_after).map((f) => f.command_key).sort()).toEqual([ck.command_key, mv.command_key].sort());
+  });
+});
+
+describe('§0.11 #1 arguments and the §0.12 #4 physics reason codes', () => {
+  it('INVALID_ARGUMENT: wrong names or types never start (same rule as evaluateSafety)', () => {
+    const bad = [
+      cmd('checkpoint', 'job-b', { job_id: 'job-b', arguments: { reason: 'x' } }),
+      cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { power_limit_w: 900 } }),
+      cmd('power_cap', 'job-b', { job_id: 'job-b', arguments: { limit_w: 500 } }),
+      cmd('migrate_restart', 'job-b', { job_id: 'job-b', arguments: {} }),
+      cmd('migrate_restart', 'job-b', { job_id: 'job-b', arguments: { destination_gpu_ids: gpusOn(7), destination_node_ids: ['node-r7-n1'] } }),
+      cmd('escalate', 'pump-a'),
+      cmd('cordon_gpu', 'gpu-r1-n1-0', { arguments: { xid_code: 79 } }),
+    ];
+    const { results } = run(21_000, bad.map((c) => [20_000, c] as [number, ActionCommand]));
+    const w = at(results, 20_000).world_after;
+    for (const c of bad) expect(commandOutcome(w, c.command_key), c.command_key).toEqual({ status: 'failed', reason_code: 'INVALID_ARGUMENT' });
+    expect(job(w.observable, 'job-b')).toMatchObject({ status: 'running', allocated_gpu_ids: gpusOn(4) });
+  });
+
+  it('JOB_NOT_FOUND, JOB_STATE_INVALID, TARGET_NOT_FOUND', () => {
+    const noJob = cmd('checkpoint', 'job-zzz', { job_id: 'job-zzz' });
+    const pauseTwice = cmd('pause_job', 'job-b', { job_id: 'job-b' });
+    const pause = cmd('pause_job', 'job-b', { job_id: 'job-b' });
+    const capDead = cmd('power_cap', 'job-a', { job_id: 'job-a', arguments: { power_limit_w: 500 } });
+    const capNothing = cmd('power_cap', 'rack-zz', { arguments: { power_limit_w: 500 } });
+    const { results } = run(31_000, [[10_000, pause], [20_000, noJob], [20_000, pauseTwice], [30_000, capDead], [30_000, capNothing]], {
+      faults: [fault('gpu_xid_79', 'gpu-r2-n1-0', T0 + 25_000)],
+    });
+    const w = results.at(-1)!.world_after;
+    expect(commandOutcome(w, pause.command_key)).toEqual({ status: 'succeeded' });
+    expect(commandOutcome(w, noJob.command_key)).toEqual({ status: 'failed', reason_code: 'JOB_NOT_FOUND' });
+    expect(commandOutcome(w, pauseTwice.command_key)).toEqual({ status: 'failed', reason_code: 'JOB_STATE_INVALID' });
+    expect(commandOutcome(w, capDead.command_key)).toEqual({ status: 'failed', reason_code: 'JOB_STATE_INVALID' }); // job-a failed: no GPUs
+    expect(commandOutcome(w, capNothing.command_key)).toEqual({ status: 'failed', reason_code: 'TARGET_NOT_FOUND' });
+  });
+});
+
 describe('command plumbing', () => {
   it('no command ever completes on the tick it starts', () => {
     const ops: ActionCommand[] = [
       cmd('power_cap', 'job-b', { job_id: 'job-b' }), cmd('pause_job', 'job-c', { job_id: 'job-c' }),
-      cmd('cordon_gpu', 'gpu-r1-n1-0'), cmd('escalate', 'pump-a'), cmd('keep_running', 'job-a', { job_id: 'job-a' }),
+      cmd('cordon_gpu', 'gpu-r1-n1-0'), cmd('escalate', 'pump-a', { arguments: { reason: 'pump alarm' } }), cmd('keep_running', 'job-a', { job_id: 'job-a' }),
     ];
     const { results } = run(12_000, ops.map((c) => [10_000, c] as [number, ActionCommand]));
     expect(at(results, 10_000).completed_command_keys).toEqual([]);
@@ -268,7 +344,7 @@ describe('command plumbing', () => {
   });
 
   it('is idempotent per command_key: re-enqueueing and re-requesting runs it once; unknown ids are ignored', () => {
-    const c = cmd('escalate', 'pump-a');
+    const c = cmd('escalate', 'pump-a', { arguments: { reason: 'pump alarm' } });
     let w = enqueueCommands(enqueueCommands(demoWorld(), [c]), [c]);
     const r1 = step(tickInput(w, [], [c.action_id, c.action_id, 'act-unknown']));
     w = enqueueCommands(r1.world_after, [c]);
@@ -279,7 +355,7 @@ describe('command plumbing', () => {
   });
 
   it('a queued command waits until its action id is requested', () => {
-    const c = cmd('escalate', 'pump-a');
+    const c = cmd('escalate', 'pump-a', { arguments: { reason: 'pump alarm' } });
     const { results } = run(15_000, [], {}, enqueueCommands(demoWorld(), [c]));
     expect(results.flatMap((r) => [...r.completed_command_keys, ...r.failed_command_keys])).toEqual([]);
   });

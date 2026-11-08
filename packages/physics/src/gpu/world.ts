@@ -3,6 +3,7 @@
 // Pure and deterministic. Only `import type` from @dcos/contracts.
 import type {
   ActionCommand,
+  ActionStatus,
   CoolingCurrent,
   FaultInjection,
   GpuCurrent,
@@ -36,10 +37,24 @@ import {
 /** Latched hardware failure of a GPU (truth; survives the fault's duration: hardware does not self-heal). */
 export type GpuFailure = 'xid_79' | 'xid_48' | 'xid_74' | 'thermal_shutdown' | 'node_crash';
 
-/** How a command ended. reason_code uses CONTRACTS §0.7 codes where one fits, else a physics-specific code. */
+/**
+ * commandOutcome(world, command_key) result (CONTRACTS §0.12 #4, frozen). status uses ActionStatus['status'] values:
+ *   'running'    started in physics and not finished yet (in flight; see inFlightCommands for its due time)
+ *   'succeeded'  completed; no reason_code
+ *   'failed'     refused at start or failed on completion; reason_code is a §0.7 code (incl. the physics codes
+ *                JOB_NOT_FOUND, JOB_STATE_INVALID, TARGET_NOT_FOUND, INVALID_ARGUMENT, JOB_FAILED_DURING_OPERATION)
+ * A key physics has not started (unknown, or enqueued but not yet requested) gives null.
+ */
 export interface CommandOutcome {
+  status: Extract<ActionStatus['status'], 'running' | 'succeeded' | 'failed'>;
+  reason_code?: string;
+}
+
+/** Hidden record of a finished command (internal; adds the finish time the harnesses need). */
+export interface FinishedCommand {
   ok: boolean;
   reason_code: string | null;
+  /** End time of the tick it finished on. */
   sim_time_ms: number;
 }
 
@@ -81,7 +96,7 @@ export interface HiddenState {
   /** command_keys already completed or failed (idempotency: a key never runs twice). */
   finished_command_keys: string[];
   /** Outcome per finished command_key (PhysicsTickResult has no per-command reason field; see commandOutcome()). */
-  command_outcomes: Record<string, CommandOutcome>;
+  command_outcomes: Record<string, FinishedCommand>;
   /** Last good observed values for resources under a sensor_stale fault: `${resource_id}|${field}` → value. */
   stale_values: Record<string, number>;
 }

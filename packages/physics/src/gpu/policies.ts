@@ -13,6 +13,10 @@
 // epoch, versions, sim time, possibly another destination): callers must keep the first payload under a key, not
 // resubmit (CONTRACTS §A treats same key + different payload as a collision).
 //
+// ARGUMENTS (CONTRACTS §0.11 #1): exactly the contract's names. cordon_gpu / checkpoint {}; migrate_restart
+// { destination_gpu_ids } (never destination_node_ids, which is for manual use, §0.12 #6); escalate { reason } with
+// reason one of xid_on_non_allocatable_gpu | no_destination | checkpoint_unavailable | not_preemptible.
+//
 // Imports: only constants and the hard safety check (evaluateSafety, which itself reads only the snapshot).
 //
 // ---- KEY SCHEME (P = 'reactive' | 'threshold', the policy that emitted it) ------------------------------------------
@@ -239,12 +243,11 @@ function xidCommands(ix: Index, p: Prefix): ActionCommand[] {
     if (!allocatable(ix, g)) {
       out.push(command(ix, {
         ...base, key: `${p}.${id}.escalate.xid${g.last_xid_code}`, operation: 'escalate', target: id, job: null,
-        args: { reason: 'xid_on_non_allocatable_gpu', xid_code: g.last_xid_code },
+        args: { reason: 'xid_on_non_allocatable_gpu' },
       }));
     } else if (g.availability !== 'cordoned') {
       out.push(command(ix, {
         ...base, key: `${p}.${id}.cordon_gpu.xid${g.last_xid_code}`, operation: 'cordon_gpu', target: id, job: null,
-        args: { reason: 'xid', xid_code: g.last_xid_code },
       }));
     }
   }
@@ -259,7 +262,7 @@ function xidCommands(ix: Index, p: Prefix): ActionCommand[] {
     const base = { workflow: `wf.${p}.${first}`, plan: `plan.${p}.${first}`, incidents, job: J, target: J };
     const escalate = (reason: string) => command(ix, {
       ...base, key: `${p}.${J}.escalate.${reason}.v${job.version}`, operation: 'escalate', versioned: [J],
-      args: { reason, xid_gpu_ids: bad.map((g) => g.resource_id) },
+      args: { reason },
     });
     const ck = latestCheckpoint(ix, job);
     if (job.latest_checkpoint_id !== null && !(ck && ck.status === 'complete' && ck.accessible)) {
@@ -274,7 +277,7 @@ function xidCommands(ix: Index, p: Prefix): ActionCommand[] {
     for (const gid of dest) ix.claimed.add(gid);
     out.push(command(ix, {
       ...base, key: `${p}.${J}.migrate_restart.v${job.version}`, operation: 'migrate_restart', versioned: [J, ...dest],
-      args: { destination_gpu_ids: dest, reason: 'restart_after_xid', from_checkpoint_id: job.latest_checkpoint_id },
+      args: { destination_gpu_ids: dest },
     }));
   }
   return out;
@@ -314,7 +317,7 @@ function safeMigrate(ix: Index, job: JobState, spec: JobSpec, draft: Omit<Draft,
   for (const dest of destinationCandidates(ix, spec, 'coolest', current)) {
     const cmd = command(ix, {
       ...draft, versioned: [job.job_id, ...dest],
-      args: { destination_gpu_ids: dest, reason: 'preventive_thermal_move', threshold_temp_c: THRESHOLD_TEMP_C },
+      args: { destination_gpu_ids: dest },
     });
     if (evaluateSafety(ix.obs, cmd, SAFETY_CTX(ix.obs)).decision === 'allow') {
       for (const g of dest) ix.claimed.add(g);
@@ -348,10 +351,9 @@ function thermalCycle(ix: Index, job: JobState, spec: JobSpec, cycle: { x: strin
     workflow: `wf.threshold.${J}`, plan: `plan.threshold.${J}.after.${cycle.x}`, incidents: [`inc.threshold.${J}.thermal`],
     target: J, job: J,
   };
-  const hotGpus = job.allocated_gpu_ids.filter((id) => (ix.gpu.get(id)?.temp_c ?? -Infinity) > THRESHOLD_TEMP_C);
   const escalate = (reason: string) => command(ix, {
     ...base, key: `threshold.${J}.escalate.${reason}.after.${cycle.x}`, operation: 'escalate', versioned: [J],
-    args: { reason, hot_gpu_ids: hotGpus, threshold_temp_c: THRESHOLD_TEMP_C },
+    args: { reason },
   });
   if (!spec.preemptible) return [escalate('not_preemptible')]; // no voluntary move for a non-preemptible job
   const ckKey = `threshold.${J}.checkpoint.after.${cycle.x}`;
@@ -360,7 +362,7 @@ function thermalCycle(ix: Index, job: JobState, spec: JobSpec, cycle: { x: strin
     const mv = safeMigrate(ix, job, spec, migrateDraft);
     return mv ? [mv] : [];
   }
-  const ck = command(ix, { ...base, key: ckKey, operation: 'checkpoint', versioned: [J], args: { reason: 'preventive_thermal_checkpoint' } });
+  const ck = command(ix, { ...base, key: ckKey, operation: 'checkpoint', versioned: [J] });
   if (!spec.checkpoint_supported || !spec.checkpoint_storage_id
     || evaluateSafety(ix.obs, ck, SAFETY_CTX(ix.obs)).decision !== 'allow') {
     return [escalate('checkpoint_unavailable')];

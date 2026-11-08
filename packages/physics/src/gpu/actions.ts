@@ -8,15 +8,18 @@
 //   Proposed additive schema change: `SimulationTickInput.requested_actions: ActionCommand[]` would remove the inbox.
 //
 // TIMING: a command starts at the tick's end time t1 and gets due_sim_ms = t1 + its duration (checkpoint
-//   checkpoint_duration_ms = 30 s, migrate_restart restart_duration_ms = 120 s, everything else 0). It completes on
-//   the first LATER tick whose t1 ≥ due, after that tick's faults applied (completion revalidates). Its key then
+//   checkpoint_duration_ms = 30 s, migrate_restart restart_duration_ms = 120 s, everything else one step: the next
+//   tick, CONTRACTS §0.12 #5). It completes on the first LATER tick whose t1 ≥ due, after that tick's faults applied (completion revalidates). Its key then
 //   lands in completed_command_keys or failed_command_keys; invalid commands fail on the tick they are requested.
-//   commandOutcome() gives the reason code; inFlightCommands() gives due times for the DB's action rows.
+//   commandOutcome() (CONTRACTS §0.12 #4) gives { status, reason_code? }; inFlightCommands() (§0.12 #5) gives due
+//   times for the DB's action rows. Arguments by operation follow §0.11 #1 (args.ts); anything else is
+//   INVALID_ARGUMENT.
 //
 // Physics checks only physical feasibility. Epoch / resource-version / lease / preemptibility policy is the safety
 // engine's job (evaluateSafety, P1-6) and the reducers'; physics never blocks on them.
 import type { ActionCommand, Checkpoint, JobState, PhysicsWorld } from '@dcos/contracts';
-import { POWER_CAP_W, POWER_LIMIT_W, WIRE_SCHEMA_VERSION as V } from './constants.js';
+import { argumentProblems } from './args.js';
+import { POWER_CAP_W, WIRE_SCHEMA_VERSION as V } from './constants.js';
 import { JOB_FATAL_FAILURES, finishCommand, releaseJob, type TickCtx } from './jobs.js';
 import {
   cloneJson,
@@ -26,6 +29,7 @@ import {
   isRealResource,
   specOf,
   type CommandOutcome,
+  type FinishedCommand,
   type HiddenState,
   type InFlightCommand,
   type Topology,
@@ -67,7 +71,12 @@ export interface InFlightView {
   due_sim_time_ms: number;
 }
 
-/** Started-but-unfinished commands with their due times (trusted callers only: it reads the private world). */
+/**
+ * CONTRACTS §0.12 #5 (frozen): started-but-unfinished commands with at least { command_key, due_sim_time_ms } (P2
+ * copies due_sim_time_ms into action.due_sim_time_ms). Extra fields: action_id, operation, job_id, started_sim_ms.
+ * Due times: checkpoint = start + checkpoint_duration_ms (30 s), migrate_restart = start + restart_duration_ms
+ * (120 s), everything else = the next tick. Trusted callers only: it reads the private world.
+ */
 export function inFlightCommands(world: PhysicsWorld): InFlightView[] {
   return hiddenOf(world).in_flight.map((f) => ({
     command_key: f.command.command_key, action_id: f.command.action_id, operation: f.command.operation,
@@ -75,8 +84,19 @@ export function inFlightCommands(world: PhysicsWorld): InFlightView[] {
   }));
 }
 
-/** How a finished command ended, or null while it is queued / in flight / unknown. */
+/**
+ * CONTRACTS §0.12 #4 (frozen): how a command stands in physics. 'running' while in flight, 'succeeded' / 'failed'
+ * (+ reason_code) once finished, null if physics has not started it (unknown key, or enqueued and not yet requested).
+ */
 export function commandOutcome(world: PhysicsWorld, commandKey: string): CommandOutcome | null {
+  const h = hiddenOf(world);
+  const done = h.command_outcomes[commandKey];
+  if (done) return done.ok ? { status: 'succeeded' } : { status: 'failed', reason_code: done.reason_code ?? 'FAILED' };
+  return h.in_flight.some((f) => f.command.command_key === commandKey) ? { status: 'running' } : null;
+}
+
+/** The hidden finish record (ok, reason_code, finish sim time) of a finished command, or null. For trusted harnesses. */
+export function finishedCommand(world: PhysicsWorld, commandKey: string): FinishedCommand | null {
   return hiddenOf(world).command_outcomes[commandKey] ?? null;
 }
 
@@ -117,7 +137,7 @@ function destinationGpus(world: PhysicsWorld, h: HiddenState, topo: Topology, c:
   const explicit = stringList(c.arguments.destination_gpu_ids);
   if (explicit) return explicit;
   const nodes = stringList(c.arguments.destination_node_ids);
-  if (!nodes) return reject('DEST_GPU_COUNT_INSUFFICIENT');
+  if (!nodes) return reject('INVALID_ARGUMENT'); // (argumentProblems already rejects this)
   if (nodes.some((n) => isRealResource(topo.resources.get(n)))) return reject('REAL_GPU_NOT_ALLOCATABLE'); // node-real-0
   const taken = new Set(world.observable.allocations.filter((a) => a.job_id !== job.job_id).map((a) => a.gpu_id));
   const free = nodes.flatMap((n) => topo.nodeGpus.get(n) ?? [])
@@ -135,7 +155,10 @@ function durationMs(world: PhysicsWorld, c: ActionCommand): number {
 }
 
 function startCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ctx: TickCtx, c: ActionCommand): InFlightCommand {
-  const f: InFlightCommand = { command: c, started_sim_ms: ctx.t1, due_sim_ms: ctx.t1 + durationMs(world, c) };
+  if (argumentProblems(c).length > 0) reject('INVALID_ARGUMENT'); // CONTRACTS §0.11 #1 (args.ts)
+  // due (CONTRACTS §0.12 #5): start + duration; an instant operation is due on the next tick (start + this tick's step)
+  const duration = durationMs(world, c);
+  const f: InFlightCommand = { command: c, started_sim_ms: ctx.t1, due_sim_ms: ctx.t1 + (duration > 0 ? duration : ctx.t1 - ctx.t0) };
   switch (c.operation) {
     case 'checkpoint': {
       const job = jobOf(world, c);
@@ -194,9 +217,7 @@ function startCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ctx: 
       return f;
     }
     case 'power_cap': {
-      const limit = typeof c.arguments.power_limit_w === 'number' ? c.arguments.power_limit_w : POWER_CAP_W;
-      if (!(limit > 0 && limit <= POWER_LIMIT_W)) reject('INVALID_ARGUMENT');
-      if (targetGpus(world, topo, c).length === 0) reject('TARGET_NOT_FOUND');
+      if (targetGpus(world, topo, c).length === 0) reject('JOB_STATE_INVALID'); // a job holding no GPUs
       return f;
     }
     case 'pause_job': {
@@ -259,7 +280,7 @@ function completeCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ct
     case 'power_cap': {
       const limit = typeof c.arguments.power_limit_w === 'number' ? c.arguments.power_limit_w : POWER_CAP_W;
       const ids = new Set(targetGpus(world, topo, c));
-      if (ids.size === 0) return 'TARGET_NOT_FOUND';
+      if (ids.size === 0) return 'JOB_STATE_INVALID';
       for (const g of world.observable.gpus) if (ids.has(g.resource_id)) g.power_limit_w = limit;
       return null;
     }

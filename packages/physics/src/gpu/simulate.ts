@@ -327,12 +327,12 @@ function simulate(obs: ObservedSnapshot, commands: ActionCommand[], opts: Simula
       for (const c of pending) {
         const ds = c.depends_on_command_keys;
         const missing = ds.find((k) => !knownKeys.has(k) && outcomeOf(k) === null);
-        const failed = ds.find((k) => deps.failedKeys.has(k) || outcomeOf(k)?.ok === false);
+        const failed = ds.find((k) => deps.failedKeys.has(k) || outcomeOf(k)?.status === 'failed');
         if (missing !== undefined || failed !== undefined) {
           deps.failedKeys.add(c.command_key);
           deps.violations.push(missing !== undefined ? 'DEPENDENCY_NOT_FOUND' : 'DEPENDENCY_FAILED');
           changed = true;
-        } else if (ds.every((k) => outcomeOf(k)?.ok === true)) {
+        } else if (ds.every((k) => outcomeOf(k)?.status === 'succeeded')) {
           requested.push(c.action_id);
         } else {
           next.push(c);
@@ -410,8 +410,8 @@ function simulate(obs: ObservedSnapshot, commands: ActionCommand[], opts: Simula
   for (const c of commands) {
     if (deps.failedKeys.has(c.command_key)) continue;
     const o = commandOutcome(world, c.command_key);
-    if (o === null) unfinished += 1;
-    else if (!o.ok) violations.push(o.reason_code ?? 'FAILED');
+    if (o === null || o.status === 'running') unfinished += 1;
+    else if (o.status === 'failed') violations.push(o.reason_code ?? 'FAILED');
   }
   violations.push(...deps.violations);
   if (unfinished > 0) assumptions.push(`${unfinished} plan command(s) had not finished by the end of the horizon.`);
