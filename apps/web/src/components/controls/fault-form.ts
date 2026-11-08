@@ -20,6 +20,11 @@ export const DELAY_PRESETS_S = [0, 10, 30] as const;
 export type FaultDelayS = (typeof DELAY_PRESETS_S)[number];
 /** The real attached GPU and its node never receive simulated faults. */
 export const REAL_RESOURCE_IDS: ReadonlySet<string> = new Set(['gpu-real-0', 'node-real-0']);
+/**
+ * Default Xid 79 target: rack 7 sits on pump-b's loop, away from the pump-a cooling incident on racks 2–4 and the
+ * hot rack 6, so the demo's second fault opens a separate incident instead of merging into the first.
+ */
+export const DEFAULT_XID_GPU_ID = 'gpu-r7-n1-0';
 
 export interface FaultFormInput {
   kind: FaultControlKind;
