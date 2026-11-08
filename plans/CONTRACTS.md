@@ -93,7 +93,7 @@ Racks r1, r5, r7 and r8 are free capacity. The existing facility model (`compile
 | `nvidia_smi.utilization_gpu` | ratio | Real Brev GPU utilization |
 | `nvidia_smi.clocks_sm` | MHz | Real Brev GPU SM clock |
 
-XIDs are always `SignalEvent`s (`event_type: "xid"`, `xid_code` 48/79/74), never gauges.
+XIDs are always `SignalEvent`s (`event_type: "xid_error"`, as in the schema; `xid_code` 48/79/74), never gauges.
 
 ### 0.6 Function names each lane calls (frozen)
 **P1, `@dcos/physics` (pure, deterministic):**
@@ -128,7 +128,10 @@ The existing v0 functions (`step` for the facility, `simulate`, `checkAction`) m
 `decision` is `allow | deny | needs_approval`.
 
 ### 0.8 Additions to the kit's tables (§B)
-- **`agent_event`** gains `tool_calls_json`: `[{ tool, args_summary, result_summary }]`. This is **F-NV1**: the dashboard shows Nemotron's tool calls and a one-line summary for each step. Never store raw chain-of-thought.
+- **`agent_event`** gains `tool_calls_json`: `[{ tool, args_summary, result_summary, actor }]` with `actor: "nemotron" | "code"`, plus an event-level `actor` column with the same values. This is **F-NV1**: the dashboard shows Nemotron's tool calls and a one-line summary for each step.
+  - **`nemotron`** marks diagnosis, incident grouping/splitting, option choice and replan decisions.
+  - **`code`** marks `simulate_plan`, `evaluate_safety`, ranking and ledger actions.
+  - Summaries are Nemotron's own stated conclusions, e.g. *"24 GPUs on racks 2–4 + pump A at 0 kW → one incident. XID 79 on rack 7 → unrelated, separate incident."* Never store raw chain-of-thought.
 - **`resource`** gains a `gpu-real-0` row. `gpu_current` is updated from `nvidia-smi` telemetry ingested with `source_kind: "hardware"` (**F-NV2**).
 - **Tier 1 tables** (P2 builds these first):
   - `run`, `resource`, `dependency_edge`
@@ -160,6 +163,63 @@ The browser can read public tables without a token. **Tokens are handed out by P
 - `FAN_SERIAL_PORT`
 - `VITE_STDB_URI`, `VITE_STDB_DB`, `VITE_DATA_MODE` (`mock | live`)
 - `VITE_ADMIN_TOKEN` (presenter laptop's local build only; **never on Vercel**)
+
+### 0.11 Decisions from P3 build questions (v1.1.1, additive)
+1. **`ActionCommand.arguments` by operation:**
+   - `checkpoint {}`
+   - `migrate_restart { destination_gpu_ids: string[] }`
+   - `power_cap { power_limit_w: number }`
+   - `pause_job {}`
+   - `cordon_gpu {}` / `uncordon_gpu {}` (the GPU is `target_resource_id`)
+   - `keep_running {}`
+   - `escalate { reason: string }`
+2. **`payload_hash`** = sha256 of the command's canonical JSON (keys sorted), **excluding `requested_sim_time_ms`**. The same key with a different hash is rejected as `COMMAND_KEY_COLLISION`.
+3. **Safety deny on `request_action`:**
+   - It **persists** the action with `status: "failed"` and `reason_code: "SAFETY_REJECTED"`, puts the violations in `result.violations`, appends an `action_event`, and **returns** that status. It doesn't throw, because the UI shows it as BLOCKED.
+   - Bad payloads, key collisions, stale fencing tokens and held leases are rejected (they throw) and nothing is persisted.
+4. **`gpu-real-0`** sits on node `node-real-0` (resource kind `node`, `profile: "brev_real"`, no rack, never allocatable).
+5. **Thermal bit:** `clocks_event_reasons & 0x20` (DCGM SW thermal slowdown) means throttling because of temperature. A power cap sets `0x04` (SW power cap).
+6. **`getEvidence([], windowSimMs)`** returns evidence for the whole run over that window.
+7. **db-client also exports** `getWorkflow(id)`, `listOpenWorkflows()` and `listIncidents()`. Until `@dcos/db-client` ships, `AgentEventInput`, `WorkflowRecord`, `WorkflowLease` and `SymptomRecord` live in `apps/agent/src/ports.ts`; P2's client must match those shapes.
+8. **`@dcos/physics` exports `PlanMetrics`** (same shape as §0.6), and P3 switches its import when P1 ships.
+9. **`cooling_current`** has one row per pump **and** one per loop.
+10. **db-client also exports `upsertSymptoms(symptoms: SymptomRecord[])`** (P2 adds a reducer `upsert_symptoms`, agent role). Triage writes symptoms before linking them.
+11. **Incident severity** maps from symptom severity: critical → `critical`, warning → `high`, info → `medium`.
+12. **The triage tool `submit_incident_assessment`** may return `split_symptom_ids` (a proper subset of a candidate's symptoms) for a `split`. This is internal to P3, not a wire type.
+13. **`cancel_action(command_key, reason_code, fencing_token)`** accepts **either** the action's own lease fencing token **or** the fencing token of the workflow that owns the action, when the caller holds that workflow's lease. Replan cancels superseded actions this way. Only `requested` and `claimed` actions can be cancelled; `running` ones never can.
+14. **DB errors are recognized by `code`, not by class.**
+    - Every rejection from `@dcos/db-client` is an `Error` with a string `code` from this set: `COMMAND_KEY_COLLISION`, `VERSION_CONFLICT`, `STALE_FENCING_TOKEN`, `LEASE_HELD`, `LEASE_EXPIRED`, `INVALID_TRANSITION`, `NOT_FOUND`, `INVALID_PAYLOAD`, `UNAUTHORIZED`.
+    - It also carries an optional `violations: string[]`.
+    - The reducer's error string starts with the code (e.g. `"LEASE_HELD: …"`), and the client parses it into `.code`.
+    - Consumers must check `e.code` and never use `instanceof`.
+15. **`onChange(cb): unsubscribe` is a frozen db-client function.** It fires a `DbChange` for each of these:
+    - `{ kind: "decision_epoch", decision_epoch, sim_time_ms }` when `run.decision_epoch` changes
+    - `{ kind: "resource_version", resource_id, version, sim_time_ms }` when a `resource.version` or `gpu_current.version` row changes
+    - `{ kind: "signal", signal: SignalEvent }` when a `signal_event` row is inserted
+    - `{ kind: "action_status", status: ActionStatus }` when an `action` row changes
+
+    It's built on table subscriptions. The shapes match `apps/agent/src/ports.ts`.
+16. **`heartbeat_workflow` does not bump `workflow.version`.** It only extends `lease_expires_unix_ms` with the same fencing token. `update_workflow` bumps the version.
+17. **When the model is unavailable,** the agent still runs its **deterministic, safety-checked** plan. Events are tagged `actor: "code"` and the summary starts with "deterministic:". Plans are flagged `needs_approval` for the UI but not held back, because hackathon demo resilience outweighs approval gating. `requireApproval=true` turns the gating on.
+
+### 0.12 Decisions from P1 build questions (doc-only, no schema change)
+1. **XID event name** is `event_type: "xid_error"` (§0.5 already fixed).
+2. **The run clock starts at `sim_time_ms = 600000`** (10 min) in `gpu_demo_8`. This keeps checkpoint ages visible without negative times:
+   - job-a's last checkpoint completed at **60000** (9 min old).
+   - job-b's completed at **540000** (1 min old).
+   - job-c has none.
+
+   **Every "t = X" in the gates is relative to the run start:** pump-a degradation is at **610000**, i.e. start + 10 s. Ages are always `sim_time_ms − complete_sim_time_ms`. Don't stamp pre-run checkpoints at 0, because that erases the job-a vs job-b difference the demo depends on.
+3. **Commands into `step`:** the trusted caller (P2's tick) calls `enqueueCommands(world, cmds)`, which stores them in the hidden `command_inbox`. A command starts on the tick its `action_id` appears in `requested_action_ids`, and once per `command_key`. There's no schema change for now.
+4. **Per-command outcome:** `commandOutcome(world, command_key) → { status, reason_code? }` is frozen in `@dcos/physics`. The §0.7 reason codes gain the physics-only codes `JOB_NOT_FOUND`, `JOB_STATE_INVALID`, `TARGET_NOT_FOUND`, `INVALID_ARGUMENT` and `JOB_FAILED_DURING_OPERATION`.
+5. **Due times:** physics computes them (checkpoint = start + 30 s, migrate_restart = start + 120 s, everything else = next tick). `inFlightCommands(world) → [{ command_key, due_sim_time_ms }]` is frozen, and P2 copies the value into `action.due_sim_time_ms`.
+6. **`migrate_restart` destination:** the standard form is `arguments.destination_gpu_ids` (an exact set), which is what P3 sends. Physics also accepts `destination_node_ids` (first free ready GPUs on those nodes) for judge or manual use only.
+7. **Storage outage:** there's no new fault kind yet. A `node_crash` or `network_link_down` that targets `ckpt-store-1` means storage is inaccessible (`checkpoint.accessible = false`). A dedicated `checkpoint_store_outage` kind is Tier 2.
+8. **GPU availability values** are `ready | degraded | cordoned | unreachable`:
+   - XID 79, thermal shutdown and node crash → `unreachable`
+   - XID 48 and XID 74 → `degraded`
+   - cordon → `cordoned`
+9. **Scenario:** `{ scenario_id, seed, preset_id, faults, horizon_s }` may also carry optional `initial_overrides` and `description` fields. P1 documents their exact shape in `packages/physics`.
 
 ---
 

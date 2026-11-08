@@ -67,7 +67,7 @@ Then fill in `plans/status/<P1|P2|P3|P4|HW>.md` and push your branch.
 
 **Gate 1, 11:30 PM: world with no AI**
 - [ ] `create_run('run-demo-1', 42, 'gpu_demo_8')` seeds 64 GPUs and 3 jobs. Ticks advance `sim_time_ms`.
-- [ ] `inject_fault` pump-a degradation at 10,000 ms: racks r2–r4 heat up, and GPUs over 85 °C throttle.
+- [ ] `inject_fault` pump-a degradation at **610,000 ms** (run start + 10 s; CONTRACTS §0.12 #2): racks r2–r4 heat up, and GPUs over 85 °C throttle.
 - [ ] XID 79 on `gpu-r3-n1-0`: `job-a` fails back to `durable_work_units`, and the signal event appears.
 - [ ] The browser shows all of this live from SpacetimeDB.
 
