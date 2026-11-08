@@ -683,3 +683,76 @@ describe('in-flight checkpoint (job checkpointing right now)', () => {
     expect(pause.commands[0]!.depends_on_command_keys).toEqual([INFLIGHT_KEY]);
   });
 });
+
+/**
+ * FakePhysics with a controllable keep_running outlook: a single-job view with no commands (the keepHold probe) is
+ * clean (no loss, no risk) up to `cleanUpToS` of horizon; everything else is FakePhysics (job-a on the degraded loop
+ * is risky over the full planner horizon, so without a hold rule it moves).
+ */
+class OutlookPhysics extends FakePhysics {
+  constructor(public cleanUpToS: number) {
+    super();
+  }
+  override simulatePlan(...args: Parameters<FakePhysics['simulatePlan']>) {
+    const [obs, plan, opts] = args;
+    const m = super.simulatePlan(obs, plan, opts);
+    const h = opts?.horizon_s ?? 600;
+    if (plan.commands.length === 0 && obs.job_states.length === 1 && h <= this.cleanUpToS) {
+      return { ...m, expected_lost_work_units: 0, failure_risk_estimate: 0 };
+    }
+    return m;
+  }
+}
+
+describe('keep_running holds (RANKING_ASSUMPTION rules (a) near-complete and (b) deferral)', () => {
+  const runWith = (p: FakePhysics, recheckAfterS?: number) =>
+    planIncidents({ db, physics: p, llm: new FakeLlm([]), workflowId: WF, runId: RUN_ID, recheckAfterS }, { incidents: [PUMP] });
+
+  it('documents both rules in RANKING_ASSUMPTION', () => {
+    expect(RANKING_ASSUMPTION).toMatch(/until \(a\) it completes/);
+    expect(RANKING_ASSUMPTION).toMatch(/\(b\) the last moment a mitigation can still be started/);
+  });
+
+  it('(b) defers job-a only when the caller re-plans on a schedule and the outlook is clean for the whole lead time', async () => {
+    // job-a: checkpoint 30 s + restart 120 s + re-check 30 s = 180 s lead time
+    const p = new OutlookPhysics(200);
+    const now = await runWith(p);
+    expect(jobPlan(now, 'job-a').chosen.commands.map((c) => c.operation)).toEqual(['checkpoint', 'migrate_restart']);
+    expect(now.recheck_after_s).toBeUndefined();
+
+    const later = await runWith(p, 30);
+    const a = jobPlan(later, 'job-a');
+    expect(a.chosen.option_id).toBe('job-a:keep');
+    expect(a.chosen.hold).toEqual({ kind: 'deferred', window_s: 180, recheck_s: 30 });
+    expect(a.chosen.label).toMatch(/deferred/);
+    expect(later.recheck_after_s).toBe(30);
+    // clean for the whole planner horizon: the next re-check can wait until (600 - checkpoint - restart) = 450 s
+    const calm = await runWith(new OutlookPhysics(600), 30);
+    expect(jobPlan(calm, 'job-a').chosen.hold).toEqual({ kind: 'deferred', window_s: 180, recheck_s: 450 });
+    expect(calm.recheck_after_s).toBe(450);
+    // the alternatives are still scored and ranked (the re-check finds the same move once it is needed)
+    expect(a.alternatives.some((o) => o.commands.some((c) => c.operation === 'migrate_restart'))).toBe(true);
+  });
+
+  it('(b) does not defer when trouble starts inside the lead time', async () => {
+    const r = await runWith(new OutlookPhysics(120), 30);
+    expect(jobPlan(r, 'job-a').chosen.commands.map((c) => c.operation)).toEqual(['checkpoint', 'migrate_restart']);
+    expect(r.recheck_after_s).toBeUndefined();
+  });
+
+  it('(a) a job that completes before it can fail keeps running, even without a re-check', async () => {
+    db.mutateSnapshot((s) => {
+      const st = s.job_states.find((j) => j.job_id === 'job-a')!;
+      const spec = s.job_specs.find((j) => j.job_id === 'job-a')!;
+      st.progress_work_units = spec.total_work_units - spec.gpus_required * spec.work_rate_per_gpu_per_sim_s * 100; // 100 s left
+    });
+    const base = await runWith(new OutlookPhysics(0)); // outlook never clean: the ranking without rule (a) moves it
+    expect(jobPlan(base, 'job-a').chosen.commands.length).toBeGreaterThan(0);
+    const r = await runWith(new OutlookPhysics(600));
+    const a = jobPlan(r, 'job-a');
+    expect(a.chosen.option_id).toBe('job-a:keep');
+    expect(a.chosen.hold?.kind).toBe('completes_first');
+    expect(a.chosen.hold?.window_s).toBeCloseTo(100, 5);
+    expect(r.recheck_after_s).toBeUndefined();
+  });
+});

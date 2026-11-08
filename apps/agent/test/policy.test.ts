@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validatePayload } from '@dcos/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createNemotronPolicy, describePolicy, newSupersedeTriggers, observationFingerprint, policyWorkflowId } from '../src/policy.js';
+import { DEFER_RECHECK_S, createNemotronPolicy, describePolicy,newSupersedeTriggers, observationFingerprint, policyWorkflowId } from '../src/policy.js';
 import type { LlmChatRequest, LlmChatResponse, LlmPort } from '../src/ports.js';
 import { CHOOSE_OPTIONS_TOOL_NAME } from '../src/prompts/planner.js';
 import { SNAPSHOT_DB_READ_ONLY_MESSAGE, createSnapshotDb } from '../src/snapshot-db.js';
@@ -152,9 +152,81 @@ describe('nemotron policy', () => {
     expect(policy.stats()).toMatchObject({ calls: 1, cacheHits: 0, llmFailures: 1 });
   });
 
-  it('derives the workflow id from run id and sim-time bucket', () => {
-    expect(policyWorkflowId('run-1', 430_000)).toBe(policyWorkflowId('run-1', 431_000));
-    expect(policyWorkflowId('run-1', 430_000)).not.toBe(policyWorkflowId('run-1', 700_000));
+  it('derives the workflow id from run id + the open incident set (order- and triage-bucket-insensitive)', () => {
+    const id = policyWorkflowId('run-1', ['inc-thermal-pump-a-b2', 'inc-gpu-gpu-r7-n1-0-b2']);
+    expect(policyWorkflowId('run-1', ['inc-gpu-gpu-r7-n1-0-b2', 'inc-thermal-pump-a-b2'])).toBe(id);
+    // stateless re-triage rolled the bucket suffix over: same incidents, same workflow
+    expect(policyWorkflowId('run-1', ['inc-thermal-pump-a-b3', 'inc-gpu-gpu-r7-n1-0-b2'])).toBe(id);
+    expect(policyWorkflowId('run-1', ['inc-thermal-pump-a-b2'])).not.toBe(id);
+    expect(policyWorkflowId('run-2', ['inc-thermal-pump-a-b2', 'inc-gpu-gpu-r7-n1-0-b2'])).not.toBe(id);
+    expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/);
+  });
+
+  it('a plan spanning a 300 s sim-time bucket boundary keeps its command keys', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const policy = createNemotronPolicy({ llm: null, physics: new FakePhysics(), cacheDir: dir });
+    const at = (simMs: number, epochBump: number) => ({ ...obs, clock: { ...obs.clock, sim_time_ms: simMs, decision_epoch: obs.clock.decision_epoch + epochBump } });
+    const before = at(899_000, 0);
+    const after = at(901_000, 1); // material change (epoch) right after the boundary: re-plans
+    const k1 = (await policy(before, ctx(before))).map((c) => c.command_key);
+    const k2 = (await policy(after, ctx(after))).map((c) => c.command_key);
+    expect(k1.length).toBeGreaterThan(0);
+    expect(policy.stats().replans).toBe(2);
+    expect(k2).toEqual(k1);
+  });
+
+  it('a failed checkpoint we issued supersedes its plan (new attempt keys); reported once', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const policy = createNemotronPolicy({ llm: null, physics: new FakePhysics(), cacheDir: dir });
+    const cmds = await policy(obs, ctx(obs));
+    const ck = cmds.find((c) => c.operation === 'checkpoint' && c.job_id === 'job-a')!;
+    const row = { ...obs.checkpoints.find((c) => c.job_id === 'job-a')!, checkpoint_id: 'ckpt-failed-1', command_key: ck.command_key, status: 'failed' as const };
+    const failed = { ...obs, checkpoints: [...obs.checkpoints, row], clock: { ...obs.clock, decision_epoch: obs.clock.decision_epoch + 1 } };
+    expect(newSupersedeTriggers(failed, cmds, new Set())).toEqual([`ckpt-failed:${ck.command_key}`]);
+    const again = await policy(failed, ctx(failed));
+    const a = again.filter((c) => c.job_id === 'job-a');
+    expect(a.length).toBeGreaterThan(0);
+    expect(a.every((c) => c.command_key.endsWith(':2'))).toBe(true);
+  });
+});
+
+/** FakePhysics whose single-job keep_running outlook is clean for horizons <= cleanUpToS (planner rule (b) probe). */
+class OutlookPhysics extends FakePhysics {
+  constructor(public cleanUpToS: number) {
+    super();
+  }
+  override simulatePlan(...args: Parameters<FakePhysics['simulatePlan']>) {
+    const [obs, plan, opts] = args;
+    const m = super.simulatePlan(obs, plan, opts);
+    const h = opts?.horizon_s ?? 600;
+    return plan.commands.length === 0 && obs.job_states.length === 1 && h <= this.cleanUpToS
+      ? { ...m, expected_lost_work_units: 0, failure_risk_estimate: 0 }
+      : m;
+  }
+}
+
+describe('nemotron policy: deferred mitigations are re-checked on schedule', () => {
+  it('defers job-a while its outlook is clean, re-plans every DEFER_RECHECK_S without an observable change, acts once it is not', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const physics = new OutlookPhysics(200); // clean for job-a's 180 s lead time only: re-check after DEFER_RECHECK_S
+    const policy = createNemotronPolicy({ llm: null, physics, cacheDir: dir });
+    const at = (dtS: number) => ({ ...obs, clock: { ...obs.clock, sim_time_ms: obs.clock.sim_time_ms + dtS * 1000 } });
+    const first = await policy(obs, ctx(obs));
+    expect(first.filter((c) => c.job_id === 'job-a')).toEqual([]);
+    expect(await policy(at(10), ctx(at(10)))).toEqual([]);
+    expect(policy.stats()).toMatchObject({ replans: 1, unchangedSkips: 1, deferredRechecks: 0 });
+    physics.cleanUpToS = 0; // the outlook within the lead time is no longer clean
+    const due = at(DEFER_RECHECK_S);
+    const acted = await policy(due, ctx(due));
+    expect(policy.stats()).toMatchObject({ replans: 2, deferredRechecks: 1 });
+    expect(acted.filter((c) => c.job_id === 'job-a').map((c) => c.operation)).toEqual(['checkpoint', 'migrate_restart']);
+  });
+
+  it('deferRecheckS: null acts on the first plan (no deferral)', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const policy = createNemotronPolicy({ llm: null, physics: new OutlookPhysics(600), cacheDir: dir, deferRecheckS: null });
+    const cmds = await policy(obs, ctx(obs));
+    expect(cmds.filter((c) => c.job_id === 'job-a').map((c) => c.operation)).toEqual(['checkpoint', 'migrate_restart']);
   });
 });
 

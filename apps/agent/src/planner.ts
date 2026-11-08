@@ -39,6 +39,8 @@ export interface RankedOption {
   /** Failure risk attributable to this option's job (job-scoped simulatePlan), 0..1. Drives the risk tier. */
   job_risk: number;
   excluded_reason?: string;
+  /** keep_running only: set when a hold rule put it first. */
+  hold?: KeepHold;
 }
 
 export interface JobPlan {
@@ -60,6 +62,8 @@ export interface PlanResult {
   summary?: string;
   /** F-NV1: `nemotron` only when at least one final job decision came from the LLM. */
   actor?: AgentActor;
+  /** Set when a job's mitigation was deferred (rule (b)): the caller must re-plan within this many sim seconds. */
+  recheck_after_s?: number;
 }
 
 export interface PlannerDeps {
@@ -73,6 +77,21 @@ export interface PlannerDeps {
   reservedGpuIds?: string[];
   /** A completed checkpoint younger than this (sim seconds) is reused instead of taking a new one. Default 60. */
   freshCheckpointMaxAgeS?: number;
+  /**
+   * Set only by a caller that GUARANTEES a re-plan within this many sim seconds even when nothing observable changes
+   * (the evaluation policy). Enables rule (b) of RANKING_ASSUMPTION: mitigations of a running job whose keep outlook
+   * is clean for its whole lead time are deferred. Unset (the agent loop): act now.
+   */
+  recheckAfterS?: number;
+}
+
+/** Why keep_running was put first for a job (RANKING_ASSUMPTION rule (a) / (b)). */
+export interface KeepHold {
+  kind: 'completes_first' | 'deferred';
+  /** Sim seconds over which the keep outlook was checked clean. */
+  window_s: number;
+  /** `deferred` only: re-plan within this many sim seconds (>= recheckAfterS). */
+  recheck_s?: number;
 }
 
 export const FRESH_CHECKPOINT_MAX_AGE_S = 60;
@@ -98,9 +117,16 @@ export const RISK_TIER_WIDTH = 0.1;
 export const riskTolerance = (priority: number): number => Math.min(1, Math.max(0, (100 - priority) / 100));
 export const EVIDENCE_WINDOW_MS = 600_000;
 export const DETERMINISTIC_EXPLANATION = 'deterministic ranking (LLM unavailable)';
+/** A keep_running outlook is "clean" with no expected lost work and a failure risk below this. */
+export const CLEAN_OUTLOOK_MAX_RISK = 0.01;
 export const RANKING_ASSUMPTION =
   'ranking: jobs planned sequentially in priority order, each scored with the higher-priority jobs’ chosen commands already ' +
-  'applied (conditional/marginal, not every-other-job-in-place); unsafe excluded; lost work within max(one restart of the job, ' +
+  'applied (conditional/marginal, not every-other-job-in-place); unsafe excluded; keep_running first when the running job’s own ' +
+  `keep outlook is clean (no lost work, failure risk < ${CLEAN_OUTLOOK_MAX_RISK * 100}%) until (a) it completes (a job that finishes ` +
+  'before it can fail gains nothing from a checkpoint, cap or move, which only add delay) or, when the caller re-plans on a ' +
+  'schedule, (b) the last moment a mitigation can still be started and finished (checkpoint + restart + re-check interval; ' +
+  'acting earlier only pays for a fault that may still clear, and the re-check acts once the outlook within that lead time is ' +
+  'no longer clean); otherwise lost work within max(one restart of the job, ' +
   `5% of avoidable loss) of the best counts as a tie; then the job's own marginal failure risk in ${RISK_TIER_WIDTH} tiers, risk up ` +
   'to (100 - priority)% tolerated (staying on a degraded cooling loop or hot GPUs is riskier than moving to a healthy one); a ' +
   'migrate/pause that beats keep_running on neither lost work nor risk tier is a needless preemption and ranks below keep/cap; ' +
@@ -455,7 +481,7 @@ const preemptions = (o: Scored): number =>
  * Metrics are conditional on the context the options were scored in, so comparing with keep_running measures
  * the marginal gain of acting on THIS job given the higher-priority jobs' plan.
  */
-export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]): RankedOption[] {
+export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[], hold: KeepHold | null = null): RankedOption[] {
   const eligible = scored.filter((o) => o.violations.length === 0);
   const excluded = scored.filter((o) => o.violations.length > 0);
   const spec = ix.jobSpec.get(jobId);
@@ -474,8 +500,11 @@ export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]):
   const failed = ix.jobState.get(jobId)?.status === 'failed';
   const needless = (o: Scored): number =>
     !failed && keep !== undefined && preemptions(o) > 0 && lossTier(o) >= lossTier(keep) && rTier(o) >= rTier(keep) ? 1 : 0;
+  // Rules (a)/(b): a clean keep outlook (checked by keepHold) puts keep_running ahead of every option with commands.
+  const held = (o: Scored): number => (hold && keep !== undefined && o.commands.length > 0 ? 1 : 0);
   eligible.sort(
     (a, b) =>
+      held(a) - held(b) ||
       lossTier(a) - lossTier(b) ||
       rTier(a) - rTier(b) ||
       needless(a) - needless(b) ||
@@ -487,10 +516,51 @@ export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]):
   );
   excluded.sort((a, b) => a.option_id.localeCompare(b.option_id));
   const strip = ({ violations: _v, ...o }: Scored) => o;
+  const withHold = (o: Scored): Omit<RankedOption, 'rank'> =>
+    hold && o.commands.length === 0 ? { ...strip(o), label: `${o.label} (${holdText(hold)})`, hold } : strip(o);
   return [
-    ...eligible.map((o, i) => ({ ...strip(o), rank: i + 1 })),
+    ...eligible.map((o, i) => ({ ...withHold(o), rank: i + 1 })),
     ...excluded.map((o, i) => ({ ...strip(o), rank: eligible.length + i + 1, excluded_reason: o.violations.join(',') })),
   ];
+}
+
+const holdText = (h: KeepHold): string =>
+  h.kind === 'completes_first'
+    ? `outlook clean until it completes in ~${Math.round(h.window_s)} s`
+    : `deferred: outlook clean for the ${Math.round(h.window_s)} s mitigation lead time; re-check scheduled`;
+
+/**
+ * RANKING_ASSUMPTION rules (a) and (b) for a RUNNING job: is its keep_running outlook clean (no expected lost work,
+ * failure risk < CLEAN_OUTLOOK_MAX_RISK) on a view holding only this job (other jobs' load stays in the observed
+ * telemetry, so ignoring the context's mitigations is conservative: they only remove heat)?
+ *  (a) clean over the whole horizon and the job completes within it: nothing to mitigate.
+ *  (b) only with `recheckAfterS` (the caller re-plans on a schedule): clean over the lead time a mitigation needs
+ *      (checkpoint if supported + restart if preemptible + the re-check interval), capped at the job's remaining time.
+ */
+export function keepHold(physics: PhysicsPort, ix: SnapshotIndex, jobId: string, recheckAfterS?: number): KeepHold | null {
+  const state = ix.jobState.get(jobId);
+  const spec = ix.jobSpec.get(jobId);
+  if (!state || !spec || state.status !== 'running') return null;
+  const rate = spec.gpus_required * spec.work_rate_per_gpu_per_sim_s;
+  const remainingS = rate > 0 ? Math.max(0, spec.total_work_units - state.progress_work_units) / rate : Infinity;
+  const clean = (horizonS: number): boolean => {
+    try {
+      const m = physics.simulatePlan(jobView(ix.snap, new Set([jobId])), { commands: [] }, { horizon_s: horizonS });
+      return m.expected_lost_work_units <= 1e-6 && clamp01(m.failure_risk_estimate) < CLEAN_OUTLOOK_MAX_RISK;
+    } catch {
+      return false; // no estimate: never hold
+    }
+  };
+  if (remainingS <= PLANNER_HORIZON_S && clean(PLANNER_HORIZON_S)) return { kind: 'completes_first', window_s: remainingS };
+  if (recheckAfterS === undefined || !(recheckAfterS > 0)) return null;
+  const leadS =
+    (spec.checkpoint_supported ? spec.checkpoint_duration_ms / 1000 : 0) + (spec.preemptible ? spec.restart_duration_ms / 1000 : 0) + recheckAfterS;
+  const windowS = Math.min(leadS, remainingS, PLANNER_HORIZON_S);
+  if (!clean(windowS)) return null;
+  // Next re-check: the outlook is known clean through windowS (or the whole horizon), and the mitigation needs leadS
+  // from the moment it is decided, so re-planning after (clean span - leadS) is still in time; never before recheckAfterS.
+  const cleanSpanS = windowS < PLANNER_HORIZON_S && clean(PLANNER_HORIZON_S) ? PLANNER_HORIZON_S : windowS;
+  return { kind: 'deferred', window_s: windowS, recheck_s: Math.max(recheckAfterS, cleanSpanS - leadS + recheckAfterS) };
 }
 
 type EnumerateCtx = Parameters<typeof enumerateOptions>[2];
@@ -503,12 +573,14 @@ export function rankJobInContext(
   ctx: PlanContext,
   enumCtx: EnumerateCtx,
   calls: ToolCallSummary[],
+  recheckAfterS?: number,
 ): RankedOption[] {
   const jix: SnapshotIndex =
     ctx.claimed_gpu_ids.length > 0 ? { ...ix, allocatedGpus: new Set([...ix.allocatedGpus, ...ctx.claimed_gpu_ids]) } : ix;
   const base = contextBaseline(physics, ix, ctx);
   const drafts = enumerateOptions(jix, job, enumCtx);
-  return rankOptions(jix, job.job_id, drafts.map((d) => scoreOption(physics, jix, d, calls, ctx, base)));
+  const hold = keepHold(physics, ix, job.job_id, recheckAfterS);
+  return rankOptions(jix, job.job_id, drafts.map((d) => scoreOption(physics, jix, d, calls, ctx, base)), hold);
 }
 
 /** The option deterministic planning takes: rank 1, else keep_running (no commands), else anything. */
@@ -764,7 +836,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   const assumed = new Map<string, string>();
   let ctx = EMPTY_CONTEXT;
   for (const job of jobs) {
-    const opts = rankJobInContext(physics, ix, job, ctx, enumCtx, toolCalls);
+    const opts = rankJobInContext(physics, ix, job, ctx, enumCtx, toolCalls, deps.recheckAfterS);
     ranked.set(job.job_id, opts);
     const top = deterministicTop(opts);
     assumed.set(job.job_id, top.option_id);
@@ -783,7 +855,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   for (const job of jobs) {
     let opts = ranked.get(job.job_id)!;
     if (diverged) {
-      opts = rankJobInContext(physics, ix, job, finalCtx, enumCtx, toolCalls);
+      opts = rankJobInContext(physics, ix, job, finalCtx, enumCtx, toolCalls, deps.recheckAfterS);
       ranked.set(job.job_id, opts);
     }
     const d = decideJob(opts, byJob.get(job.job_id), llmUp);
@@ -796,7 +868,17 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   const commands = jobPlans.flatMap((p) => p.chosen.commands);
   const plan = await buildPlan({ physics, ix, planId, runId, workflowId, attempt, incidentIds, jobPlans, commands, llmUp, toolCalls });
   await db.submitPlan(plan);
-  return { plan, commands, job_plans: jobPlans, tool_calls: toolCalls, used_llm: llmUp, ...planNarrative(jobPlans, llmUp) };
+  const rechecks = [...ranked.values()].flatMap((opts) => opts.flatMap((o) => (o.hold?.kind === 'deferred' ? [o.hold.recheck_s ?? 0] : [])));
+  const recheckAfterS = rechecks.length > 0 && deps.recheckAfterS !== undefined ? Math.max(deps.recheckAfterS, Math.min(...rechecks)) : undefined;
+  return {
+    plan,
+    commands,
+    job_plans: jobPlans,
+    tool_calls: toolCalls,
+    used_llm: llmUp,
+    ...planNarrative(jobPlans, llmUp),
+    ...(recheckAfterS !== undefined ? { recheck_after_s: recheckAfterS } : {}),
+  };
 }
 
 interface BuildPlanArgs {
