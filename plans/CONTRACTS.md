@@ -183,6 +183,7 @@ The browser can read public tables without a token. **Tokens are handed out by P
 10. **db-client also exports `upsertSymptoms(symptoms: SymptomRecord[])`** (P2 adds a reducer `upsert_symptoms`, agent role). Triage writes symptoms before linking them.
 11. **Incident severity** maps from symptom severity: critical → `critical`, warning → `high`, info → `medium`.
 12. **The triage tool `submit_incident_assessment`** may return `split_symptom_ids` (a proper subset of a candidate's symptoms) for a `split`. This is internal to P3, not a wire type.
+13. **`cancel_action(command_key, reason_code, fencing_token)`** accepts **either** the action's own lease fencing token **or** the fencing token of the workflow that owns the action, when the caller holds that workflow's lease. Replan cancels superseded actions this way. Only `requested` and `claimed` actions can be cancelled; `running` ones never can.
 
 ---
 
