@@ -308,6 +308,12 @@ export const SignalEvent = __t.object("SignalEvent", {
 });
 export type SignalEvent = __Infer<typeof SignalEvent>;
 
+export const SourceCursor = __t.object("SourceCursor", {
+  sourceId: __t.string(),
+  lastSeq: __t.f64(),
+});
+export type SourceCursor = __Infer<typeof SourceCursor>;
+
 export const Symptom = __t.object("Symptom", {
   symptomId: __t.string(),
   runId: __t.string(),

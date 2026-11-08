@@ -41,6 +41,7 @@ import ConfigureRunReducer from "./configure_run_reducer";
 import CreateRunReducer from "./create_run_reducer";
 import GrantRoleReducer from "./grant_role_reducer";
 import HeartbeatWorkflowReducer from "./heartbeat_workflow_reducer";
+import IngestObservationsReducer from "./ingest_observations_reducer";
 import InjectFaultReducer from "./inject_fault_reducer";
 import PauseRunReducer from "./pause_run_reducer";
 import PingReducer from "./ping_reducer";
@@ -460,6 +461,7 @@ const reducersSchema = __reducers(
   __reducerSchema("create_run", CreateRunReducer),
   __reducerSchema("grant_role", GrantRoleReducer),
   __reducerSchema("heartbeat_workflow", HeartbeatWorkflowReducer),
+  __reducerSchema("ingest_observations", IngestObservationsReducer),
   __reducerSchema("inject_fault", InjectFaultReducer),
   __reducerSchema("pause_run", PauseRunReducer),
   __reducerSchema("ping", PingReducer),

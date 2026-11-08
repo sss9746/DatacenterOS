@@ -519,6 +519,15 @@ export const tick_schedule = table(
   }
 );
 
+/** Last accepted source_seq per telemetry source (G3): retransmits stay rejected after their rows age out. */
+export const source_cursor = table(
+  { name: 'source_cursor' },
+  {
+    source_id: t.string().primaryKey(),
+    last_seq: t.f64(),
+  }
+);
+
 /** CONTRACTS §0.9: identity → role (`admin` | `agent` | `gateway`). */
 export const role_grant = table(
   { name: 'role_grant' },
@@ -559,6 +568,7 @@ const spacetimedb = schema({
   fault_injection_truth,
   tick_schedule,
   role_grant,
+  source_cursor,
 });
 
 export default spacetimedb;

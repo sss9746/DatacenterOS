@@ -90,6 +90,13 @@ describe('extractSymptoms', () => {
     expect(s.some((x) => x.kind === 'stale_telemetry' && x.resource_id === 'gpu-r5-n1-0')).toBe(true);
   });
 
+  it('never raises symptoms for the real GPU, even hot, throttling or stale', () => {
+    const obs = loadPumpDegradedSnapshot();
+    const base = obs.gpus[0]!;
+    obs.gpus.push({ ...base, resource_id: 'gpu-real-0', node_id: 'node-real-0', temp_c: 95, clocks_event_reasons: THERMAL_THROTTLE_BIT, last_seen_sim_ms: 0 });
+    expect(extractSymptoms(obs, []).some((x) => x.resource_id === 'gpu-real-0')).toBe(false);
+  });
+
   it('XID from a signal and from the snapshot produce the same stable symptom id', async () => {
     const obs = await setup(['r7']).getObservedSnapshot();
     const fromSnap = extractSymptoms(obs, []).find((x) => x.kind === 'gpu_xid')!;

@@ -71,8 +71,10 @@ export async function controlledReset(client: DbClient, opts: ControlledResetOpt
     });
   });
   const workflows = (await client.listOpenWorkflows()).length;
-  if (snap.gpus.length !== 64 || snap.job_states.length !== 3 || actions !== 0 || workflows !== 0) {
-    throw new Error(`controlledReset: run is not clean: ${snap.gpus.length} GPUs, ${snap.job_states.length} jobs, ${actions} actions, ${workflows} open workflows`);
+  // A running collector can recreate the real GPU's row straight after the reset; it isn't part of the run.
+  const gpus = snap.gpus.filter((g) => g.resource_id !== 'gpu-real-0').length;
+  if (gpus !== 64 || snap.job_states.length !== 3 || actions !== 0 || workflows !== 0) {
+    throw new Error(`controlledReset: run is not clean: ${gpus} GPUs, ${snap.job_states.length} jobs, ${actions} actions, ${workflows} open workflows`);
   }
-  return { run_id: runId, seed, sim_time_ms: snap.clock.sim_time_ms, tick_index: snap.clock.tick_index, gpus: snap.gpus.length, jobs: snap.job_states.length };
+  return { run_id: runId, seed, sim_time_ms: snap.clock.sim_time_ms, tick_index: snap.clock.tick_index, gpus, jobs: snap.job_states.length };
 }
