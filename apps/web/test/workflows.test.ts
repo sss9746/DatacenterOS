@@ -8,8 +8,11 @@ import { openDashboard } from '../src/data/dashboard';
 import {
   actorCounts,
   actorSummary,
+  blockedStepReason,
   buildWorkflowViews,
   candidateRound,
+  groupActions,
+  resumedWithoutDuplicate,
   latestCandidateRound,
   persistedCandidateOptions,
   readVerification,
@@ -95,6 +98,22 @@ describe('waiting vs verified', () => {
     expect(v.groups.blocked.map((l) => l.reason)).toEqual(['STALE_DECISION_EPOCH']);
     expect(v.groups.failed.map((l) => l.reason)).toEqual(['WAIT_TIMEOUT']);
   });
+  it('a BLOCKED ledger action puts the Safety step in a blocked state with the real violation as its reason', () => {
+    const v = view(wf({ stage: 'execute' }), [ev({ stage: 'safety' })], [action('failed', { key: 'b', reason: 'SAFETY_REJECTED', violations: ['STALE_DECISION_EPOCH', 'DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT'] })]);
+    expect(v.blockedReason).toBe('stale decision epoch +1');
+    expect(v.steps.find((s) => s.id === 'safety')).toMatchObject({ state: 'blocked', stateLabel: 'blocked: stale decision epoch +1' });
+    expect(v.steps.find((s) => s.id === 'execute')!.state).toBe('current');
+    // No violation codes: the ledger reason code is used, never an invented one.
+    expect(blockedStepReason(groupActions([action('failed', { key: 'b', reason: 'SAFETY_REJECTED' })]))).toBe('safety rejected');
+  });
+  it('other failures and clean workflows leave the Safety step untouched', () => {
+    expect(view(wf(), [ev({ stage: 'safety' })], [action('failed', { key: 'f', reason: 'WAIT_TIMEOUT' })]).steps.find((s) => s.id === 'safety')!.state).toBe('recorded');
+    expect(view(wf(), [], []).blockedReason).toBeNull();
+    // The current step keeps its position even when an action was blocked.
+    const cur = view(wf({ stage: 'safety' }), [], [action('failed', { key: 'b', reason: 'SAFETY_REJECTED', violations: ['X'] })]);
+    expect(cur.steps.find((s) => s.id === 'safety')!.state).toBe('current');
+    expect(cur.blockedReason).toBe('x');
+  });
 });
 
 describe('escalation', () => {
@@ -133,6 +152,24 @@ describe('resumed only with evidence', () => {
   });
   it('falls back to the resume event summary', () => {
     expect(resumeEvidence([ev({ stage: 'execute', summary: 'continuing wf-1 from stage plan after agent restart' })])?.source).toBe('event_summary');
+  });
+  it('claims "no duplicate action" only with evidence: a skip reconcile and a ledger without repeats', () => {
+    const skip = [ev({ stage: 'execute', tool_calls: [{ tool: 'get_action_status', args_summary: 'k1', result_summary: 'succeeded → skip' }] })];
+    const marker = { resumed: { by_worker: 'w2', at_sim_time_ms: 5, action: 'resumed_verify', previous_owner: 'w1' } };
+    const once = [action('succeeded', { key: 'k1', op: 'cordon_gpu' })];
+    expect(view(wf({ state: marker }), skip, once).resumedWithoutDuplicate).toBe(true);
+    // Marker only, no reconcile evidence: the claim is omitted (null), not asserted.
+    expect(view(wf({ state: marker }), [], once).resumedWithoutDuplicate).toBeNull();
+    expect(resumedWithoutDuplicate([], once, null)).toBeNull();
+    // A second ledger action for the same plan + operation + subject, or a retried attempt, contradicts the claim.
+    const twice = [action('succeeded', { key: 'k1', op: 'cordon_gpu' }), action('succeeded', { key: 'k1-again', op: 'cordon_gpu' })];
+    expect(view(wf({ state: marker }), skip, twice).resumedWithoutDuplicate).toBe(false);
+    const retried = [{ ...once[0]!, status: { ...once[0]!.status, attempt: 2 } }];
+    expect(view(wf({ state: marker }), skip, retried).resumedWithoutDuplicate).toBe(false);
+    // Rendered copy follows the evidence.
+    const html = (v: WorkflowView) => renderToStaticMarkup(createElement(WorkflowBoard, { workflows: [v.workflow], events: v.events, actionDetails: v.actions, incidents: [], snapshot: null, example: false, mode: 'mock' }));
+    expect(html(view(wf({ state: marker }), skip, once))).toContain('no duplicate action');
+    expect(html(view(wf({ state: marker }), [], once))).not.toContain('no duplicate action');
   });
 });
 
