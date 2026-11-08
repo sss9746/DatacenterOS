@@ -40,8 +40,8 @@ Should a stale version found at start be recorded as `SAFETY_REJECTED` or stay `
 - [x] Violation-free `needs_approval` still runs (mock test)
 - [x] `pnpm -r test` and typechecks match the K0 baseline plus new tests. The agent's mock integration test is the one most likely to react.
 - [x] Passes on `dcos-r-local`
-- [ ] Branch merged to `int/r-sprint` (**merge-ready at M1**; who merges is open with Suvan)
-- [ ] Gate 2 and `smoke:ledger` re-run on `dcos-dev` after R1 is merged (**closes in K3 at M2**). Never reset prod for this.
+- [x] Branch merged to `int/r-sprint` (`4202392`)
+- [x] Gate 2 and `smoke:ledger` re-run on `dcos-dev` after R1 is merged (K3, 2026-11-08 02:53 CST). Never reset prod for this.
 
 ## Not in this checkpoint
 Phase-aware completion checks (R1, Suvan). Any change to `evaluateSafety` (`packages/physics`).

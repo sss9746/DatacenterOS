@@ -31,8 +31,8 @@ When a row has no provenance, should `physics_profile_version` be `''` or stay t
 ## Done when
 - [x] Vitest passes for old, new and malformed rows, plus the corrupt-JSON case
 - [x] Live round-trip passes on `dcos-r-local`
-- [ ] Merged to `int/r-sprint` before K3's republish
-- [ ] Re-run on `dcos-dev` during K3, then test rows cleared by the reset
+- [x] Merged to `int/r-sprint` before K3's republish (`4202392`)
+- [x] Re-run on `dcos-dev` during K3, then test rows cleared by the reset
 - [x] No credentials in any output or artifact
 
 "Export" in TASKS R0 means comparison against the saved artifact. That part belongs to S6, which reads rows back and matches them.
