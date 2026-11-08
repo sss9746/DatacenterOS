@@ -1,8 +1,9 @@
 import { connect, createMockClient, type DbClient, type AgentEventInput, type Evidence, type MockDbClient } from '@dcos/db-client';
 import type { ActionStatus, EvaluationResult, Incident, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
 import { loadRecoveryExample } from './recovery-example';
+import { createLocalPhysicsClient, type LocalFacilityConfig } from './local-physics';
 
-export type Preview = 'demo' | 'pump_degraded' | 'recovery';
+export type Preview = 'physics' | 'demo' | 'pump_degraded' | 'recovery';
 export interface DashboardState {
   phase: 'loading' | 'ready' | 'error';
   snapshot: ObservedSnapshot | null;
@@ -83,11 +84,11 @@ export class DashboardStore {
   close() { this.closed = true; clearInterval(this.timer); this.unsubscribers.forEach((fn) => fn()); this.client.close(); this.listeners.clear(); }
 }
 
-export async function openDashboard(mode: 'mock' | 'live', preview: Preview, options: { uri: string; db: string; token?: string }) {
+export async function openDashboard(mode: 'mock' | 'live', preview: Preview, options: { uri: string; db: string; token?: string; localConfig?: LocalFacilityConfig }) {
   let client: DbClient;
   if (mode === 'live') client = await connect({ ...options, runId: 'run-demo-1' });
   else {
-    const mock = createMockClient({ snapshot: preview === 'pump_degraded' ? preview : 'demo' });
+    const mock = preview === 'physics' ? createLocalPhysicsClient(42, options.localConfig) : createMockClient({ snapshot: preview === 'pump_degraded' ? preview : 'demo' });
     if (preview === 'recovery') await loadRecoveryExample(mock);
     client = mock;
   }

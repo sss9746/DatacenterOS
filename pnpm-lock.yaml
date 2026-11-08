@@ -94,6 +94,9 @@ importers:
       '@dcos/evaluation':
         specifier: workspace:*
         version: link:../evaluation
+      '@dcos/physics':
+        specifier: workspace:*
+        version: link:../../packages/physics
       '@radix-ui/react-slot':
         specifier: ^1.2.3
         version: 1.5.0(@types/react@19.3.0)(react@19.3.1)
