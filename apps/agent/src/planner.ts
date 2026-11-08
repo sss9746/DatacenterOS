@@ -1,8 +1,10 @@
 // Planner (LANE-P3 P3-4). "How the agent decides":
 //   1. deterministic code enumerates concrete options per affected job
 //   2. every option is scored with physics.simulatePlan and every command checked with physics.evaluateSafety
-//   3. options are ranked per ARCHITECTURE §5 (no unsafe -> least irreversible work loss -> least completion
-//      delay -> least GPU-busy waste -> fewest preemptions; ties -> fewer commands -> option_id)
+//   3. options are ranked per ARCHITECTURE §5 (no unsafe -> least irreversible work loss -> lower failure-risk
+//      tier -> least completion delay -> least GPU-busy waste -> fewest preemptions; ties -> fewer commands ->
+//      option_id). The risk tier is the job's own risk (job-scoped simulatePlan), so a power cap that leaves a
+//      job on a degraded cooling loop does not beat a move to a healthy loop just because it is quicker.
 //   4. Nemotron chooses among the top eligible options and explains (one choose_options call for all jobs);
 //      code rejects any choice that is not an eligible option and falls back to rank 1
 //   5. the result is persisted as a PlanCandidate proposal (db.submitPlan). Nothing is executed here.
@@ -27,6 +29,8 @@ export interface RankedOption {
   metrics: PlanMetrics;
   safety: SafetyDecision[];
   rank: number;
+  /** Failure risk attributable to this option's job (job-scoped simulatePlan), 0..1. Drives the risk tier. */
+  job_risk: number;
   excluded_reason?: string;
 }
 
@@ -77,11 +81,20 @@ export const POWER_CAP_W = 500;
 export const NEAR_THROTTLE_MARGIN_C = 5;
 /** Loss differences below this share of the avoidable loss are ties (estimates aren't that precise). */
 export const LOSS_TIE_FRACTION = 0.05;
+/** Failure-risk tier width: risks within the same 0.1 bucket tie (estimates are coarse). */
+export const RISK_TIER_WIDTH = 0.1;
+/**
+ * Residual failure risk a job tolerates without paying for a move: (100 - priority) / 100. A priority-80 job
+ * tolerates 0.2 (so a power cap that leaves it at ~0.25 on a degraded loop loses to a move to a healthy loop);
+ * a priority-60 job tolerates 0.4 (a cap is good enough, no restart).
+ */
+export const riskTolerance = (priority: number): number => Math.min(1, Math.max(0, (100 - priority) / 100));
 export const EVIDENCE_WINDOW_MS = 600_000;
 export const DETERMINISTIC_EXPLANATION = 'deterministic ranking (LLM unavailable)';
 export const RANKING_ASSUMPTION =
   'ranking: unsafe excluded; lost work within max(one restart of the job, 5% of avoidable loss) of the best counts as a tie; ' +
-  'then completion delay, GPU-busy waste, preemptions, command count';
+  `then the job's own failure risk in ${RISK_TIER_WIDTH} tiers, risk up to (100 - priority)% tolerated (staying on a degraded ` +
+  'cooling loop or hot GPUs is riskier than moving to a healthy one), then completion delay, GPU-busy waste, preemptions, command count';
 
 const MAX_EXPLANATION_CHARS = 200;
 const PLAN_EXPLANATION_MAX = 2_000;
@@ -255,11 +268,33 @@ interface Scored extends DraftOption {
   metrics: PlanMetrics;
   safety: SafetyDecision[];
   violations: string[];
+  job_risk: number;
+}
+
+/**
+ * The cluster-wide failure_risk_estimate is dominated by the riskiest job anywhere, so it cannot tell two
+ * options of ONE job apart. Score the same commands on a job-scoped view (only this job's spec/state) to get
+ * the risk this option leaves on its own job. Approximation: other jobs' load is still in the observed telemetry.
+ */
+function jobScopedRisk(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption): number {
+  const snap = ix.snap;
+  const view = {
+    ...snap,
+    job_states: snap.job_states.filter((j) => j.job_id === d.job_id),
+    job_specs: snap.job_specs.filter((j) => j.job_id === d.job_id),
+  };
+  try {
+    const r = physics.simulatePlan(view, { commands: d.commands }, { horizon_s: PLANNER_HORIZON_S }).failure_risk_estimate;
+    return Number.isFinite(r) ? Math.min(1, Math.max(0, r)) : 0;
+  } catch {
+    return 0; // no job-scoped estimate: the risk tier then ties and delay decides
+  }
 }
 
 function scoreOption(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption, calls: ToolCallSummary[]): Scored {
   const snap = ix.snap;
   const metrics = physics.simulatePlan(snap, { commands: d.commands }, { horizon_s: PLANNER_HORIZON_S });
+  const job_risk = jobScopedRisk(physics, ix, d);
   const safety = d.commands.map((c) =>
     physics.evaluateSafety(snap, c, { decision_epoch: snap.clock.decision_epoch, leased_resource_ids: [] }),
   );
@@ -280,8 +315,11 @@ function scoreOption(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption, ca
   };
   calls.push(summarizeToolCall('simulate_plan', argsSummary, metrics, 'code'));
   calls.push(summarizeToolCall('evaluate_safety', { option_id: d.option_id }, { allowed: violations.length === 0, violations }, 'code'));
-  return { ...d, metrics, safety, violations };
+  return { ...d, metrics, safety, violations, job_risk };
 }
+
+/** Coarse risk bucket (0.1 wide), 0 when within the job's tolerance; the epsilon absorbs float error. */
+export const riskTier = (risk: number, tolerance = 0): number => (risk <= tolerance + 1e-9 ? 0 : Math.floor(risk / RISK_TIER_WIDTH + 1e-9));
 
 const preemptions = (o: Scored): number =>
   o.commands.filter((c) => c.operation === 'migrate_restart' || c.operation === 'pause_job').length;
@@ -296,10 +334,12 @@ export function rankOptions(ix: SnapshotIndex, jobId: string, scored: Scored[]):
   const bestLost = Math.min(...eligible.map((o) => o.metrics.expected_lost_work_units));
   const avoidable = keepLost !== undefined ? Math.max(0, keepLost - bestLost) : 0;
   const tol = Math.max(restartCost, LOSS_TIE_FRACTION * avoidable);
+  const tolerance = riskTolerance(spec?.priority ?? 0);
   const lossTier = (o: Scored) => (o.metrics.expected_lost_work_units <= bestLost + tol ? -1 : o.metrics.expected_lost_work_units);
   eligible.sort(
     (a, b) =>
       lossTier(a) - lossTier(b) ||
+      riskTier(a.job_risk, tolerance) - riskTier(b.job_risk, tolerance) ||
       a.metrics.expected_completion_delay_sim_s - b.metrics.expected_completion_delay_sim_s ||
       a.metrics.expected_gpu_busy_waste_s - b.metrics.expected_gpu_busy_waste_s ||
       preemptions(a) - preemptions(b) ||
@@ -340,6 +380,7 @@ function buildLlmPayload(ix: SnapshotIndex, incidents: Incident[], ranked: Map<s
     return {
       job_id: jobId,
       priority: spec?.priority,
+      risk_tolerance: spec ? riskTolerance(spec.priority) : undefined,
       preemptible: spec?.preemptible,
       checkpoint_supported: spec?.checkpoint_supported,
       unsaved_work_units: st ? st.progress_work_units - st.durable_work_units : undefined,
@@ -353,7 +394,7 @@ function buildLlmPayload(ix: SnapshotIndex, incidents: Incident[], ranked: Map<s
           lost_wu: round(o.metrics.expected_lost_work_units),
           delay_s: round(o.metrics.expected_completion_delay_sim_s),
           waste_s: round(o.metrics.expected_gpu_busy_waste_s),
-          risk: round(o.metrics.failure_risk_estimate * 100) / 100,
+          risk: Math.round(o.job_risk * 100) / 100,
         })),
       excluded: opts.filter((o) => o.excluded_reason).slice(0, 4).map((o) => ({ option_id: o.option_id, reason: o.excluded_reason })),
     };

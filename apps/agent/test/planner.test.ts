@@ -4,7 +4,10 @@ import {
   DETERMINISTIC_EXPLANATION,
   LLM_PAYLOAD_MAX_BYTES,
   PLANNER_HORIZON_ASSUMPTION,
+  RANKING_ASSUMPTION,
   planIncidents,
+  riskTier,
+  riskTolerance,
   type PlanResult,
 } from '../src/planner.js';
 import type { LlmChatRequest } from '../src/ports.js';
@@ -330,6 +333,64 @@ describe('reservedGpuIds and fresh checkpoint reuse', () => {
     expect(allOptions(strict, 'job-a').some((o) => o.commands.some((c) => c.operation === 'checkpoint'))).toBe(true);
     const dflt = await run(new FakeLlm([pickTop()]));
     expect(allOptions(dflt, 'job-a').some((o) => o.commands.some((c) => c.operation === 'checkpoint'))).toBe(false);
+  });
+
+  // Intended behavior change (risk tier): before it, a fresh checkpoint made the power cap tie the move on lost
+  // work (within one restart) and the cap won on delay, leaving job-a on degraded loop-a. Now the job's own risk
+  // decides first: the move leaves ~0.02, the cap ~0.25, above job-a's tolerance of 0.2.
+  /** Like the demo after job-a's checkpoint completed: durable work == progress, checkpoint 5 s old. */
+  const justCheckpointed = async () => {
+    const snap = loadPumpDegradedSnapshot();
+    const a = snap.job_states.find((j) => j.job_id === 'job-a')!;
+    a.durable_work_units = a.progress_work_units;
+    a.latest_checkpoint_id = 'ckpt-job-a-fresh';
+    snap.checkpoints.push({ ...snap.checkpoints[0]!, checkpoint_id: 'ckpt-job-a-fresh', job_id: 'job-a', complete_sim_time_ms: snap.clock.sim_time_ms - 5_000 });
+    db = new FakeDb({ snapshot: snap, physics });
+    await setup([[PUMP, ['pump-a', 'loop-a', 'rack-r2', 'rack-r3', 'rack-r4']]]);
+  };
+
+  it('risk tier: with a fresh checkpoint, job-a moves to a healthy loop instead of a power cap in place', async () => {
+    await justCheckpointed();
+    const r = await run(new FakeLlm([new Error('down')]));
+    const a = jobPlan(r, 'job-a');
+    const cap = allOptions(r, 'job-a').find((o) => o.option_id === 'job-a:cap')!;
+    expect(a.chosen.commands.map((c) => c.operation)).toEqual(['migrate_restart']);
+    expect(destRacks(r, 'job-a').every((x) => COOL_RACKS.has(x))).toBe(true);
+    expect(cap.excluded_reason).toBeUndefined();
+    expect(cap.rank).toBeGreaterThan(a.chosen.rank);
+    expect(a.chosen.job_risk).toBeLessThan(cap.job_risk);
+    const restartCost = 16 * 1 * 120; // gpus * rate * restart_s: the lost-work tie tolerance
+    expect(Math.abs(cap.metrics.expected_lost_work_units - a.chosen.metrics.expected_lost_work_units)).toBeLessThanOrEqual(restartCost);
+    expect(a.chosen.metrics.expected_completion_delay_sim_s).toBeGreaterThan(cap.metrics.expected_completion_delay_sim_s);
+    // job-b (priority 60) tolerates the cap's residual risk and still avoids a restart
+    expect(jobPlan(r, 'job-b').chosen.option_id).toBe('job-b:cap');
+    expect(r.plan.assumptions).toContain(RANKING_ASSUMPTION);
+    expect(RANKING_ASSUMPTION).toMatch(/failure risk/);
+  });
+
+  it('sends Nemotron the job-scoped risk and the job risk tolerance', async () => {
+    await justCheckpointed();
+    const llm = new FakeLlm([pickTop()]);
+    await run(llm);
+    const user = llm.requests[0]!.messages.find((m) => m.role === 'user');
+    const text = String(user && 'content' in user ? user.content : '');
+    const input = JSON.parse(text.slice(text.indexOf('PLANNING_INPUT=') + 'PLANNING_INPUT='.length)) as {
+      jobs: { job_id: string; risk_tolerance: number; options: { option_id: string; risk: number }[] }[];
+    };
+    const a = input.jobs.find((j) => j.job_id === 'job-a')!;
+    expect(a.risk_tolerance).toBeCloseTo(0.2);
+    expect(a.options[0]!.option_id).toContain('move');
+    expect(a.options[0]!.risk).toBeCloseTo(0.02);
+  });
+
+  it('riskTier buckets by 0.1 and treats risk within tolerance as tier 0', () => {
+    expect(riskTier(0.02)).toBe(0);
+    expect(riskTier(0.25)).toBe(2);
+    expect(riskTier(0.3)).toBe(3);
+    expect(riskTier(0.25, riskTolerance(60))).toBe(0);
+    expect(riskTier(0.25, riskTolerance(80))).toBe(2);
+    expect(riskTolerance(80)).toBeCloseTo(0.2);
+    expect(riskTolerance(150)).toBe(0);
   });
 
   it('is unchanged when neither option is given and the checkpoint is stale', async () => {

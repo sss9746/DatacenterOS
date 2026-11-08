@@ -6,9 +6,10 @@
 //
 // Steps: (1) healthy gpu_demo_8 cluster, (2) pump-a degrades (+ rack r1 runs hot), (3) the loop triages one
 // incident and plans per job (hot r1 destinations BLOCKED by safety), (4) XID 79 hits job-a's planned
-// destination mid-checkpoint -> second incident -> replan -> new destination, (5) the agent is killed while
-// the replanned action runs; the DB keeps going; a NEW worker resumes by command key with no duplicate,
-// (6) verify + handoff, (7) summary table. Exit 0 only if every check passes.
+// destination mid-checkpoint -> second incident -> replan -> job-a moves to ANOTHER SAFE placement (healthy
+// loop, not the XID GPU, not hot r1; a power cap in place on the degraded loop loses on failure risk),
+// (5) the agent is killed during the replanned migrate; the DB keeps going; a NEW worker resumes by command
+// key with no duplicate, (6) verify + handoff, (7) summary table. Exit 0 only if every check passes.
 
 import type { ActionCommand, SignalEvent } from '@dcos/contracts';
 import { createAgentLoop, type AgentLoop } from '../src/agent-loop.js';
@@ -24,6 +25,7 @@ import { killable } from './crash-test.js';
 
 const LLM_CALL_BUDGET = 12;
 const HOT_RACK = 'rack-r1';
+const DEGRADED_LOOP = 'loop-a';
 const TTY = process.stdout.isTTY === true;
 const color = (code: number, s: string) => (TTY ? `\x1b[${code}m${s}\x1b[0m` : s);
 const bold = (s: string) => color(1, s);
@@ -178,10 +180,16 @@ async function collectChecks(w: World, xidGpu: string | null, killedKey: string 
   const gpus = jobA?.allocated_gpu_ids ?? [];
   const rackOf = (g: string) => snap.nodes.find((n) => n.resource_id === snap.gpus.find((x) => x.resource_id === g)?.node_id)?.rack_id;
   const racks = [...new Set(gpus.map(rackOf))];
-  const moved = !racks.includes('rack-r2') && !racks.includes('rack-r3');
-  const capped = (await w.db.getObservedSnapshot()).job_states.some((j) => j.job_id === 'job-a') && w.db.listActions().some((a) => a.status === 'succeeded' && a.command_key.includes(':power_cap:job-a:'));
-  const safe = gpus.length === 16 && !!xidGpu && !gpus.includes(xidGpu) && !racks.includes(HOT_RACK) && (moved || capped);
-  add('job-a safe (never on XID GPU / hot r1)', safe, `${moved ? 'moved to' : capped ? 'power-capped in place on' : 'still on'} ${racks.map((r) => r?.replace('rack-', '')).join('+')} (XID on ${xidGpu ?? '-'})`);
+  const short = (rs: (string | undefined)[]) => rs.map((r) => r?.replace('rack-', '') ?? '?').join('+');
+  const loopARacks = new Set(snap.dependencies.filter((d) => d.relation === 'cooled_by' && d.provider_id === DEGRADED_LOOP).map((d) => d.consumer_id));
+  const movedOk = w.db.listActions().some((a) => a.status === 'succeeded' && a.command_key.includes(':migrate_restart:job-a:'));
+  const safePlacement =
+    movedOk && gpus.length === 16 && !!xidGpu && !gpus.includes(xidGpu) && !racks.some((r) => r === HOT_RACK || (r !== undefined && loopARacks.has(r)));
+  add(
+    'job-a moved to a safe placement (not loop-a, not XID GPU)',
+    safePlacement,
+    `${movedOk ? 'moved to' : 'still on'} ${short(racks)}; loop-a cools ${short([...loopARacks].sort())}; XID on ${xidGpu ?? '-'}`,
+  );
   const perKey = new Map<string, number>();
   for (const c of snap.checkpoints) if (c.status === 'complete' && c.command_key) perKey.set(c.command_key, (perKey.get(c.command_key) ?? 0) + 1);
   const dupCkpt = [...perKey.values()].filter((n) => n > 1).length;
@@ -247,13 +255,14 @@ async function main(): Promise<number> {
   // ---- (3) + (4)
   step(3, 'agent loop: triage -> diagnose -> plan (keep / cap / checkpoint+relocate, safety-checked)');
   const xidGpu = armXidInjection(w, (gpu) => {
-    step(4, `XID 79 on ${gpu} = job-a's planned destination, mid-checkpoint`);
+    step(4, `XID 79 on ${gpu} = job-a's planned destination, mid-checkpoint -> second incident -> replan to another safe placement`);
   });
   const run1 = loop1.runOnce();
   const outcome = await Promise.race([w1.killed.then(() => 'killed' as const), run1.then(() => 'finished' as const)]);
 
   // ---- (5)
-  step(5, `agent process killed while ${killedKey ?? '(nothing)'} runs; SpacetimeDB (fake) keeps ticking`);
+  const killedOp = (killedKey as string | null)?.split(':')[1] ?? '(nothing)';
+  step(5, `agent process killed during the replanned ${killedOp} (${killedKey ?? '-'}); SpacetimeDB (fake) keeps ticking`);
   if (outcome !== 'killed') console.log('  !! the kill point was never reached');
   w.db.tick(5_000);
   const during = killedKey ? await w.db.getActionStatus(killedKey) : null;
@@ -297,7 +306,7 @@ function printSummary(w: World, llm: LlmSetup, checks: Check[]): void {
   console.log(`  ${bold('nemotron')}   ${llm.mode}: ${llm.calls.length} call(s), ${ok.length} ok, ${llm.calls.length - ok.length} failed, avg latency ${avg} ms`);
   console.log(`  ${bold('feed')}       ${w.db.agentEvents.length} agent events (${w.db.agentEvents.filter((e) => e.actor === 'nemotron').length} by Nemotron)`);
   console.log(`  ${bold('checks')}`);
-  for (const c of checks) console.log(`    ${c.ok ? color(32, 'PASS') : color(31, 'FAIL')}  ${pad(c.name, 40)} ${c.detail}`);
+  for (const c of checks) console.log(`    ${c.ok ? color(32, 'PASS') : color(31, 'FAIL')}  ${pad(c.name, 58)} ${c.detail}`);
   console.log(`\n${checks.every((c) => c.ok) ? bold('DEMO OK') : bold('DEMO FAILED')}  (LOCAL DEMO on in-memory fakes; live version runs on SpacetimeDB)`);
 }
 

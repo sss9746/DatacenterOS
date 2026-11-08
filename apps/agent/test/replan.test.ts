@@ -254,6 +254,22 @@ describe('watcher trigger rules', () => {
     w.dispose();
   });
 
+  it('attached after a restart: an adopted, already-running action of the plan is still recognised as our own', async () => {
+    const { db, plan } = await setup();
+    const ckpt = plan.commands.find((c) => c.operation === 'checkpoint')!;
+    const s = await db.requestAction(ckpt);
+    const { fencing_token } = await db.claimAction(ckpt.command_key, s.version, 'worker-1');
+    await db.startAction(ckpt.command_key, fencing_token);
+    // the watcher never saw the `running` event (it belonged to the dead worker)
+    const w = createReplanWatcher({ db }, plan);
+    await flush();
+    db.tick(60_000); // checkpoint completes -> job-a version bump
+    await flush();
+    expect((await db.getActionStatus(ckpt.command_key))?.status).toBe('succeeded');
+    expect(w.shouldAbort()).toBe(false);
+    w.dispose();
+  });
+
   it('does not abort on a signal for an unrelated resource (triage may still open its own incident)', async () => {
     const { db, plan } = await setup();
     const r7 = loadSignalXid79R7();

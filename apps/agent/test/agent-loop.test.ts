@@ -137,6 +137,38 @@ describe('createAgentLoop.runOnce', () => {
     for (const n of requestsPerKey(w.db).values()) expect(n).toBe(1);
   });
 
+  it('replan with Nemotron: job-a takes another safe placement; feed does not repeat the narrative or triage calls', async () => {
+    const w = world();
+    const xid = armXid(w);
+    const llm = new FakeLlm(Array.from({ length: 8 }, () => plannerNemotron));
+    const r = await makeLoop(w, { llm }).runOnce();
+    expect(r.replans).toHaveLength(1);
+    // §11: the replanned job-a moves (healthy loop-b racks, not the XID GPU), not a power cap in place on loop-a
+    const a2 = r.plans[1]!.job_plans.find((p) => p.job_id === 'job-a')!;
+    expect(a2.chosen.commands.map((c) => c.operation)).toContain('migrate_restart');
+    const snap = await w.db.getObservedSnapshot();
+    const rackOf = (g: string) => snap.nodes.find((n) => n.resource_id === snap.gpus.find((x) => x.resource_id === g)?.node_id)?.rack_id;
+    const racks = new Set(snap.job_states.find((j) => j.job_id === 'job-a')!.allocated_gpu_ids.map(rackOf));
+    for (const hot of ['rack-r2', 'rack-r3', 'rack-r4']) expect(racks.has(hot)).toBe(false);
+    expect(snap.job_states.find((j) => j.job_id === 'job-a')!.allocated_gpu_ids).not.toContain(xid());
+
+    const evs = w.db.agentEvents;
+    const lastReplan = evs.map((e, i) => [e, i] as const).filter(([e]) => e.stage === 'replan').pop()!;
+    const nextPlan = evs.slice(lastReplan[1] + 1).find((e) => e.stage === 'plan')!;
+    expect(lastReplan[0].actor).toBe('nemotron');
+    expect(nextPlan.summary).not.toBe(lastReplan[0].summary);
+    expect(nextPlan.summary).toMatch(/^new plan /);
+    const key = (t: { tool: string; args_summary: string; result_summary: string }) => `${t.tool}|${t.args_summary}|${t.result_summary}`;
+    const replanCalls = new Set(lastReplan[0].tool_calls.map(key));
+    expect(nextPlan.tool_calls.some((t) => t.tool === CHOOSE_OPTIONS_TOOL_NAME && replanCalls.has(key(t)))).toBe(false);
+
+    const triageEv = evs.find((e) => e.stage === 'triage')!;
+    const diagEv = evs.find((e) => e.stage === 'diagnose')!;
+    const shown = new Set(triageEv.tool_calls.map(key));
+    expect(triageEv.tool_calls.length).toBeGreaterThan(0);
+    expect(diagEv.tool_calls.some((t) => shown.has(key(t)))).toBe(false);
+  });
+
   it('escalates once the replan cap is reached', async () => {
     const w = world();
     armXid(w);
@@ -249,6 +281,53 @@ describe('createAgentLoop.start (resume on boot)', () => {
     expect(snap.checkpoints.filter((c) => c.command_key === killedKey && c.status === 'complete')).toHaveLength(1);
     expect(await w.db.listOpenWorkflows()).toHaveLength(0);
     expect([...w.db.incidents.values()].every((i) => i.state === 'monitoring')).toBe(true);
+  });
+
+  it('XID 79 on the destination while the agent is dead: resume replans (attempt 2) instead of escalating', async () => {
+    const w = world();
+    let ckKey: string | null = null;
+    const k = killable(w.db, (m, args, phase) => {
+      if (m !== 'startAction' || phase !== 'after' || !String(args[0]).includes(':checkpoint:job-a:')) return false;
+      ckKey = String(args[0]);
+      return true;
+    });
+    const loop1 = makeLoop(w, { db: k.db, workerId: 'worker-1' });
+    loops.pop(); // dead worker: never await its stop
+    void loop1.runOnce();
+    await k.killed;
+    const wf = (await w.db.listOpenWorkflows())[0]!;
+    const dest = ((wf.state.commands ?? []) as ActionCommand[]).filter((c) => c.job_id === 'job-a').flatMap(destOf)[0]!;
+    expect(dest).toBeDefined();
+    const sim = w.simNow() + 1_000;
+    w.db.injectSignal({ ...loadSignalXid79Dest(), event_id: `sig-xid-${dest}-${sim}`, resource_id: dest, sim_time_ms: sim, evidence: { xid_code: 79, gpu_id: dest } });
+    w.db.advanceWallMs(Math.max(CLAIM_LEASE_MS, DEFAULT_LEASE_MS) + 1_000);
+
+    const events = createEventPublisher({ db: w.db, runId: RUN_ID, clock: w.clock, redact: (s) => s, startSeq: 1000 });
+    const loop2 = makeLoop(w, { workerId: 'worker-2', events });
+    await loop2.start();
+    const item = loop2.lastResume()!.items[0]!;
+    expect(item.action).toBe('resumed_execute');
+    expect(item.note).toMatch(/REPLANNED/);
+    expect(item.reconciled.find((r) => r.command_key === ckKey)?.decision).toBe('wait');
+    expect(w.db.agentEvents.some((e) => e.stage === 'replan' && e.summary.includes(dest))).toBe(true);
+
+    // the dead GPU was never targeted again; job-a moved with an attempt-2 key
+    const moves = w.db.calls.filter((c) => c.method === 'requestAction' && (c.args[0] as ActionCommand).operation === 'migrate_restart').map((c) => c.args[0] as ActionCommand);
+    expect(moves.length).toBeGreaterThan(0);
+    for (const m of moves) {
+      expect(destOf(m)).not.toContain(dest);
+      expect(m.command_key.endsWith(':2')).toBe(true);
+    }
+    const snap = await w.db.getObservedSnapshot();
+    const jobA = snap.job_states.find((j) => j.job_id === 'job-a')!;
+    expect(jobA.allocated_gpu_ids).not.toContain(dest);
+    expect(w.db.listActions().find((a) => a.command_key === moves[0]!.command_key)?.status).toBe('succeeded');
+    // exactly once: one request per key, the interrupted checkpoint completed once and was kept
+    for (const n of requestsPerKey(w.db).values()) expect(n).toBe(1);
+    expect(snap.checkpoints.filter((c) => c.command_key === ckKey && c.status === 'complete')).toHaveLength(1);
+    expect(w.db.calls.some((c) => c.method === 'requestAction' && (c.args[0] as ActionCommand).command_key.includes(':checkpoint:job-a:2'))).toBe(false);
+    expect(await w.db.listOpenWorkflows()).toHaveLength(0);
+    expect([...w.db.incidents.values()].some((i) => i.state === 'escalated')).toBe(false);
   });
 
   it('runs resume before triage, then reacts to db changes until stopped', async () => {
