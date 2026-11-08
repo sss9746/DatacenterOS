@@ -69,5 +69,6 @@ export function Bubble({ bubble, fresh, handoffFresh, showExample, showHandoff =
 }
 
 export function Divider({ divider }: { divider: DividerModel }) {
-  return <li className="ar-divider" role="separator" aria-label={divider.text}><span>{divider.text}</span></li>;
+  // A plain list item (no separator role: not an allowed child of a list); the text itself is the accessible content.
+  return <li className="ar-divider"><span>{divider.text}</span></li>;
 }
