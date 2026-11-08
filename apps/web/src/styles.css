@@ -376,3 +376,10 @@ td small { display: block; color: var(--muted); font-size: 9px; margin-top: 5px;
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Model assumptions (scope §2): compact read-only key/value list. */
+.model-assumptions-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.5rem 1.25rem; margin: 0.75rem 0 0; }
+.model-assumptions-list div { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.model-assumptions-list dt { color: var(--muted); font-size: 0.78rem; }
+.model-assumptions-list dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.model-assumptions-note { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.8rem; }

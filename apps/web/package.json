@@ -4,16 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "dev": "pnpm --filter @dcos/physics build && vite --host 127.0.0.1",
+    "build": "pnpm --filter @dcos/physics build && tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run",
+    "test": "pnpm --filter @dcos/physics build && vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@dcos/contracts": "workspace:*",
     "@dcos/db-client": "workspace:*",
     "@dcos/evaluation": "workspace:*",
+    "@dcos/physics": "workspace:*",
     "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

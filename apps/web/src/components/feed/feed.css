@@ -1,0 +1,3 @@
+.feed-badges { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.feed-event > p.feed-workflow { margin: 8px 0 0; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.feed-workflow code { font-size: 10px; color: #c3d3df; }
