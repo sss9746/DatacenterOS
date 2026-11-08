@@ -5,9 +5,9 @@ The P2 lane split into one file per task. Source of truth for scope: [`plans/LAN
 ## Board
 | # | Checkpoint | Due | Gate | Depends on | Status |
 |---|---|---|---|---|---|
-| 0 | [Setup + booth questions](P2-0-setup.md) | 8:15 PM | — | — | ☐ |
-| 1 | [Scaffold module + publish + bindings](P2-1-scaffold.md) | 9:00 PM | **Gate 0** | P2-0 | ☐ |
-| 2 | [db-client wrapper + mock](P2-2-db-client-mock.md) ‖ | 9:00 PM | Gate 0 | P1 fixtures (or local stand-ins) | ☐ |
+| 0 | [Setup + booth questions](P2-0-setup.md) | 8:15 PM | — | — | ◐ booth Qs |
+| 1 | [Scaffold module + publish + bindings](P2-1-scaffold.md) | 9:00 PM | **Gate 0** | P2-0 | ☑ |
+| 2 | [db-client wrapper + mock](P2-2-db-client-mock.md) ‖ | 9:00 PM | Gate 0 | P1 fixtures (or local stand-ins) | ☑ (ping P3/P4) |
 | 3 | [Tier 1 tables + `create_run`](P2-3-tables-create-run.md) | 10:45 PM | — | P2-1, P1 `buildPreset` | ☐ |
 | 4 | [`advance_tick` + `inject_fault`](P2-4-tick-faults.md) | 11:30 PM | **Gate 1** | P2-3, P1 `step` | ☐ |
 | 5 | [Action ledger](P2-5-action-ledger.md) | 1:00 AM | — | P2-4, P1 `evaluateSafety` | ☐ |

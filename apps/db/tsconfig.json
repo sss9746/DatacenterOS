@@ -1,0 +1,15 @@
+// SpacetimeDB module tsconfig. The options in the second block are required by SpacetimeDB.
+{
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+
+    "target": "ESNext",
+    "lib": ["ES2021", "dom"],
+    "module": "ESNext",
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}

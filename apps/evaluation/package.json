@@ -1,0 +1,10 @@
+{
+  "name": "@dcos/evaluation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/report.ts" },
+  "scripts": { "build": "tsc --noEmit", "test": "vitest run", "evaluate": "tsx src/main.ts" },
+  "dependencies": { "@dcos/contracts": "workspace:*", "@dcos/db-client": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.20.0", "tsx": "^4.20.6", "typescript": "^5.9.3", "vitest": "^2.1.9" }
+}

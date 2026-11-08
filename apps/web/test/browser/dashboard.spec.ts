@@ -1,0 +1,26 @@
+import { expect, test } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+test('cluster, fault rollback, playback, recovery example, and responsive accessibility', async ({ page }, testInfo) => {
+  const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/'); await expect(page.locator('[data-gpu]')).toHaveCount(64);
+  await expect(page.getByRole('heading', { name: 'No matched evaluation runs yet' })).toBeVisible();
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  const clock = await page.getByTestId('sim-clock').innerText(); await page.waitForTimeout(1100); expect(await page.getByTestId('sim-clock').innerText()).toBe(clock);
+  await page.locator('[data-gpu="gpu-r3-n1-0"]').focus(); await page.keyboard.press('ArrowRight'); await expect(page.locator('[data-gpu="gpu-r3-n1-1"]')).toBeFocused();
+  await page.getByText('Judge controls', { exact: true }).click();
+  await page.getByRole('button', { name: 'Inject XID 79' }).click();
+  await expect(page.locator('[data-gpu="gpu-r3-n1-0"]')).toHaveAttribute('aria-label', /XID 79/);
+  await expect(page.locator('#jobs')).toContainText('work units lost');
+  await page.getByRole('button', { name: 'Reset run', exact: true }).click(); await page.getByRole('button', { name: 'Confirm reset', exact: true }).click();
+  await expect(page.locator('[data-gpu="gpu-r3-n1-0"]')).toHaveAttribute('aria-label', /ready/);
+  await page.getByLabel('Preview fixture').selectOption('recovery');
+  await expect(page.locator('.incident')).toHaveCount(2); await expect(page.locator('.feed-event')).toHaveCount(3);
+  await page.locator('.tool-call summary').first().click(); await expect(page.locator('.tool-call[open]')).toContainText('Example: exclude');
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const accessibility = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.screenshot({ path: `.impeccable/review/${testInfo.project.name}.png`, fullPage: true, animations: 'disabled' });
+  expect(errors).toEqual([]);
+});

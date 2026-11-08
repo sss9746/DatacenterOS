@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.1.0",
+  "event_id": "sig.150000.gpu-r3-n1-0.xid_error",
+  "run_id": "run-demo-1",
+  "resource_id": "gpu-r3-n1-0",
+  "source_kind": "simulator",
+  "source_id": "sim-engine-1",
+  "source_seq": 150900,
+  "sim_time_ms": 150000,
+  "observed_unix_ms": 1794091350000,
+  "event_type": "xid_error",
+  "xid_code": 79,
+  "severity": "critical",
+  "message": "Xid 79: GPU has fallen off the bus (simulated)",
+  "evidence": {
+    "xid_code": 79,
+    "gpu_id": "gpu-r3-n1-0",
+    "node_id": "node-r3-n1",
+    "rack_id": "rack-r3",
+    "dcgm_field": "DCGM_FI_DEV_XID_ERROR",
+    "dcgm_field_id": 230,
+    "simulated": true
+  }
+}
