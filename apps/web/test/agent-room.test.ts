@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentEventInput, ToolCallSummary, WorkflowRecord } from '@dcos/db-client';
 import type { Incident } from '@dcos/contracts';
 import { seatOf } from '../src/components/agent-room/seat-of';
-import { boundSummary, buildRoomView, resumeAnchorIndex, resumeDividerText, type Bubble, type Divider } from '../src/components/agent-room/room-view';
+import { boundSummary, buildRoomView, dividerText, processName, processOfEvent, resumeAnchorIndex, resumeDividerText, type Bubble, type Divider } from '../src/components/agent-room/room-view';
 
 const call = (tool: string, actor: ToolCallSummary['actor'] = 'code'): ToolCallSummary => ({ tool, args_summary: 'a', result_summary: 'r', actor });
 let seq = 0;
@@ -138,5 +138,55 @@ describe('buildRoomView', () => {
     expect(stale.planner).toBe('done');
     const frozen = buildRoomView({ events, workflows: [wf()], incidents: [], nowUnixMs: now + 60_000, example: true }).seatStates;
     expect(frozen.planner).toBe('thinking');
+  });
+});
+
+describe('agent processes', () => {
+  const now = 1_700_000_100_000;
+  it('processName strips one trailing pid segment and is null for empty ids', () => {
+    expect(processName('agent-alpha-12345')).toBe('agent-alpha');
+    expect(processName('agent-host-1-99')).toBe('agent-host-1');
+    expect(processName('example-agent-2')).toBe('example-agent');
+    expect(processName(null)).toBeNull();
+    expect(processName(undefined)).toBeNull();
+    expect(processName('')).toBeNull();
+  });
+  it('attributes events to previous_owner before the resume marker and by_worker at/after; lease_owner without a marker; never guesses', () => {
+    const marker = { previous_owner: 'agent-alpha-1', by_worker: 'agent-beta-2', at_sim_time_ms: 200 };
+    expect(processOfEvent(100, marker, 'agent-beta-2')).toBe('agent-alpha');
+    expect(processOfEvent(200, marker, 'agent-beta-2')).toBe('agent-beta');
+    expect(processOfEvent(100, null, 'agent-gamma-7')).toBe('agent-gamma');
+    expect(processOfEvent(100, { previous_owner: null, by_worker: 'agent-beta-2', at_sim_time_ms: 200 }, 'agent-beta-2')).toBeNull();
+    expect(processOfEvent(100, null, null)).toBeNull();
+  });
+  it('threads carry the lease owner chip from lease_owner only, with a lapsed state for open workflows', () => {
+    const events = [ev({ workflow_id: 'wf-1' })];
+    const owned = buildRoomView({ events, workflows: [wf({ lease_owner: 'agent-alpha-12345', lease_expires_unix_ms: now + 60_000 })], incidents: [], nowUnixMs: now, example: false }).threads[0]!;
+    expect(owned.owner).toBe('agent-alpha');
+    expect(owned.leaseLapsed).toBe(false);
+    const lapsed = buildRoomView({ events, workflows: [wf({ lease_owner: 'agent-alpha-12345', lease_expires_unix_ms: now - 1 })], incidents: [], nowUnixMs: now, example: false }).threads[0]!;
+    expect(lapsed.leaseLapsed).toBe(true);
+    const done = buildRoomView({ events, workflows: [wf({ stage: 'done', lease_owner: 'agent-alpha-12345', lease_expires_unix_ms: now - 1 })], incidents: [], nowUnixMs: now, example: false }).threads[0]!;
+    expect(done.leaseLapsed).toBe(false);
+    const unowned = buildRoomView({ events, workflows: [wf({ lease_owner: null })], incidents: [], nowUnixMs: now, example: false }).threads[0]!;
+    expect(unowned.owner).toBeNull();
+    expect((unowned.items[0] as Bubble).process).toBeNull();
+  });
+  it('bubbles carry the owning process split at the resume marker and the divider reads as a takeover when processes differ', () => {
+    const events = [
+      ev({ workflow_id: 'wf-1', sim_time_ms: 100, stage: 'execute', tool_calls: [call('start_action')] }),
+      ev({ workflow_id: 'wf-1', sim_time_ms: 200, stage: 'execute', summary: 'resumed after agent restart: skipped', tool_calls: [call('get_action_status')] }),
+    ];
+    const state = { resumed: { by_worker: 'agent-beta-2', at_sim_time_ms: 200, action: 'resumed_verify', previous_owner: 'agent-alpha-1' }, resume_count: 1 };
+    const view = buildRoomView({ events, workflows: [wf({ state, lease_owner: 'agent-beta-2', lease_expires_unix_ms: now + 1 })], incidents: [], nowUnixMs: now, example: false });
+    const bubbles = view.threads[0]!.items.filter((i): i is Bubble => i.kind === 'bubble');
+    expect(bubbles.map((b) => b.process)).toEqual(['agent-alpha', 'agent-beta']);
+    expect((view.threads[0]!.items[1] as Divider).text).toBe('agent-alpha stopped → agent-beta took over (lease reclaimed, #1), reconciling…');
+    expect(view.counts.processes).toBe(2);
+  });
+  it('keeps the plain resume wording when the same process restarted or the previous owner is unknown', () => {
+    expect(dividerText({ previous_owner: 'agent-alpha-1', by_worker: 'agent-alpha-9', count: 2 })).toBe('Agent process stopped → new process resumed by agent-alpha-9 (#2), reconciling…');
+    expect(dividerText({ previous_owner: null, by_worker: 'agent-beta-2', count: null })).toBe('Agent process stopped → new process resumed by agent-beta-2, reconciling…');
+    expect(dividerText({ previous_owner: 'agent-alpha-1', by_worker: 'agent-beta-2', count: null })).toBe('agent-alpha stopped → agent-beta took over (lease reclaimed), reconciling…');
   });
 });

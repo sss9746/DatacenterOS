@@ -55,7 +55,7 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
 
   const detail = (
     <div className="ar-head-right">
-      <strong className="ar-head-line">6 specialists · 2 Nemotron · 4 code</strong>
+      <strong className="ar-head-line">6 specialists · 2 Nemotron · 4 code{view.counts.processes > 0 && ` · ${view.counts.processes} process${view.counts.processes === 1 ? '' : 'es'}`}</strong>
       <span className="ar-head-badges">
         {mode === 'live' ? <Badge tone="neutral">LIVE DB</Badge> : <Badge tone="mock">MOCK</Badge>}
         {example && <Badge tone="example">EXAMPLE</Badge>}
@@ -78,14 +78,19 @@ export function AgentRoom(props: { events: AgentEventInput[]; workflows: Workflo
               <button key={t.id} type="button" role="tab" id={`ar-tab-${t.id}`} aria-selected={selected} aria-controls="ar-stream" tabIndex={selected ? 0 : -1} className={`ar-tab ar-accent-${t.accent}${selected ? ' is-selected' : ''}`} onClick={() => setPicked(t.id)}>
                 <i className="ar-tab-swatch" aria-hidden="true"/>
                 <span className="ar-tab-title">{t.title}</span>
+                <span className="ar-tab-meta">
                 <span className="ar-tab-count">{n}</span>
+                {t.owner && (t.leaseLapsed ? <span className="ar-tab-owner is-lapsed">lease lapsed · was {t.owner}</span> : <span className="ar-tab-owner">owned by {t.owner}</span>)}
                 {t.closed && <span className="ar-tab-state">{t.workflowStage === 'escalated' ? 'needs a human' : 'done'}</span>}
                 {t.silentForS !== null && <span className="ar-tab-silent">silent for {t.silentForS}s</span>}
+                </span>
               </button>
             );
           })}
         </div>
       )}
+
+      {active?.owner && <p className={`ar-active-owner${active.leaseLapsed ? ' is-lapsed' : ''}`}>{active.leaseLapsed ? `lease lapsed · was ${active.owner}` : `owned by ${active.owner}`}</p>}
 
       <div id="ar-stream" ref={logRef} onScroll={onScroll} role="log" aria-live="polite" aria-labelledby={active ? `ar-tab-${active.id}` : undefined} className={`ar-stream ar-accent-${active?.accent ?? 'run'}`}>
         {active === null || active.items.length === 0 ? (

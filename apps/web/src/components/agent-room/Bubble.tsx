@@ -16,6 +16,7 @@ export function Bubble({ bubble, fresh, handoffFresh }: { bubble: BubbleModel; f
       <div className="ar-bubble">
         <div className="ar-msg-meta">
           <strong className="ar-msg-seat">{seat.name}</strong>
+          {bubble.process && <span className="ar-msg-process"><span aria-hidden="true">· </span>{bubble.process}<span aria-hidden="true"> ·</span></span>}
           <Badge tone={tone}>{seat.actor === 'nemotron' ? 'NVIDIA Nemotron' : seat.actor === 'code' ? 'code' : 'unattributed'}</Badge>
           {bubble.example && <Badge tone="example">EXAMPLE</Badge>}
           {bubble.blocked && <Badge tone="blocked">BLOCKED</Badge>}
