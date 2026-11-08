@@ -334,36 +334,9 @@ async function cancelSuperseded(deps: ReplanDeps, commands: ActionCommand[]): Pr
   return out;
 }
 
-/** DbPort view whose snapshot marks `reserved` GPUs as allocated, so placement never offers them. */
-function withReservedGpus(db: DbPort, reserved: Set<string>, holders: Map<string, string>): DbPort {
-  if (reserved.size === 0) return db;
-  return new Proxy(db, {
-    get(target, prop, receiver) {
-      if (prop === 'getObservedSnapshot') {
-        return async () => {
-          const snap = await target.getObservedSnapshot();
-          const already = new Set(snap.allocations.map((a) => a.gpu_id));
-          const extra = [...reserved]
-            .filter((g) => !already.has(g))
-            .map((gpu_id) => ({
-              schema_version: snap.schema_version,
-              run_id: snap.run_id,
-              job_id: holders.get(gpu_id) ?? 'reserved',
-              gpu_id,
-              since_sim_time_ms: snap.clock.sim_time_ms,
-            }));
-          return { ...snap, allocations: [...snap.allocations, ...extra] };
-        };
-      }
-      const v = Reflect.get(target, prop, receiver) as unknown;
-      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
-    },
-  });
-}
-
 const destsOfOption = (o: RankedOption): string[] => o.commands.flatMap(destinationsOf);
 
-/** Belt and braces over the snapshot overlay: swap any chosen option that lands on a reserved GPU. */
+/** Belt and braces over PlannerDeps.reservedGpuIds: swap any chosen option that lands on a reserved GPU. */
 async function enforceNoDoubleAllocation(db: DbPort, result: PlanResult, reserved: Set<string>): Promise<PlanResult> {
   if (reserved.size === 0) return result;
   const clash = (o: RankedOption) => destsOfOption(o).some((g) => reserved.has(g));
@@ -404,8 +377,6 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
 
   // (2) cancel only what is safe to cancel; remember what is still holding GPUs
   const pass = await cancelSuperseded(deps, input.previous.commands);
-  const holders = new Map<string, string>();
-  for (const c of input.previous.commands) for (const g of destinationsOf(c)) holders.set(g, c.job_id ?? 'reserved');
 
   // (3) triage again: the new failure becomes its own incident
   const triage = await runTriage({ db, llm: deps.llm, now: deps.now });
@@ -420,12 +391,13 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
   const open = [...wanted].map((id) => byId.get(id)).filter((i): i is Incident => !!i && i.state !== 'resolved');
   const planned = await planIncidents(
     {
-      db: withReservedGpus(db, pass.reserved, holders),
+      db,
       physics: deps.physics,
       llm: deps.llm ?? NO_LLM,
       workflowId,
       runId: deps.runId,
       attempt: input.attempt,
+      reservedGpuIds: [...pass.reserved].sort(),
     },
     { incidents: open.length > 0 ? open : [...triage.incidents] },
   );
