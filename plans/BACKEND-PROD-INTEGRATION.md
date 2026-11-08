@@ -22,14 +22,14 @@
 | Piece | This branch | `dcos-dev` | Prod `dcos` | Public site |
 |---|---|---|---|---|
 | DB module (incl. `ingest_observations`) | ✅ unchanged since `c1ac94d` (only checkpoint docs differ) | ✅ module `c1ac94d` | ❌ older module: `ingest_observations` → "no such reducer" | — |
+| Unique option ids web fix (`18f5a2b`) | ✅ cherry-picked | — | — | — |
 | Agent team + live progress | ✅ | ✅ L3 17/18 at 09:16 | ❌ not run | — |
 | Brev GPU: collector, `load.py`, recording, tile | ✅ | ✅ G5 passed 06:12; collector currently stopped | ❌ no reducer, no gateway role | — |
 | New UI with the Workflows team tab | ✅ | — | — | ❌ old build |
 | `origin/main` | `0b82369`, 104+ commits behind | | | |
 
 **Not on this branch yet:**
-- `18f5a2b`, only on Karthik's local `int/r-sprint`: unique ids for repeated persisted options, fixing duplicate React keys seen in live R5 runs. It cherry-picks cleanly onto this branch. Karthik pushes it, or you take it with `git cherry-pick 18f5a2b` from the patch Karthik sends.
-- `922c9c1` on `origin/int/r-sprint`: docs only.
+- `922c9c1` on `origin/int/r-sprint`: docs only. (The unique-option-ids fix `18f5a2b`, which was only on Karthik's local `int/r-sprint`, is now cherry-picked onto this branch; 244 web tests pass.)
 - An uncommitted 08:38 edit to `plans/MULTI-AGENT-HACKATHON-PLAN.md` on Karthik's machine (Codex review notes; not Karthik's). It is not in this push.
 
 ## Decision first: which database is the demo database?
@@ -42,7 +42,7 @@
 ## Steps
 
 ### 1. Land on `main` (needs Suvan's OK, about 09:40)
-1. Bring in `18f5a2b` and `origin/int/r-sprint`, then run the gate:
+1. `git merge origin/int/r-sprint` (docs only), then run the gate:
     - `pnpm --filter @dcos/physics build`;
     - the `contracts`, `db-client`, `physics`, `evaluation`, `agent`, `web` and `nvidia-smi-collector` tests;
     - `agent typecheck`;
