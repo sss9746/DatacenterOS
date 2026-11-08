@@ -1,8 +1,16 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { validatePayload, type ActionCommand, type ObservedSnapshot } from '@dcos/contracts';
-import { CLOCKS_EVENT_SW_POWER_CAP, CLOCKS_EVENT_SW_THERMAL, DbError, isDbError, isSafetyRejected, type DbChange } from '../src/ports.js';
+import { validatePayload, type ActionCommand, type Incident, type IncidentLink, type ObservedSnapshot } from '@dcos/contracts';
+import {
+  CLOCKS_EVENT_SW_POWER_CAP,
+  CLOCKS_EVENT_SW_THERMAL,
+  DbError,
+  isDbError,
+  isSafetyRejected,
+  type DbChange,
+  type SymptomRecord,
+} from '../src/ports.js';
 import { FakeDb, FakeLlm, FakePhysics, FAKE_PHYSICS_BANNER, commandPayloadHash } from './fakes/index.js';
 import { gpuId, loadPumpDegradedSnapshot, loadSignalXid79Dest, loadSignalXid79R7 } from './fixtures/index.js';
 
@@ -299,6 +307,84 @@ describe('FakeLlm (TEST-ONLY)', () => {
     expect((await llm.chat({ messages: [] })).content).toBe('done');
     await expect(llm.chat({ messages: [] })).rejects.toThrow(/exhausted/);
     expect(llm.requests).toHaveLength(4);
+  });
+});
+
+describe('FakeDb symptoms + clock gaps (TEST-ONLY)', () => {
+  const sym = (over: Partial<SymptomRecord> = {}): SymptomRecord => ({
+    symptom_id: 'sym-1',
+    run_id: 'run-demo-1',
+    resource_id: 'gpu-r7-n1-3',
+    first_seen_sim_ms: 540_000,
+    last_seen_sim_ms: 540_000,
+    kind: 'xid_error',
+    severity: 'critical',
+    evidence_event_ids: ['e1'],
+    status: 'open',
+    ...over,
+  });
+
+  it('upsertSymptoms is idempotent by symptom_id and updates last_seen/status', async () => {
+    const db = new FakeDb({ snapshot: loadPumpDegradedSnapshot() });
+    await db.upsertSymptoms([sym()]);
+    await db.upsertSymptoms([sym(), sym({ symptom_id: 'sym-2', resource_id: 'gpu-r7-n1-4' })]);
+    await db.upsertSymptoms([sym({ first_seen_sim_ms: 550_000, last_seen_sim_ms: 570_000, status: 'resolved' })]);
+    expect(db.symptoms.size).toBe(2);
+    expect(db.symptoms.get('sym-1')).toMatchObject({ first_seen_sim_ms: 540_000, last_seen_sim_ms: 570_000, status: 'resolved' });
+    expect(db.calls.filter((c) => c.method === 'upsertSymptoms')).toHaveLength(3);
+  });
+
+  it('getEvidence returns stored symptoms: run-wide when empty, link-filtered otherwise', async () => {
+    const db = new FakeDb({ snapshot: loadPumpDegradedSnapshot() });
+    await db.upsertSymptoms([sym(), sym({ symptom_id: 'sym-2', resource_id: 'gpu-r7-n1-4' })]);
+    expect((await db.getEvidence([], 60_000)).symptoms.map((s) => s.symptom_id).sort()).toEqual(['sym-1', 'sym-2']);
+    const inc = {
+      schema_version: '1.1.0',
+      run_id: 'run-demo-1',
+      incident_id: 'inc-1',
+      title: 't',
+      state: 'open',
+      severity: 'high',
+      hypothesis: null,
+      confidence: 0.5,
+      opened_sim_time_ms: 540_000,
+      updated_sim_time_ms: 540_000,
+      version: 1,
+    } as Incident;
+    const link = {
+      schema_version: '1.1.0',
+      run_id: 'run-demo-1',
+      incident_id: 'inc-1',
+      linked_id: 'sym-1',
+      link_kind: 'symptom',
+      reason: 'r',
+    } as IncidentLink;
+    await db.upsertIncident(inc, [link]);
+    const ev = await db.getEvidence(['inc-1'], 60_000);
+    expect(ev.symptoms.map((s) => s.symptom_id)).toEqual(['sym-1']);
+  });
+
+  it('tick refreshes last_seen for reachable GPUs but not for XID-79 unreachable ones', async () => {
+    const db = new FakeDb({ snapshot: loadPumpDegradedSnapshot() });
+    db.injectSignal(loadSignalXid79R7());
+    db.tick(120_000);
+    const snap = await db.getObservedSnapshot();
+    const now = snap.clock.sim_time_ms;
+    const dead = snap.gpus.find((g) => g.resource_id === 'gpu-r7-n1-3')!;
+    expect(dead.availability).toBe('unreachable');
+    expect(dead.last_seen_sim_ms).toBe(560_000);
+    for (const g of snap.gpus.filter((x) => x.availability !== 'unreachable')) expect(g.last_seen_sim_ms).toBe(now);
+  });
+
+  it('injectSignal advances the clock and getEvidence includes signals newer than the snapshot', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const db = new FakeDb({ snapshot: obs });
+    expect(obs.clock.sim_time_ms).toBeLessThan(560_000);
+    db.injectSignal(loadSignalXid79R7());
+    expect((await db.getObservedSnapshot()).clock.sim_time_ms).toBe(560_000);
+    const ev = await db.getEvidence([], 60_000);
+    expect(ev.as_of_sim_time_ms).toBe(560_000);
+    expect(ev.signals.map((s) => s.event_id)).toEqual(['sig-xid79-gpu-r7-n1-3-560000']);
   });
 });
 

@@ -302,6 +302,13 @@ export interface DbPort {
 
   listIncidents(): Promise<Incident[]>;
 
+  /**
+   * `upsert_symptoms` (CONTRACTS §0.11 #10): idempotent by `symptom_id`. A repeat call for an existing id
+   * updates `last_seen_sim_ms` / `status` (and other mutable fields); `first_seen_sim_ms` is preserved.
+   * Triage writes symptoms before linking them to an incident.
+   */
+  upsertSymptoms(symptoms: SymptomRecord[]): Promise<void>;
+
   /** `submit_plan`: persists a proposal only; never executes. */
   submitPlan(plan: PlanCandidate): Promise<void>;
 

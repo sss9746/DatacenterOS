@@ -25,6 +25,7 @@ import {
   type DbPort,
   type Evidence,
   type PhysicsPort,
+  type SymptomRecord,
   type WorkflowLease,
   type WorkflowRecord,
   type WorkflowStage,
@@ -94,6 +95,8 @@ export class FakeDb implements DbPort {
   readonly links: IncidentLink[] = [];
   readonly signals: SignalEvent[] = [];
   readonly telemetry: TelemetryEvent[] = [];
+  /** `symptom` rows by symptom_id (see upsertSymptoms). */
+  readonly symptoms = new Map<string, SymptomRecord>();
 
   private snap: ObservedSnapshot;
   private readonly actions = new Map<string, ActionRecord>();
@@ -173,6 +176,8 @@ export class FakeDb implements DbPort {
   injectSignal(sig: SignalEvent): void {
     const v = validatePayload('SignalEvent', sig);
     if (!v.ok) throw new DbError('INVALID_PAYLOAD', v.errors.join('; '));
+    // Injecting a signal advances the fake clock to at least the signal's time.
+    this.advanceClockTo(sig.sim_time_ms);
     this.signals.push(clone(sig));
     this.emit({ kind: 'signal', signal: clone(sig) });
     const gpu = this.snap.gpus.find((g) => g.resource_id === sig.resource_id);
@@ -184,6 +189,20 @@ export class FakeDb implements DbPort {
       this.emit({ kind: 'resource_version', resource_id: gpu.resource_id, version: gpu.version, sim_time_ms: this.simMs });
       this.snap.observation_event_ids.push(sig.event_id);
       this.bumpDecisionEpoch();
+    }
+  }
+
+  /** Move sim time forward (never backward) and refresh liveness of reachable GPUs. */
+  private advanceClockTo(simMs: number): void {
+    if (simMs <= this.simMs) return;
+    this.snap.clock.sim_time_ms = simMs;
+    this.refreshReachableGpus();
+  }
+
+  /** GPUs that are not unreachable keep reporting: bump last_seen_sim_ms to now so they don't go stale. */
+  private refreshReachableGpus(): void {
+    for (const g of this.snap.gpus) {
+      if (g.availability !== 'unreachable') g.last_seen_sim_ms = this.simMs;
     }
   }
 
@@ -220,6 +239,7 @@ export class FakeDb implements DbPort {
       const dt = Math.min(step, target - this.simMs);
       this.snap.clock.sim_time_ms += dt;
       this.snap.clock.tick_index += 1;
+      this.refreshReachableGpus();
       for (const rec of this.actions.values()) {
         if (rec.status.status === 'running' && rec.dueSimMs !== null && rec.dueSimMs <= this.simMs) {
           this.complete(rec);
@@ -286,21 +306,29 @@ export class FakeDb implements DbPort {
 
   async getEvidence(incidentIds: string[], windowSimMs: number): Promise<Evidence> {
     this.record('getEvidence', incidentIds, windowSimMs);
-    const from = this.simMs - windowSimMs;
-    const inWindow = <T extends { sim_time_ms: number }>(x: T) => x.sim_time_ms >= from && x.sim_time_ms <= this.simMs;
+    // Include injected signals even if timestamped after the snapshot time.
+    const asOf = Math.max(this.simMs, ...this.signals.map((x) => x.sim_time_ms));
+    const from = asOf - windowSimMs;
+    const inWindow = <T extends { sim_time_ms: number }>(x: T) => x.sim_time_ms >= from && x.sim_time_ms <= asOf;
     const wanted = new Set(incidentIds);
     const links = this.links.filter((l) => wanted.size === 0 || wanted.has(l.incident_id));
     const linkedResources = new Set(links.map((l) => l.linked_id));
     const relevant = <T extends { resource_id: string; sim_time_ms: number }>(x: T) =>
       inWindow(x) && (wanted.size === 0 || linkedResources.has(x.resource_id));
+    const symptoms = [...this.symptoms.values()].filter(
+      (sy) =>
+        sy.last_seen_sim_ms >= from &&
+        sy.first_seen_sim_ms <= asOf &&
+        (wanted.size === 0 || linkedResources.has(sy.symptom_id) || linkedResources.has(sy.resource_id)),
+    );
     return {
       run_id: this.snap.run_id,
       incident_ids: [...incidentIds],
       window_sim_ms: windowSimMs,
-      as_of_sim_time_ms: this.simMs,
+      as_of_sim_time_ms: asOf,
       incidents: [...this.incidents.values()].filter((i) => wanted.size === 0 || wanted.has(i.incident_id)).map(clone),
       links: clone(links),
-      symptoms: [],
+      symptoms: clone(symptoms),
       signals: clone(this.signals.filter(relevant)),
       telemetry: clone(this.telemetry.filter(relevant)),
     };
@@ -522,6 +550,18 @@ export class FakeDb implements DbPort {
   async listIncidents(): Promise<Incident[]> {
     this.record('listIncidents');
     return [...this.incidents.values()].map(clone);
+  }
+
+  async upsertSymptoms(symptoms: SymptomRecord[]): Promise<void> {
+    this.record('upsertSymptoms', symptoms);
+    for (const sy of symptoms) {
+      const prev = this.symptoms.get(sy.symptom_id);
+      this.symptoms.set(sy.symptom_id, {
+        ...clone(sy),
+        first_seen_sim_ms: prev ? Math.min(prev.first_seen_sim_ms, sy.first_seen_sim_ms) : sy.first_seen_sim_ms,
+        last_seen_sim_ms: prev ? Math.max(prev.last_seen_sim_ms, sy.last_seen_sim_ms) : sy.last_seen_sim_ms,
+      });
+    }
   }
 
   async submitPlan(plan: PlanCandidate): Promise<void> {
