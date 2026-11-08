@@ -42,7 +42,7 @@ describe('jobMoveTimeline (local physics: GPU dies before a checkpoint → rollb
     try {
       await store.refresh();
       const before = store.state.snapshot!.job_states.find((j) => j.job_id === 'job-a')!;
-      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.last_update_sim_time_ms, faultId: 'judge-x', kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.last_update_sim_time_ms, faultId: 'judge-x', fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
       client.tick(); await store.refresh();
       const t = jobMoveTimeline('job-a', store.state)!;
       expect(t.kind).toBe('rollback'); expect(t.phase).toBe('rolled_back');
@@ -57,7 +57,7 @@ describe('jobMoveTimeline (local physics: GPU dies before a checkpoint → rollb
     const client = createLocalPhysicsClient();
     try {
       const s0 = await client.getObservedSnapshot();
-      await client.injectFault(buildFaultInjection({ runId: s0.run_id, simTimeMs: s0.clock.sim_time_ms, faultId: 'judge-y', kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: s0.run_id, simTimeMs: s0.clock.sim_time_ms, faultId: 'judge-y', fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
       client.tick();
       const snapshot = await client.getObservedSnapshot();
       const t = jobMoveTimeline('job-a', { snapshot, actionDetails: [], jobTrail: {} })!;

@@ -15,7 +15,7 @@ describe('in-browser recovery preview (deterministic thresholdPolicy through the
       await store.refresh(); store.start(); await settle();
       const s0 = store.state.snapshot!;
       const jobA0 = s0.job_states.find((j) => j.job_id === 'job-a')!;
-      await client.injectFault(buildFaultInjection({ runId: s0.run_id, simTimeMs: s0.clock.sim_time_ms, faultId: 'judge-x', kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: s0.run_id, simTimeMs: s0.clock.sim_time_ms, faultId: 'judge-x', fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
       client.advance(2); await settle();
       expect(store.state.snapshot!.job_states.find((j) => j.job_id === 'job-a')!.status).toBe('failed');
 

@@ -8,8 +8,10 @@ import { duration } from '../../lib/utils';
 import { Button } from '../ui/button';
 import {
   buildFaultInjection, DEFAULT_PUMP_LOSS, DELAY_PRESETS_S, effectivePumpCapacity, percent, PUMP_IDS, PUMP_LOSS_PRESETS,
-  REAL_RESOURCE_IDS, scheduleState, type FaultControlKind, type FaultDelayS, type PumpId, type PumpLoss,
+  REAL_RESOURCE_IDS, scheduleState, type FaultDelayS, type PumpId, type PumpLoss,
 } from './fault-form';
+
+type FaultControlKind = 'pump_degradation' | 'gpu_xid_79';
 import { controlsMode, MODE_BADGE, type ControlsMode } from './mode';
 import './controls.css';
 
@@ -68,9 +70,9 @@ export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, 
     try {
       // Fresh clock: the start time is relative to the sim time at submission, not to the last rendered frame.
       const fresh = await store.client.getObservedSnapshot();
-      const fault = buildFaultInjection(kind === 'cooling_pump_degradation'
-        ? { kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: selectedPumpId, capacityLoss: loss, delayS: pumpDelay }
-        : { kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: gpuId, delayS: gpuDelay });
+      const fault = buildFaultInjection(kind === 'pump_degradation'
+        ? { fault: kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: selectedPumpId, severity: loss, delayS: pumpDelay, snapshot: fresh }
+        : { fault: kind, runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: gpuId, delayS: gpuDelay, snapshot: fresh });
       await store.client.injectFault(fault);
       setLog((prev) => ({ store, items: [...(prev.store === store ? prev.items : []), { fault, submittedAtSimMs: fresh.clock.sim_time_ms }] }));
       const where = mode === 'live' ? 'the live run' : mode === 'local' ? 'this local simulation' : 'the fixture mock';
@@ -114,7 +116,7 @@ export function FaultControls({ store, canAdmin, selectedGpuId, selectedPumpId, 
         <p className="presenter-note" id={`${id}-pump-note`}>Persistent until reset. {modeled && capacity
           ? `${selectedPumpId} reports ${percent(capacity.now)} of nominal capacity now; losses multiply, so about ${percent(capacity.after)} would remain.`
           : 'Losses on one pump multiply: two 60% losses leave 16%, not less than zero.'}</p>
-        <Button variant="secondary" aria-describedby={`${id}-pump-note`} onClick={() => void inject('cooling_pump_degradation')}><Fan size={15} aria-hidden="true"/>Degrade {selectedPumpId} by {percent(loss)}</Button>
+        <Button variant="secondary" aria-describedby={`${id}-pump-note`} onClick={() => void inject('pump_degradation')}><Fan size={15} aria-hidden="true"/>Degrade {selectedPumpId} by {percent(loss)}</Button>
       </fieldset>
       <fieldset className="presenter-fieldset" disabled={disabled}>
         <legend><Zap size={14} aria-hidden="true"/>GPU inaccessible (Xid 79)</legend>

@@ -61,7 +61,7 @@ describe('cooling topology read from the snapshot', () => {
     try {
       const before = await client.getObservedSnapshot();
       expect(degradedPumps(before)).toEqual([]);
-      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-a', kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.6, delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-a', fault: 'pump_degradation', targetId: 'pump-a', severity: 0.6, delayS: 0 }));
       client.advance(60);
       const after = await client.getObservedSnapshot();
       expect(degradedPumps(after).map((row) => row.resource_id)).toEqual(['pump-a']);
@@ -89,7 +89,7 @@ describe('default Xid target', () => {
       expect(loopOfRack(coolingLoops(snapshot), rack)?.pumpId).toBe('pump-b');
       expect(rack).not.toBe(6);
       expect(snapshot.gpus.some((gpu) => gpu.resource_id === DEFAULT_XID_GPU_ID)).toBe(true);
-      expect(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: 'judge-x', kind: 'gpu_xid_79', targetId: DEFAULT_XID_GPU_ID, delayS: 0 }).target_resource_id).toBe('gpu-r7-n1-0');
+      expect(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: 'judge-x', fault: 'gpu_xid_79', targetId: DEFAULT_XID_GPU_ID, delayS: 0 }).target_resource_id).toBe('gpu-r7-n1-0');
     } finally { client.close(); }
   });
 });

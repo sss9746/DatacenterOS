@@ -10,6 +10,7 @@ import {
   capacityLoss, coolingLoops, degradedPumps, detectMoves, formatDeltaC, inletRiseC, isPumpId, jobRacks, loopOfRack,
   moveArcPath, pumpLabel, rackAnchor, rackColumnsFor, rackRanges, type CoolingLoop, type JobMove, type RackGridGeometry,
 } from './topology';
+import { gpuFaultText, staleReadingMs } from './situation';
 import './simulation-view.css';
 
 type Props = {
@@ -30,6 +31,9 @@ const ACTIVE = new Set(['requested', 'claimed', 'running']);
 export const stateOf = (gpu: GpuCurrent): State => gpu.availability !== 'ready' || gpu.last_xid_code !== null ? 'fault' : gpu.temp_c >= 85 ? 'hot' : gpu.temp_c >= 80 ? 'warm' : 'normal';
 const isThrottled = (gpu: GpuCurrent) => (gpu.clocks_event_reasons & 0x20) !== 0;
 const stateText = (state: State) => state === 'fault' ? 'GPU unavailable' : state === 'hot' ? 'GPU slowing down' : state === 'warm' ? 'Getting warm' : 'Running normally';
+/** Per-GPU text: a degraded GPU (Xid 48/74) says so instead of "unavailable". */
+const gpuStateText = (gpu: GpuCurrent) => (stateOf(gpu) === 'fault' ? gpuFaultText(gpu) : stateText(stateOf(gpu)));
+const staleText = (lagMs: number) => `readings stale ${Math.round(lagMs / 1000)} s`;
 const rackState = (gpus: GpuCurrent[]): State => gpus.some((g) => stateOf(g) === 'fault') ? 'fault' : gpus.some((g) => stateOf(g) === 'hot') ? 'hot' : gpus.some((g) => stateOf(g) === 'warm') ? 'warm' : 'normal';
 /** Last-resort mapping when the snapshot carries no cooling topology at all (P1's preset always does). */
 const FALLBACK_PUMP = (rack: number): PumpId => (rack >= 2 && rack <= 4 ? 'pump-a' : 'pump-b');
@@ -161,7 +165,9 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
   };
 
   const tempText = (gpu: GpuCurrent) => `${number(gpu.temp_c, 1)} °C`;
-  const tileTitle = (gpu: GpuCurrent, id: string) => `${id} · ${tempText(gpu)} · ${stateText(stateOf(gpu))}${gpu.last_xid_code !== null ? ` · XID ${gpu.last_xid_code}` : ''}${isThrottled(gpu) ? ' · thermal throttle' : ''} · ${jobByGpu.get(id) ?? 'free'}`;
+  const staleOf = (gpu: GpuCurrent) => staleReadingMs(gpu, snapshot.gpus);
+  const nodeDown = (n: number) => snapshot.nodes.some((node) => node.rack_id === `rack-r${n}` && node.availability === 'unreachable');
+  const tileTitle = (gpu: GpuCurrent, id: string) => `${id} · ${tempText(gpu)} · ${gpuStateText(gpu)}${stateOf(gpu) !== 'fault' && gpu.last_xid_code !== null ? ` · XID ${gpu.last_xid_code}` : ''}${isThrottled(gpu) ? ' · thermal throttle' : ''}${staleOf(gpu) ? ` · ${staleText(staleOf(gpu))}` : ''} · ${jobByGpu.get(id) ?? 'free'}`;
   const selectedRackPump = pumpOf(rack);
   const selectedRackDelta = degraded.has(selectedRackPump) ? degradedDelta(rack, loopOfRack(loops, rack)) : null;
 
@@ -192,7 +198,7 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
           const rackJobs = [...new Set(here.map((gpu) => jobByGpu.get(gpu.resource_id)).filter((id): id is string => Boolean(id)))];
           const moving = rackJobs.filter((id) => movingJobs.has(id));
           const temp = hottest === null ? 'no temperature' : `${number(hottest, 0)} degrees Celsius`;
-          const label = `Rack ${n}, ${temp}, ${stateText(state)}, ${readyHere} of 8 GPUs ready${rackJobs.length ? `, ${rackJobs.join(' and ')}` : ''}${onDegradedLoop ? `, on degraded ${pumpLabel(pump)} loop${delta ? `, ${delta}` : ''}` : ''}${moving.length ? `, ${moving.join(', ')} moving` : ''}`;
+          const label = `Rack ${n}, ${temp}, ${stateText(state)}, ${readyHere} of 8 GPUs ready${nodeDown(n) ? ', node unreachable' : ''}${rackJobs.length ? `, ${rackJobs.join(' and ')}` : ''}${onDegradedLoop ? `, on degraded ${pumpLabel(pump)} loop${delta ? `, ${delta}` : ''}` : ''}${moving.length ? `, ${moving.join(', ')} moving` : ''}`;
           return <button type="button" key={n} data-sim-rack={n} className={`sim-rack sim-rack-${state} ${loopClass(pump)} ${rack === n ? 'is-selected' : ''} ${pump === focusedPump ? 'is-on-route' : ''} ${onDegradedLoop ? 'is-on-degraded-loop' : ''}`} aria-label={label} title={label} aria-pressed={rack === n} onClick={() => chooseRack(n)}>
             <span className="sim-rack-top" aria-hidden="true"><span className="sim-rack-name">Rack {n}</span><strong>{hottest === null ? '—' : `${number(hottest, 0)} °C`}</strong></span>
             <span className="sim-rack-cabinet" aria-hidden="true"><span className="sim-rack-rail"/><span className="sim-rack-modules">{gpus.map((gpu, slot) => {
@@ -203,6 +209,7 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
               return <span key={slot} data-sim-gpu={id} data-move-role={role?.cls.split(' ')[0]} title={tileTitle(gpu, id)} style={style} className={`sim-rack-module sim-rack-module-${s} ${jobClass(role?.jobId ?? jobByGpu.get(id))} ${role?.cls ?? ''} ${selected === id ? 'is-selected' : ''}`}><i/><b/><em/></span>;
             })}</span><span className="sim-rack-rail"/></span>
             <span className="sim-rack-bottom" aria-hidden="true">
+              {nodeDown(n) && <span className="sim-rack-loop-note is-node-down">Node unreachable</span>}
               {onDegradedLoop && <span className="sim-rack-loop-note">On degraded {pumpLabel(pump)}{delta ? <em>{delta}</em> : null}</span>}
               {rackFlagOf(n) ? <span className={`sim-rack-flag ${rollbacks.some((m) => m.from!.racks.includes(n)) && !liveMoves.some((m) => m.to!.racks.includes(n)) ? 'is-failed' : ''}`}>{rackFlagOf(n)}</span> : moving.length > 0 && <span className="sim-rack-flag">{moving.join(', ')} moving</span>}
               <span className="sim-rack-description">{stateText(state)}</span><span className="sim-rack-ready">{readyHere}/8 ready</span>
@@ -234,15 +241,16 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
           const id = `gpu-r${rack}-n1-${slot}`;
           if (!gpu) return <span className="sim-gpu sim-gpu-missing" key={id} title={`${id} · no data`}>GPU {slot}<small>No data</small></span>;
           const state = stateOf(gpu); const isSelected = selectedGpu?.resource_id === id; const job = jobByGpu.get(id);
-          return <button type="button" key={id} data-gpu={id} data-sim-gpu={id} title={tileTitle(gpu, id)} className={`sim-gpu sim-gpu-${state} ${jobClass(job)} ${isThrottled(gpu) || state === 'hot' ? 'is-throttled' : ''} ${isSelected ? 'is-selected' : ''}`} aria-label={`GPU ${slot}, ${number(gpu.temp_c, 1)} degrees Celsius, ${gpu.availability}${gpu.last_xid_code ? `, XID ${gpu.last_xid_code}` : ''}, ${job ?? 'free'}`} aria-pressed={isSelected} onClick={() => onSelect(id)}>
+          const stale = staleOf(gpu);
+          return <button type="button" key={id} data-gpu={id} data-sim-gpu={id} title={tileTitle(gpu, id)} className={`sim-gpu sim-gpu-${state} ${jobClass(job)} ${isThrottled(gpu) || state === 'hot' ? 'is-throttled' : ''} ${stale ? 'is-stale' : ''} ${isSelected ? 'is-selected' : ''}`} aria-label={`GPU ${slot}, ${number(gpu.temp_c, 1)} degrees Celsius, ${gpu.availability}${gpu.last_xid_code ? `, XID ${gpu.last_xid_code}` : ''}${stale ? `, ${staleText(stale)}` : ''}, ${job ?? 'free'}`} aria-pressed={isSelected} onClick={() => onSelect(id)}>
             <span className="sim-gpu-card" aria-hidden="true"><span className="sim-gpu-connector"/><span className="sim-gpu-board"><span className="sim-gpu-fan"/><span className="sim-gpu-vents"/><span className="sim-gpu-led"/></span></span>
-            <span className="sim-gpu-caption" aria-hidden="true"><span>GPU {slot}<small>{state === 'fault' ? 'Unavailable' : job ?? 'Free'}</small></span><strong>{number(gpu.temp_c, 0)} °C</strong></span>
+            <span className="sim-gpu-caption" aria-hidden="true"><span>GPU {slot}<small>{state === 'fault' ? gpuFaultText(gpu) : job ?? 'Free'}</small>{stale ? <em className="sim-gpu-stale">{staleText(stale)}</em> : null}</span><strong>{number(gpu.temp_c, 0)} °C</strong></span>
           </button>;
         })}</div>
         <div className="sim-inspector" aria-live="polite">
           <div className="sim-inspector-heading"><Activity size={16} aria-hidden="true"/><strong>{selectedGpu ? `GPU ${selectedGpu.resource_id.split('-').at(-1)} in rack ${rack}` : `Rack ${rack}`}</strong></div>
           {selectedGpu ? <>
-            <p className={`sim-inspector-state is-${stateOf(selectedGpu)}`}>{stateText(stateOf(selectedGpu))}{selectedGpu.last_xid_code !== null ? ` · XID ${selectedGpu.last_xid_code}` : ''}{isThrottled(selectedGpu) ? ' · thermal throttle' : ''} · {tempText(selectedGpu)}</p>
+            <p className={`sim-inspector-state is-${stateOf(selectedGpu)}`}>{gpuStateText(selectedGpu)}{stateOf(selectedGpu) !== 'fault' && selectedGpu.last_xid_code !== null ? ` · XID ${selectedGpu.last_xid_code}` : ''}{isThrottled(selectedGpu) ? ' · thermal throttle' : ''}{staleOf(selectedGpu) ? ` · ${staleText(staleOf(selectedGpu))}` : ''} · {tempText(selectedGpu)}</p>
             <p className="sim-inspector-job">{jobByGpu.get(selectedGpu.resource_id) ? `Running ${jobByGpu.get(selectedGpu.resource_id)}` : 'No training job'}{degraded.has(selectedRackPump) ? ` · on failing ${pumpLabel(selectedRackPump)} loop` : ''}</p>
             <details className="sim-inspector-more"><summary>Readings</summary>
               <dl><div><dt>GPU id</dt><dd>{selectedGpu.resource_id}</dd></div><div><dt>SM clock</dt><dd>{number(selectedGpu.sm_clock_mhz)} MHz</dd></div><div><dt>Power</dt><dd>{number(selectedGpu.power_w)} W</dd></div><div><dt>Rack {rack} ready</dt><dd>{present(rack).filter((g) => g.availability === 'ready').length} of 8</dd></div>{selectedRackDelta && <div><dt>Rack since fault</dt><dd>{selectedRackDelta.replace(/ since fault$/, '')}</dd></div>}{degraded.has(selectedRackPump) && <div><dt>{pumpLabel(selectedRackPump)}</dt><dd>{lossText(selectedRackPump) ?? pumpRow(selectedRackPump)?.operating_state ?? 'degraded'}</dd></div>}</dl>

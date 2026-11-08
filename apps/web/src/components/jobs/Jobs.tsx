@@ -7,7 +7,7 @@ import type { DashboardState } from '../../data/dashboard';
 import { Panel, Badge } from '../ui/panel';
 import { duration, fraction, number } from '../../lib/utils';
 import { detectMoves, jobRacks, type JobMove } from '../simulation/topology';
-import { decisionFor, jobKey, jobName, lastCheckpointFailed, placementOf, placementText, statusLabel, statusTone, workAtRisk, writingCheckpoint } from './job-view';
+import { checkpointStorageDown, decisionFor, jobKey, jobName, lastCheckpointFailed, placementOf, placementText, statusLabel, statusTone, workAtRisk, writingCheckpoint } from './job-view';
 import { jobMoveTimeline } from './move-timeline';
 import { MoveTimeline } from './MoveTimeline';
 import './jobs.css';
@@ -117,6 +117,7 @@ export function Jobs({ snapshot, losses, history, details = [], workflows = [], 
         {timeline && <MoveTimeline timeline={timeline} example={example}/>}
         {writing && <p className="jobcard-note">Writing a checkpoint · not safe until it completes{checkpointLeft !== null && checkpointLeft > 0 ? ` · about ${duration(checkpointLeft)} left (estimate)` : ''}</p>}
         {!writing && lastCheckpointFailed(snapshot, job.job_id) && <p className="jobcard-note is-danger">Latest checkpoint attempt failed · safe work unchanged</p>}
+        {checkpointStorageDown(snapshot, job.job_id) && <p className="jobcard-note is-danger" data-storage-down={job.job_id}>Checkpoint storage unreachable · {writing ? 'this checkpoint cannot complete' : 'no restart from the last checkpoint'} until the store is back</p>}
 
         <div className="jobcard-decision">
           {decision ? <>

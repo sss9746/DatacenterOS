@@ -1,4 +1,5 @@
-import type { ObservedSnapshot } from '@dcos/contracts';
+import type { GpuCurrent, ObservedSnapshot } from '@dcos/contracts';
+import { STEP_MS } from '@dcos/physics';
 import { coolingLoops, degradedPumps, pumpLabel, rackRanges } from './topology';
 
 /** Thermal-throttle bit in `clocks_event_reasons` (nvidia-smi convention). */
@@ -34,4 +35,26 @@ export function situationTone(snapshot: ObservedSnapshot): 'normal' | 'warning' 
   if (gpus.some((gpu) => gpu.availability !== 'ready' || gpu.last_xid_code !== null)) return 'danger';
   if (degradedPumps(snapshot).length || gpus.some((gpu) => gpu.temp_c >= 85 || (gpu.clocks_event_reasons & THROTTLE_BIT) !== 0)) return 'warning';
   return 'normal';
+}
+
+/**
+ * How far (sim-ms) a reachable GPU's readings lag behind the freshest reachable GPU in the same snapshot. Positive
+ * beyond one tick means its sensors are stale (physics `sensor_stale` freezes `last_seen_sim_ms`). Compared to peers,
+ * not to the clock, so a snapshot whose producer never updates last_seen flags nothing. Unreachable GPUs are never
+ * "stale": their readings froze because they fell off the bus.
+ */
+export function staleReadingMs(gpu: Pick<GpuCurrent, 'resource_id' | 'availability' | 'last_seen_sim_ms'>, gpus: readonly Pick<GpuCurrent, 'resource_id' | 'availability' | 'last_seen_sim_ms'>[]): number {
+  if (gpu.availability === 'unreachable') return 0;
+  const freshest = Math.max(...gpus.filter((row) => row.availability !== 'unreachable' && row.resource_id !== 'gpu-real-0').map((row) => row.last_seen_sim_ms));
+  if (!Number.isFinite(freshest)) return 0;
+  const lag = freshest - gpu.last_seen_sim_ms;
+  return lag > STEP_MS ? lag : 0;
+}
+
+/** Plain-English state of a GPU that is not ready, from its observed availability and last Xid code only. */
+export function gpuFaultText(gpu: Pick<GpuCurrent, 'availability' | 'last_xid_code'>): string {
+  if (gpu.availability === 'unreachable') return 'Unavailable';
+  if (gpu.availability === 'cordoned') return 'Cordoned';
+  if (gpu.availability === 'degraded') return gpu.last_xid_code !== null ? `Degraded · Xid ${gpu.last_xid_code}` : 'Degraded';
+  return gpu.last_xid_code !== null ? `Xid ${gpu.last_xid_code}` : 'Running normally';
 }

@@ -118,3 +118,11 @@ export const lastCheckpointFailed = (snapshot: Pick<ObservedSnapshot, 'checkpoin
   const last = rows.at(-1);
   return Boolean(last && last.status === 'failed' && !rows.some((c) => c.status === 'writing'));
 };
+
+/**
+ * The job's latest checkpoint sits on a store the physics marks unreachable (`accessible: false` on a non-failed row):
+ * a checkpoint in flight will fail and a restart from it is impossible until the store is back. Data-only: the row's
+ * `accessible` flag is what the engine derives from the active storage fault.
+ */
+export const checkpointStorageDown = (snapshot: Pick<ObservedSnapshot, 'checkpoints'>, jobId: string): boolean =>
+  snapshot.checkpoints.some((c) => c.job_id === jobId && c.status !== 'failed' && !c.accessible);

@@ -8,7 +8,7 @@ import { asLocalPhysics } from '../../data/local-physics';
 import { duration } from '../../lib/utils';
 import { reasonText } from '../ledger/action-view';
 import { Button } from '../ui/button';
-import { FaultControls } from './FaultControls';
+import { FaultLibrary } from './FaultLibrary';
 import { SafetyProbe } from './SafetyProbe';
 import { buildFaultInjection, DEFAULT_PUMP_LOSS, percent, type PumpId } from './fault-form';
 import { controlsMode, MODE_BADGE, type ControlsMode } from './mode';
@@ -78,7 +78,7 @@ export function DemoControls({ store, canAdmin, open, onOpenChange, selectedGpuI
   const breakPump = () => run('pump', async () => {
     onSelectPump('pump-a');
     const fresh = await store.client.getObservedSnapshot();
-    const fault = buildFaultInjection({ kind: 'cooling_pump_degradation', runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: 'pump-a', capacityLoss: DEFAULT_PUMP_LOSS, delayS: 0 });
+    const fault = buildFaultInjection({ fault: 'pump_degradation', runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: 'pump-a', severity: DEFAULT_PUMP_LOSS, delayS: 0, snapshot: fresh });
     await store.client.injectFault(fault);
     return mode === 'fixture'
       ? `Accepted by ${where}: pump-a loses ${percent(DEFAULT_PUMP_LOSS)} capacity, shown as a canned fixture effect.`
@@ -98,7 +98,7 @@ export function DemoControls({ store, canAdmin, open, onOpenChange, selectedGpuI
 
   const failGpu = () => run('xid', async () => {
     const fresh = await store.client.getObservedSnapshot();
-    const fault = buildFaultInjection({ kind: 'gpu_xid_79', runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: target.gpuId, delayS: 0 });
+    const fault = buildFaultInjection({ fault: 'gpu_xid_79', runId: fresh.run_id, simTimeMs: fresh.clock.sim_time_ms, faultId: `judge-${crypto.randomUUID()}`, targetId: target.gpuId, delayS: 0, snapshot: fresh });
     await store.client.injectFault(fault);
     return mode === 'fixture'
       ? `Accepted by ${where}: ${target.gpuId} inaccessible (Xid 79), shown as a canned fixture effect.`
@@ -161,9 +161,9 @@ export function DemoControls({ store, canAdmin, open, onOpenChange, selectedGpuI
         <p className="demo-process-note">Killing the agent process is done from the presenter terminal; the browser never gets process control.</p>
       </div>
       <details className="demo-advanced">
-        <summary>Advanced<small>full fault form · pump-b · delays · any simulated GPU · the probe's recorded evidence</small></summary>
+        <summary>Advanced<small>fault library · every engine fault: cooling, GPU errors, node, storage, telemetry · delays and durations · the probe's recorded evidence</small></summary>
         <div className="demo-advanced-body">
-          <FaultControls store={store} canAdmin={canAdmin} selectedGpuId={selectedGpuId} selectedPumpId={selectedPumpId} onSelectGpu={onSelectGpu} onSelectPump={onSelectPump} onReset={onReset} hideRunActions/>
+          <FaultLibrary store={store} canAdmin={canAdmin} selectedGpuId={selectedGpuId} selectedPumpId={selectedPumpId} onSelectGpu={onSelectGpu} onSelectPump={onSelectPump}/>
           {canAdmin && <SafetyProbe store={store} canAdmin={canAdmin}/>}
         </div>
       </details>

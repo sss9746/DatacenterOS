@@ -56,7 +56,7 @@ describe('XID 79 in the rendered cluster', () => {
       expect(situation(before)).toBe('All 64 GPUs healthy');
       expect(situationTone(before)).toBe('normal');
       expect(impactStats(clusterImpact(before)).map((s) => [s.value, s.tone])).toEqual([[0, 'neutral'], [0, 'neutral'], [0, 'neutral'], [3, 'agent'], [0, 'neutral']]);
-      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-x', kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-x', fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
       client.advance(5);
       const after = await client.getObservedSnapshot();
       const gpu = after.gpus.find((row) => row.resource_id === 'gpu-r3-n1-0')!;

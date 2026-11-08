@@ -16,23 +16,23 @@ const base = { runId: 'run-demo-1', simTimeMs: 600_000, faultId: 'judge-test' };
 
 describe('buildFaultInjection', () => {
   it('encodes pump capacity loss as severity and starts on the next tick for delay 0', () => {
-    const fault = buildFaultInjection({ ...base, kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.6, delayS: 0 });
+    const fault = buildFaultInjection({ ...base, fault: 'pump_degradation', targetId: 'pump-a', severity: 0.6, delayS: 0 });
     expect(fault).toMatchObject({ kind: 'cooling_pump_degradation', target_resource_id: 'pump-a', severity: 0.6, start_sim_time_ms: 600_000 + STEP_MS, duration_sim_ms: null, parameters: { capacity_factor: 0.4 } });
     expect(validatePayload('FaultInjection', fault).ok).toBe(true);
   });
 
   it('uses the selected positive delay and a fixed severity of 1 for Xid 79', () => {
-    const fault = buildFaultInjection({ ...base, kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 30 });
+    const fault = buildFaultInjection({ ...base, fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 30 });
     expect(fault).toMatchObject({ kind: 'gpu_xid_79', severity: 1, start_sim_time_ms: 630_000, duration_sim_ms: null, parameters: {} });
     expect(validatePayload('FaultInjection', fault).ok).toBe(true);
   });
 
   it('rejects the real GPU, unknown pumps and off-preset values', () => {
-    expect(() => buildFaultInjection({ ...base, kind: 'gpu_xid_79', targetId: 'gpu-real-0', delayS: 0 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'cooling_pump_degradation', targetId: 'pump-c', capacityLoss: 0.6, delayS: 0 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.5 as 0.6, delayS: 0 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 5 as 10 })).toThrow(FaultFormError);
-    expect(() => buildFaultInjection({ ...base, kind: 'gpu_xid_48' as 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'gpu_xid_79', targetId: 'gpu-real-0', delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'pump_degradation', targetId: 'pump-c', severity: 0.6, delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'pump_degradation', targetId: 'pump-a', severity: 0.5, delayS: 0 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 5 as 10 })).toThrow(FaultFormError);
+    expect(() => buildFaultInjection({ ...base, fault: 'gpu_xid_48', targetId: 'gpu-r3-n1-0', delayS: 0, durationS: 30 })).toThrow(FaultFormError);
   });
 
   it('multiplies combined pump losses and reports pending until the start time', () => {
@@ -48,7 +48,7 @@ describe('buildFaultInjection', () => {
     try {
       for (const id of ['a', 'b']) {
         const snapshot = await client.getObservedSnapshot();
-        await client.injectFault(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: `judge-${id}`, kind: 'cooling_pump_degradation', targetId: 'pump-a', capacityLoss: 0.6, delayS: 0 }));
+        await client.injectFault(buildFaultInjection({ runId: snapshot.run_id, simTimeMs: snapshot.clock.sim_time_ms, faultId: `judge-${id}`, fault: 'pump_degradation', targetId: 'pump-a', severity: 0.6, delayS: 0 }));
         client.tick();
       }
       const after = await client.getObservedSnapshot();
@@ -105,7 +105,7 @@ describe('presenter r6 safety probe', () => {
     const client = createLocalPhysicsClient();
     try {
       const start = await client.getObservedSnapshot();
-      await client.injectFault(buildFaultInjection({ runId: start.run_id, simTimeMs: start.clock.sim_time_ms, faultId: 'judge-b', kind: 'cooling_pump_degradation', targetId: 'pump-b', capacityLoss: 0.8, delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: start.run_id, simTimeMs: start.clock.sim_time_ms, faultId: 'judge-b', fault: 'pump_degradation', targetId: 'pump-b', severity: 0.8, delayS: 0 }));
       client.advance(120);
       const snapshot = await client.getObservedSnapshot();
       const build = buildR6Probe(snapshot, probeIds('u3'));
@@ -209,7 +209,7 @@ describe('demo controls markup', () => {
       expect(html).toMatch(/<details id="presenter" class="demo-controls demo-controls-local" open=""/);
       for (const name of ['Break cooling pump A', 'Try unsafe move to hot rack 6', 'Fail a GPU (XID 79)', 'Reset run']) expect(html).toContain(name);
       expect(html).toContain('Target: <code>gpu-r3-n1-0</code>'); expect(html).toContain('selected in the cluster');
-      expect(html).toContain('Advance 30 sim-s'); expect(html).toContain('Inject a fault'); expect(html).toContain('Manual safety probe');
+      expect(html).toContain('Advance 30 sim-s'); expect(html).toContain('Fault library'); expect(html).toContain('Checkpoint storage unavailable'); expect(html).toContain('Manual safety probe');
       expect(html).toContain('the browser never gets process control');
       expect((html.match(/>Reset run</g) ?? []).length).toBe(1);
     } finally { store.close(); }

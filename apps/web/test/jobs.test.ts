@@ -57,7 +57,7 @@ describe('rendered job cards', () => {
       expect(html0).toContain('id="jobs"');
       expect(html0).toContain('No agent decision recorded');
       expect(html0).not.toContain('work units lost');
-      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-x', kind: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
+      await client.injectFault(buildFaultInjection({ runId: before.run_id, simTimeMs: before.clock.sim_time_ms, faultId: 'judge-x', fault: 'gpu_xid_79', targetId: 'gpu-r3-n1-0', delayS: 0 }));
       client.advance(5);
       const after = await client.getObservedSnapshot();
       const failed = after.job_states.find((job) => job.status === 'failed');

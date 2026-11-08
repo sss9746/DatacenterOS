@@ -250,3 +250,10 @@
 .sim-move-live-label { fill: #eef5f8; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 @keyframes sim-live-dash { to { stroke-dashoffset: -26; } }
 @media (prefers-reduced-motion: reduce) { .sim-move-live-arc, .sim-rack-module.is-move-dest { animation: none !important; } }
+
+/* sensor_stale: the GPU keeps running but its readings stopped updating (derived from last_seen lag vs its peers) */
+.sim-gpu.is-stale { border-style: dashed; border-color: #a4905c; }
+.sim-gpu.is-stale .sim-gpu-board { opacity: .55; filter: grayscale(.5); }
+.sim-gpu-stale { display: block; font-style: normal; font-size: 10px; font-weight: 600; color: #e2c98a; }
+.sim-rack-module.is-stale { opacity: .55; outline: 1px dashed #a4905c; outline-offset: -1px; }
+.sim-rack-loop-note.is-node-down { color: #ffbcb3; }
