@@ -1,6 +1,6 @@
 # Final plan: integrate everything, make it work live on the frontend (03:30 → 11:00)
 
-This replaces the per-person split. **One branch, `int/r-sprint`** (now `c1ac94d`, with G3 + the collector merged; 942 tests green). The goal is simple: **what judges see on the dashboard works live, and every claim on it is backed by a real run.**
+**Step-by-step version: [RUNBOOK.md](RUNBOOK.md).** This replaces the per-person split. **One branch, `int/r-sprint`** (now `c1ac94d`, with G3 + the collector merged; 942 tests green). The goal is simple: **what judges see on the dashboard works live, and every claim on it is backed by a real run.**
 
 ## Rules (only these)
 1. Everyone commits straight to `int/r-sprint`, in small commits. Before pushing: `git pull --rebase origin int/r-sprint`, then run the tests for what you touched, then push. **Never force-push.**

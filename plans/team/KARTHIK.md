@@ -1,3 +1,5 @@
+> **SUPERSEDED (03:45 Sun):** follow [RUNBOOK.md](RUNBOOK.md) instead. This file is the older per-lane split.
+
 # Karthik: live dashboard, scoreboard, demo and submission
 
 You own `apps/web/**`, `docs/**` and `demo/**`, and work on `lane/p4-web`. Merge into `int/r-sprint` (cut from `main` at `80b1d6e`), not into `main`. Specs: [TASKS](../IMPLEMENTATION-TASKS.md) R4, R6 (scoreboard) and R7, and [SCOPE](../IMPLEMENTATION-SCOPE.md) §3, §5 and §6. The dashboard already exists; **extend it, don't rebuild it**.

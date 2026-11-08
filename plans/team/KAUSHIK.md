@@ -1,3 +1,5 @@
+> **SUPERSEDED (03:45 Sun):** follow [RUNBOOK.md](RUNBOOK.md) instead. This file is the older per-lane split.
+
 # Kaushik (P2): database, client, live infrastructure
 
 You own `apps/db/**` and `packages/db-client/**` and work on `lane/p2-db`. Merge into `int/r-sprint` (cut from `main` at `80b1d6e`), not into `main`. Specs: [TASKS](../IMPLEMENTATION-TASKS.md) R0 (steps 4–5) and R2, and [SCOPE](../IMPLEMENTATION-SCOPE.md) §4 "Required safety repairs" and §5. You also hold the **`dcos-dev` lock** (see [README](README.md) rule 2).

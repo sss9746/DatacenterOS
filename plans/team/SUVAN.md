@@ -1,3 +1,5 @@
+> **SUPERSEDED (03:45 Sun):** follow [RUNBOOK.md](RUNBOOK.md) instead. This file is the older per-lane split.
+
 # Suvan + Claude orchestrator: the majority share
 
 The Claude session orchestrates. Fable sub-agents take the hard tasks and Sonnet sub-agents take the well-specified ones. Every agent works in its own worktree off `int/r-sprint`. Nothing reaches `main` without Suvan's OK. Specs: [TASKS](../IMPLEMENTATION-TASKS.md) R0/R1/R3/R5/R6 and [SCOPE](../IMPLEMENTATION-SCOPE.md) §4, §6, §7.
