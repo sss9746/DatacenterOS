@@ -8,10 +8,13 @@ import {
   LLM_UNAVAILABLE_HYPOTHESIS,
   extractSymptoms,
   groupSymptoms,
+  normalizeEvidenceKey,
+  resolveEvidenceIds,
   runTriage,
+  stripRefs,
   type TriageResult,
 } from '../src/triage.js';
-import { TRIAGE_TOOL_NAME } from '../src/prompts/triage.js';
+import { TRIAGE_MAX_TOKENS, TRIAGE_TOOL_NAME } from '../src/prompts/triage.js';
 import { FakeDb, FakeLlm } from './fakes/index.js';
 import { THERMAL_THROTTLE_BIT, loadPumpDegradedSnapshot, loadSignalXid79Dest, loadSignalXid79R7 } from './fixtures/index.js';
 
@@ -24,7 +27,10 @@ const now = () => 1_794_091_200_000;
 
 interface PayloadCandidate {
   candidate_id: string;
-  symptoms: { id: string; evidence_ids?: string[] }[];
+  /** Short symptom ref (S1, ...) -> "kind resource". */
+  symptoms: Record<string, string>;
+  /** Short evidence ref (E1, ...) -> label. */
+  evidence: Record<string, string>;
 }
 const payloadOf = (req: LlmChatRequest): { candidates: PayloadCandidate[] } => {
   const user = req.messages.find((m) => m.role === 'user');
@@ -32,18 +38,20 @@ const payloadOf = (req: LlmChatRequest): { candidates: PayloadCandidate[] } => {
   return JSON.parse(text.slice(text.indexOf('\n') + 1));
 };
 
-/** FakeLlm step that confirms every candidate, citing its first symptom id. */
+/** Items confirming every candidate, citing its first symptom ref. */
+const confirmItems = (req: LlmChatRequest, overrides: Record<string, Record<string, unknown>> = {}) =>
+  payloadOf(req).candidates.map((c) => ({
+    candidate_id: c.candidate_id,
+    decision: 'confirm',
+    hypothesis: `LLM: ${c.candidate_id}`,
+    confidence: 0.9,
+    evidence_ids: [Object.keys(c.symptoms)[0]!],
+    ...overrides[c.candidate_id],
+  }));
+
+/** FakeLlm step that confirms every candidate, citing its first symptom ref. */
 const confirmAll = (overrides: Record<string, Record<string, unknown>> = {}) => (req: LlmChatRequest) =>
-  FakeLlm.toolCall(TRIAGE_TOOL_NAME, {
-    incidents: payloadOf(req).candidates.map((c) => ({
-      candidate_id: c.candidate_id,
-      decision: 'confirm',
-      hypothesis: `LLM: ${c.candidate_id}`,
-      confidence: 0.9,
-      evidence_ids: [c.symptoms[0]!.id],
-      ...overrides[c.candidate_id],
-    })),
-  });
+  FakeLlm.toolCall(TRIAGE_TOOL_NAME, { incidents: confirmItems(req, overrides) });
 
 function setup(signals: ('r7' | 'r8')[] = []) {
   const db = new FakeDb({ snapshot: loadPumpDegradedSnapshot() });
@@ -279,18 +287,152 @@ describe('runTriage', () => {
     }
   });
 
-  it('rejects an assessment that cites a hallucinated evidence id', async () => {
+  it('drops a hallucinated evidence id but keeps the assessment when a valid id remains', async () => {
     const db = setup(['r7']);
     const llm = new FakeLlm([confirmAll({ [PUMP_INC]: { evidence_ids: ['sym-cooling_degraded-loop-a-b1', 'sig-made-up-9'] } })]);
     const r = await runTriage({ db, llm, now });
     expect(r.usedLlm).toBe(true);
-    expect(r.overrides).toEqual([expect.stringMatching(/sig-made-up-9/)]);
+    expect(r.overrides).toEqual([expect.stringMatching(/dropped evidence_ids not in input: sig-made-up-9/)]);
+    const pump = r.incidents.find((i) => i.incident_id === PUMP_INC)!;
+    expect(pump.hypothesis).toBe(`LLM: ${PUMP_INC}`);
+    expect(r.evidenceIdsByIncident[PUMP_INC]).toEqual(['sym-cooling_degraded-loop-a-b1']);
+  });
+
+  it('rejects an assessment whose evidence ids are all unknown (resources not in the payload)', async () => {
+    const db = setup(['r7']);
+    const llm = new FakeLlm([confirmAll({ [PUMP_INC]: { evidence_ids: ['sig-made-up-9', 'gpu-r9-n1-0', 'obs:pump-z:v1', 'E99'] } })]);
+    const r = await runTriage({ db, llm, now });
+    expect(r.usedLlm).toBe(true);
+    expect(r.overrides).toEqual([expect.stringMatching(/rejected, evidence_ids not in input: sig-made-up-9/)]);
     const pump = r.incidents.find((i) => i.incident_id === PUMP_INC)!;
     expect(pump.confidence).toBe(DETERMINISTIC_CONFIDENCE);
     expect(pump.hypothesis).not.toContain('LLM:');
-    expect(r.evidenceIdsByIncident[PUMP_INC]).not.toContain('sig-made-up-9');
     // The other candidate's valid assessment is still used.
     expect(r.incidents.find((i) => i.incident_id === R7_INC)!.hypothesis).toBe(`LLM: ${R7_INC}`);
+  });
+
+  it('accepts other forms of a listed resource id and maps them to canonical ids', async () => {
+    const db = setup();
+    const llm = new FakeLlm([
+      confirmAll({ [PUMP_INC]: { evidence_ids: ['gpu-r2-n1-0', 'obs:gpu-r3-n1-0', 'obs:gpu-r4-n1-0:v9', ' e1 ', 'pump-a', 'sym-cooling_degraded-loop-a'] } }),
+    ]);
+    const r = await runTriage({ db, llm, now });
+    expect(r.overrides).toEqual([]);
+    const ev = r.evidenceIdsByIncident[PUMP_INC]!;
+    expect(ev).toEqual(expect.arrayContaining(['obs:gpu-r2-n1-0:v3', 'obs:gpu-r3-n1-0:v3', 'obs:gpu-r4-n1-0:v3']));
+    for (const id of ev) expect(id).toMatch(/^(obs:|sig-|sym-)/);
+    expect(r.incidents[0]!.hypothesis).toBe(`LLM: ${PUMP_INC}`);
+  });
+
+  it('dedupes repeated tool calls (identical or differing): first item per candidate wins', async () => {
+    const db = setup(['r7']);
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) =>
+        FakeLlm.toolCalls([
+          { name: TRIAGE_TOOL_NAME, args: { incidents: confirmItems(req, { [R7_INC]: { hypothesis: 'first r7' } }).filter((i) => i.candidate_id === R7_INC) } },
+          { name: TRIAGE_TOOL_NAME, args: { incidents: confirmItems(req, { [R7_INC]: { hypothesis: 'second r7' } }) } },
+          { name: TRIAGE_TOOL_NAME, args: { incidents: confirmItems(req, { [R7_INC]: { hypothesis: 'second r7' } }) } },
+        ]),
+    ]);
+    const r = await runTriage({ db, llm, now });
+    expect(r.usedLlm).toBe(true);
+    expect(r.incidents.find((i) => i.incident_id === R7_INC)!.hypothesis).toBe('first r7');
+    expect(r.incidents.find((i) => i.incident_id === PUMP_INC)!.hypothesis).toBe(`LLM: ${PUMP_INC}`);
+    expect(r.overrides.some((o) => /duplicate assessment/.test(o))).toBe(false);
+    expect(r.overrides).toEqual([expect.stringMatching(/3 submit_incident_assessment calls deduplicated/)]);
+    expect(diagnoseEvent(r).actor).toBe('nemotron');
+  });
+
+  it('drops one invalid item but keeps the valid ones; a bad first call does not hide a good second one', async () => {
+    const db = setup(['r7']);
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) =>
+        FakeLlm.toolCalls([
+          { name: TRIAGE_TOOL_NAME, args: '{not json' },
+          { name: TRIAGE_TOOL_NAME, args: { incidents: confirmItems(req, { [R7_INC]: { confidence: 7 } }) } },
+        ]),
+    ]);
+    const r = await runTriage({ db, llm, now });
+    expect(r.usedLlm).toBe(true);
+    expect(r.incidents.find((i) => i.incident_id === PUMP_INC)!.hypothesis).toBe(`LLM: ${PUMP_INC}`);
+    expect(r.incidents.find((i) => i.incident_id === R7_INC)!.confidence).toBe(DETERMINISTIC_CONFIDENCE);
+    expect(r.overrides.some((o) => o.includes(`${R7_INC}: invalid item dropped`))).toBe(true);
+  });
+
+  it('accepts split_symptom_ids given as S refs', async () => {
+    const db = setup();
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) => {
+        const c = payloadOf(req).candidates[0]!;
+        const ref = Object.entries(c.symptoms).find(([, v]) => v.startsWith('thermal_throttle'))![0];
+        return FakeLlm.toolCall(TRIAGE_TOOL_NAME, { incidents: confirmItems(req, { [PUMP_INC]: { decision: 'split', split_symptom_ids: [ref] } }) });
+      },
+    ]);
+    const r = await runTriage({ db, llm, now });
+    expect(r.incidents).toHaveLength(2);
+    expect(r.overrides).toEqual([]);
+  });
+
+  it('sends a compact payload with citable refs and a bounded maxTokens', async () => {
+    const db = setup(['r7', 'r8']);
+    const llm = new FakeLlm([confirmAll()]);
+    await runTriage({ db, llm, now }, { signals: [loadSignalXid79R7(), loadSignalXid79Dest()] });
+    const req = llm.requests[0]!;
+    expect(req.maxTokens).toBe(TRIAGE_MAX_TOKENS);
+    const user = req.messages[1]!;
+    const text = 'content' in user && typeof user.content === 'string' ? user.content : '';
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(LLM_PAYLOAD_MAX_BYTES);
+    expect(LLM_PAYLOAD_MAX_BYTES).toBeLessThanOrEqual(3_000);
+    const p = payloadOf(req);
+    const r7 = p.candidates.find((c) => c.candidate_id === R7_INC)!;
+    expect(Object.values(r7.evidence).join(' ')).toMatch(/xid_error 79 on gpu-r7-n1-3/);
+    const pump = p.candidates.find((c) => c.candidate_id === PUMP_INC)!;
+    expect(Object.keys(pump.symptoms).length).toBeLessThanOrEqual(10);
+    expect(Object.values(pump.symptoms).slice(0, 2)).toEqual(['cooling_degraded loop-a', 'cooling_degraded pump-a']);
+    const sys = req.messages[0]!;
+    expect('content' in sys && sys.content).toMatch(/EXACTLY ONCE/);
+  });
+});
+
+describe('resolveEvidenceIds', () => {
+  const payload = {
+    allowedEvidence: new Set(['obs:gpu-r3-n1-0:v4', 'sym-gpu_xid-gpu-r7-n1-3-b1', 'sig-xid79-gpu-r7-n1-3-560000']),
+    refs: new Map([
+      ['E1', 'obs:gpu-r3-n1-0:v4'],
+      ['S1', 'sym-gpu_xid-gpu-r7-n1-3-b1'],
+    ]),
+    byResource: new Map([
+      ['gpu-r3-n1-0', 'obs:gpu-r3-n1-0:v4'],
+      ['gpu-r7-n1-3', 'sym-gpu_xid-gpu-r7-n1-3-b1'],
+    ]),
+  };
+  it('maps refs, exact ids and normalized resource forms; drops unknown resources', () => {
+    const { valid, dropped } = resolveEvidenceIds(payload, [
+      'E1',
+      's1',
+      'gpu-r3-n1-0',
+      'obs:gpu-r3-n1-0',
+      'OBS:GPU-R3-N1-0:V2',
+      'sig-xid79-gpu-r7-n1-3-560000',
+      'gpu-r3-n1-1',
+      'obs:gpu-r9-n1-0:v4',
+      'E7',
+    ]);
+    expect(valid).toEqual(['obs:gpu-r3-n1-0:v4', 'sym-gpu_xid-gpu-r7-n1-3-b1', 'sig-xid79-gpu-r7-n1-3-560000']);
+    expect(dropped).toEqual(['gpu-r3-n1-1', 'obs:gpu-r9-n1-0:v4', 'E7']);
+  });
+  it('stripRefs removes short refs from a hypothesis but keeps resource names', () => {
+    expect(stripRefs('S1,S2,S3-S5,S7-S10 loop-a degraded + pump-a degraded -> 24 GPUs on racks r2-r4 throttling')).toBe(
+      'loop-a degraded + pump-a degraded -> 24 GPUs on racks r2-r4 throttling',
+    );
+    expect(stripRefs('XID 79 on gpu-r7-n1-3 (E1) -> separate incident')).toBe('XID 79 on gpu-r7-n1-3 -> separate incident');
+    expect(stripRefs('E1')).toBe('E1');
+  });
+
+  it('normalizeEvidenceKey strips obs/version and symptom wrappers', () => {
+    expect(normalizeEvidenceKey('obs:gpu-r3-n1-0:v4')).toBe('gpu-r3-n1-0');
+    expect(normalizeEvidenceKey('sym-thermal_throttle-gpu-r2-n1-0-b1')).toBe('gpu-r2-n1-0');
+    expect(normalizeEvidenceKey(' "Pump-A" ')).toBe('pump-a');
   });
 });
 

@@ -5,7 +5,8 @@
 //    most-upstream *degraded* provider is the same, within a time window, form one candidate.
 //    Symptoms with no degraded provider stand alone. Time overlap alone never merges candidates.
 // 3. Nemotron (LlmPort) confirms / splits / merges candidates through one tool call. Code validates
-//    everything: unknown evidence ids and merges without a shared provider are overridden.
+//    everything: repeated tool calls are deduplicated, cited ids are mapped back to canonical ids (short refs or
+//    another form of a listed resource), unknown ids are dropped, and merges without a shared provider are overridden.
 // 4. Incidents are upserted with stable ids, so reruns update instead of duplicating.
 
 import { createHash } from 'node:crypto';
@@ -18,8 +19,14 @@ import type {
   ResourceSpec,
   SignalEvent,
 } from '@dcos/contracts';
-import type { DbPort, Evidence, LlmPort, SymptomRecord, ToolCallSummary } from './ports.js';
-import { TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL, TRIAGE_TOOL_NAME, buildTriageUserMessage } from './prompts/triage.js';
+import type { DbPort, Evidence, LlmPort, LlmToolCall, SymptomRecord, ToolCallSummary } from './ports.js';
+import {
+  TRIAGE_MAX_TOKENS,
+  TRIAGE_SYSTEM_PROMPT,
+  TRIAGE_TOOL,
+  TRIAGE_TOOL_NAME,
+  buildTriageUserMessage,
+} from './prompts/triage.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,7 +40,8 @@ export const TRIAGE_XID_CODES: ReadonlySet<number> = new Set([48, 74, 79]);
 export const STALE_TELEMETRY_MS = 30_000;
 export const SYMPTOM_BUCKET_MS = 300_000;
 export const DEFAULT_TRIAGE_WINDOW_MS = 600_000;
-export const LLM_PAYLOAD_MAX_BYTES = 6_000;
+/** Target size of the triage user payload (bytes of JSON). Larger payloads were slower and noisier live. */
+export const LLM_PAYLOAD_MAX_BYTES = 3_000;
 export const DETERMINISTIC_CONFIDENCE = 0.5;
 export const LLM_UNAVAILABLE_HYPOTHESIS = 'deterministic grouping (LLM unavailable)';
 const MAX_DETERMINISTIC_EVIDENCE = 20;
@@ -111,6 +119,7 @@ export interface TriageOptions {
   /** Extra recent signals (deduplicated by event_id with getEvidence's signals). */
   signals?: SignalEvent[];
   windowSimMs?: number;
+  /** Per-call output budget; default TRIAGE_MAX_TOKENS (llm.ts still caps it at LLM_MAX_TOKENS). */
   maxTokens?: number;
   log?: (msg: string) => void;
 }
@@ -517,54 +526,189 @@ const assessmentItem = z.object({
   confidence: z.number().min(0).max(1),
   evidence_ids: z.array(z.string()).min(1),
 });
-const assessmentArgs = z.object({ incidents: z.array(assessmentItem) });
+const assessmentArgs = z.object({ incidents: z.array(z.unknown()) });
 export type AssessmentItem = z.infer<typeof assessmentItem>;
 
-interface LlmPayload {
+/** What the model may cite, and how its citations map back to canonical evidence / symptom ids. */
+export interface LlmPayload {
   json: string;
+  /** Canonical ids the model may cite (listed symptom ids + listed evidence event ids). */
   allowedEvidence: Set<string>;
+  /** Short ref (S1, E1, ...) -> canonical id. */
+  refs: Map<string, string>;
+  /** Normalized resource key (e.g. "gpu-r3-n1-0") -> canonical id, only for resources listed in the payload. */
+  byResource: Map<string, string>;
 }
 
-/** Compact candidate JSON for the model, shrunk until it fits LLM_PAYLOAD_MAX_BYTES. */
-export function buildLlmPayload(obs: ObservedSnapshot, candidates: Candidate[], windowSimMs: number): LlmPayload {
-  const levels = [
-    { perCandidate: Infinity, withEvidence: true },
-    { perCandidate: Infinity, withEvidence: false },
-    { perCandidate: 8, withEvidence: false },
-    { perCandidate: 3, withEvidence: false },
-    { perCandidate: 1, withEvidence: false },
-  ];
-  let last: LlmPayload = { json: '{}', allowedEvidence: new Set() };
-  for (const lvl of levels) {
+/** Shrink levels: symptoms listed per candidate, evidence ids listed per symptom. */
+const PAYLOAD_LEVELS = [
+  { symptoms: 10, evidence: 2 },
+  { symptoms: 6, evidence: 1 },
+  { symptoms: 3, evidence: 1 },
+  { symptoms: 1, evidence: 1 },
+] as const;
+
+/** Most diagnostic first: providers, then hard faults, then thermal symptoms on GPUs. */
+const KIND_ORDER: Record<SymptomKind, number> = {
+  cooling_outage: 0,
+  cooling_degraded: 1,
+  node_unavailable: 2,
+  gpu_xid: 3,
+  gpu_unavailable: 4,
+  thermal_throttle: 5,
+  stale_telemetry: 6,
+  near_throttle: 7,
+};
+
+/** Round-robin across racks so a capped list still shows the spread (r2, r3, r4, r2, ...). */
+function orderForPayload(obs: ObservedSnapshot, symptoms: SymptomRecord[]): SymptomRecord[] {
+  const sorted = [...symptoms].sort(
+    (a, b) => KIND_ORDER[a.kind as SymptomKind] - KIND_ORDER[b.kind as SymptomKind] || a.resource_id.localeCompare(b.resource_id),
+  );
+  const out: SymptomRecord[] = [];
+  for (const kind of [...new Set(sorted.map((s) => s.kind))]) {
+    const byRack = new Map<string, SymptomRecord[]>();
+    for (const s of sorted.filter((x) => x.kind === kind)) {
+      const r = rackOfResource(obs, s.resource_id) ?? s.resource_id;
+      byRack.set(r, [...(byRack.get(r) ?? []), s]);
+    }
+    const lanes = [...byRack.values()];
+    for (let i = 0; lanes.some((l) => i < l.length); i++) for (const l of lanes) if (l[i]) out.push(l[i]);
+  }
+  return out;
+}
+
+/** Normalized resource key of a cited id: strips obs:/:vN and sym-<kind>-/-bN wrappers, lower-cases. */
+export function normalizeEvidenceKey(id: string): string {
+  return id
+    .trim()
+    .replace(/^["'`[(]+|["'`\])]+$/g, '')
+    .toLowerCase()
+    .replace(/^obs:/, '')
+    .replace(/:v\d+$/, '')
+    .replace(/^sym-[a-z_]+-/, '')
+    .replace(/-b\d+$/, '');
+}
+
+function evidenceLabel(obs: ObservedSnapshot, id: string, signals: Map<string, SignalEvent>): string {
+  const sig = signals.get(id);
+  if (sig) return `${sig.event_type}${sig.xid_code !== null ? ` ${sig.xid_code}` : ''} on ${sig.resource_id} (signal)`;
+  const m = /^obs:(.+):v\d+$/.exec(id);
+  if (!m) return id.startsWith('sig-') ? `signal ${id.slice(4)}` : `event ${id}`;
+  const rid = m[1]!;
+  const g = obs.gpus.find((x) => x.resource_id === rid);
+  if (g) {
+    const thr = (g.clocks_event_reasons & THERMAL_THROTTLE_BIT) !== 0 ? ' throttling' : '';
+    const xid = g.last_xid_code !== null ? ` xid ${g.last_xid_code}` : '';
+    return `${rid} ${Math.round(g.temp_c)}C${thr}${xid} ${g.availability}`;
+  }
+  const c = obs.cooling.find((x) => x.resource_id === rid);
+  if (c) return `${rid} ${c.operating_state}`;
+  const n = obs.nodes.find((x) => x.resource_id === rid);
+  return n ? `${rid} ${n.availability}` : rid;
+}
+
+/**
+ * Compact candidate JSON for the model (target <= LLM_PAYLOAD_MAX_BYTES). Symptoms and evidence get short refs
+ * (S1, E1) with short labels; the model cites refs and code maps them back to canonical ids.
+ */
+export function buildLlmPayload(
+  obs: ObservedSnapshot,
+  candidates: Candidate[],
+  _windowSimMs: number,
+  signals: SignalEvent[] = [],
+): LlmPayload {
+  const sigById = new Map(signals.map((s) => [s.event_id, s]));
+  let last: LlmPayload | null = null;
+  for (const lvl of PAYLOAD_LEVELS) {
+    const refs = new Map<string, string>();
+    const byResource = new Map<string, string>();
     const allowed = new Set<string>();
+    let sN = 0;
+    let eN = 0;
+    const evRef = new Map<string, string>();
+    const cite = (canonical: string, prefix: 'S' | 'E', resourceKey: string | null): string => {
+      const existing = prefix === 'E' ? evRef.get(canonical) : undefined;
+      if (existing) return existing;
+      const ref = prefix === 'S' ? `S${++sN}` : `E${++eN}`;
+      if (prefix === 'E') evRef.set(canonical, ref);
+      refs.set(ref, canonical);
+      allowed.add(canonical);
+      if (resourceKey && !byResource.has(resourceKey)) byResource.set(resourceKey, canonical);
+      return ref;
+    };
     const body = {
-      as_of_sim_time_ms: obs.clock.sim_time_ms,
-      window_sim_ms: windowSimMs,
+      sim_time_s: Math.round(obs.clock.sim_time_ms / 1000),
       candidates: candidates.map((c) => {
-        const shown = c.symptoms.slice(0, lvl.perCandidate);
-        const firstPath = c.paths[c.symptoms[0]?.symptom_id ?? ''] ?? [];
+        const ordered = orderForPayload(obs, c.symptoms);
+        const shown = ordered.slice(0, lvl.symptoms);
+        // The longest dependency path is the most informative one (gpu > node > rack > loop > pump).
+        const firstPath = Object.values(c.paths).reduce<string[]>((a, b) => (b.length > a.length ? b : a), []);
+        const symptoms: Record<string, string> = {};
+        const evidence: Record<string, string> = {};
+        for (const s of shown) {
+          const key = s.resource_id.toLowerCase();
+          // Signals first (they carry the event), then snapshot observations.
+          const evs = [...s.evidence_event_ids].sort((a, b) => Number(b.startsWith('sig-')) - Number(a.startsWith('sig-'))).slice(0, lvl.evidence);
+          for (const e of evs) evidence[cite(e, 'E', normalizeEvidenceKey(e) === key ? key : null)] = evidenceLabel(obs, e, sigById);
+          // Resource key falls back to the symptom id when no snapshot evidence names the resource.
+          symptoms[cite(s.symptom_id, 'S', key)] = `${s.kind} ${s.resource_id}`;
+        }
+        const kinds = countKinds(c.symptoms);
+        const racks = [...new Set(c.symptoms.map((s) => rackOfResource(obs, s.resource_id)).filter((r): r is string => r !== null))].sort();
         return {
           candidate_id: c.candidate_id,
           family: c.family,
-          hypothesized_cause: c.cause_id ? describeCause(obs, c.cause_id) : null,
-          example_path: firstPath,
+          cause: c.cause_id ? describeCause(obs, c.cause_id) : null,
+          path: firstPath.join('>'),
           severity: incidentSeverity(c.symptoms),
-          symptom_count: c.symptoms.length,
-          kinds: Object.fromEntries(countKinds(c.symptoms)),
-          symptoms: shown.map((s) => {
-            allowed.add(s.symptom_id);
-            if (lvl.withEvidence) for (const e of s.evidence_event_ids) allowed.add(e);
-            return lvl.withEvidence
-              ? { id: s.symptom_id, kind: s.kind, resource_id: s.resource_id, evidence_ids: s.evidence_event_ids }
-              : { id: s.symptom_id, kind: s.kind, resource_id: s.resource_id };
-          }),
+          counts: Object.fromEntries(kinds),
+          ...(racks.length ? { racks } : {}),
+          symptoms,
+          ...(ordered.length > shown.length ? { symptoms_not_listed: ordered.length - shown.length } : {}),
+          evidence,
         };
       }),
     };
-    last = { json: JSON.stringify(body), allowedEvidence: allowed };
+    last = { json: JSON.stringify(body), allowedEvidence: allowed, refs, byResource };
     if (Buffer.byteLength(last.json, 'utf8') <= LLM_PAYLOAD_MAX_BYTES) return last;
   }
-  return last;
+  return last ?? { json: '{}', allowedEvidence: new Set(), refs: new Map(), byResource: new Map() };
+}
+
+/**
+ * Map cited ids to canonical ids. Accepts: short refs (E3/S1), exact listed ids, and ids that name a listed
+ * resource in another form ("gpu-r3-n1-0", "obs:gpu-r3-n1-0", "obs:gpu-r3-n1-0:v4"). Anything naming a resource
+ * that is not in the payload is dropped.
+ */
+/** Remove payload refs (S1, E3, S3-S5) the model sometimes copies into the hypothesis; the feed shows names. */
+export function stripRefs(hypothesis: string): string {
+  const out = hypothesis
+    .replace(/\b[SE]\d{1,3}(?:\s*[-–]\s*[SE]?\d{1,3})?\b/g, '')
+    .replace(/\(\s*[,;\s]*\)|\[\s*[,;\s]*\]/g, '')
+    .replace(/\s*([,;]\s*){2,}/g, ', ')
+    .replace(/\s+([,;.])/g, '$1')
+    .replace(/^[\s,;:]+|[\s,;:]+$/g, '')
+    .replace(/\s{2,}/g, ' ');
+  return out.length > 0 ? out : hypothesis.trim();
+}
+
+export function resolveEvidenceIds(
+  payload: Pick<LlmPayload, 'allowedEvidence' | 'refs' | 'byResource'>,
+  cited: readonly string[],
+): { valid: string[]; dropped: string[] } {
+  const valid: string[] = [];
+  const dropped: string[] = [];
+  for (const raw of cited) {
+    const id = raw.trim();
+    const hit =
+      payload.refs.get(id.toUpperCase()) ??
+      (payload.allowedEvidence.has(id) ? id : undefined) ??
+      payload.byResource.get(normalizeEvidenceKey(id));
+    if (hit) valid.push(hit);
+    else dropped.push(raw);
+  }
+  return { valid: [...new Set(valid)], dropped };
 }
 
 interface Assessed {
@@ -595,7 +739,7 @@ export function applyAssessment(
   obs: ObservedSnapshot,
   candidates: Candidate[],
   items: AssessmentItem[],
-  allowedEvidence: Set<string>,
+  payload: Pick<LlmPayload, 'allowedEvidence' | 'refs' | 'byResource'>,
 ): { assessed: Assessed[]; overrides: string[] } {
   const overrides: string[] = [];
   const byId = new Map(candidates.map((c) => [c.candidate_id, c]));
@@ -609,12 +753,14 @@ export function applyAssessment(
       overrides.push(`${it.candidate_id}: duplicate assessment, ignored`);
       continue;
     }
-    const bad = it.evidence_ids.filter((e) => !allowedEvidence.has(e));
-    if (bad.length > 0) {
-      overrides.push(`${it.candidate_id}: rejected, evidence_ids not in input: ${bad.slice(0, 5).join(', ')}`);
+    const { valid, dropped } = resolveEvidenceIds(payload, it.evidence_ids);
+    if (valid.length === 0) {
+      overrides.push(`${it.candidate_id}: rejected, evidence_ids not in input: ${dropped.slice(0, 5).join(', ')}`);
       continue;
     }
-    accepted.set(it.candidate_id, it);
+    if (dropped.length > 0) overrides.push(`${it.candidate_id}: dropped evidence_ids not in input: ${dropped.slice(0, 5).join(', ')}`);
+    const split = it.split_symptom_ids?.map((s) => payload.refs.get(s.trim().toUpperCase()) ?? s.trim());
+    accepted.set(it.candidate_id, { ...it, evidence_ids: valid, ...(split ? { split_symptom_ids: split } : {}) });
   }
 
   // Merges: only between candidates that share a hosting/cooling provider; one level deep.
@@ -678,31 +824,73 @@ export function applyAssessment(
     }
     assessed.push({
       candidate: main,
-      hypothesis: clip(it.hypothesis, MAX_HYPOTHESIS),
+      hypothesis: clip(stripRefs(it.hypothesis), MAX_HYPOTHESIS),
       confidence: it.confidence,
-      evidence_ids: [...new Set(it.evidence_ids)],
+      evidence_ids: it.evidence_ids,
       source: 'llm',
     });
   }
   return { assessed, overrides };
 }
 
+/**
+ * Collapse the model's submit_incident_assessment calls into one item list: every call is parsed, invalid items
+ * are dropped individually, and per candidate_id the first valid item wins (models sometimes repeat the call).
+ */
+export function collectAssessmentItems(calls: readonly LlmToolCall[]): { items: AssessmentItem[]; notes: string[]; error: string | null } {
+  const notes: string[] = [];
+  const byCandidate = new Map<string, AssessmentItem>();
+  let firstError: string | null = null;
+  const triage = calls.filter((c) => c.name === TRIAGE_TOOL_NAME);
+  if (triage.length === 0) return { items: [], notes, error: 'LLM returned no submit_incident_assessment call' };
+  if (triage.length > 1) notes.push(`${triage.length} ${TRIAGE_TOOL_NAME} calls deduplicated`);
+  for (const call of triage) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(call.argumentsJson);
+    } catch {
+      firstError ??= 'LLM tool arguments are not valid JSON';
+      continue;
+    }
+    const parsed = assessmentArgs.safeParse(raw);
+    if (!parsed.success) {
+      firstError ??= `LLM tool arguments failed validation: ${parsed.error.issues.map((i) => i.path.join('.') || i.message).join('; ')}`;
+      continue;
+    }
+    for (const rawItem of parsed.data.incidents) {
+      const item = assessmentItem.safeParse(rawItem);
+      if (!item.success) {
+        const id = (rawItem as { candidate_id?: unknown } | null)?.candidate_id;
+        const msg = `${typeof id === 'string' ? id : '(unknown)'}: invalid item dropped (${item.error.issues.map((i) => i.path.join('.') || i.message).join('; ')})`;
+        notes.push(msg);
+        firstError ??= `LLM tool arguments failed validation: ${msg}`;
+        continue;
+      }
+      if (!byCandidate.has(item.data.candidate_id)) byCandidate.set(item.data.candidate_id, item.data);
+    }
+  }
+  const items = [...byCandidate.values()];
+  return { items, notes, error: items.length > 0 ? null : (firstError ?? 'LLM returned no assessments') };
+}
+
 interface LlmOutcome {
   items: AssessmentItem[] | null;
+  notes: string[];
   toolCall: ToolCallSummary;
   error: string | null;
 }
 
-async function askLlm(deps: TriageDeps, payload: LlmPayload, candidates: Candidate[], maxTokens?: number): Promise<LlmOutcome> {
+async function askLlm(deps: TriageDeps, payload: LlmPayload, candidates: Candidate[], maxTokens: number): Promise<LlmOutcome> {
   const argsSummary = `${candidates.length} candidate(s), ${Buffer.byteLength(payload.json, 'utf8')} B`;
-  const fail = (error: string): LlmOutcome => ({
+  const fail = (error: string, notes: string[] = []): LlmOutcome => ({
     items: null,
+    notes,
     error,
     toolCall: { tool: TRIAGE_TOOL_NAME, args_summary: argsSummary, result_summary: `fallback to deterministic grouping: ${clip(error, 200)}`, actor: 'code' },
   });
   if (!deps.llm) return fail('no LLM configured');
   const started = deps.now();
-  let toolCalls;
+  let toolCalls: LlmToolCall[];
   try {
     const res = await deps.llm.chat({
       messages: [
@@ -711,30 +899,23 @@ async function askLlm(deps: TriageDeps, payload: LlmPayload, candidates: Candida
       ],
       tools: [TRIAGE_TOOL],
       toolChoice: 'required',
-      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      maxTokens,
     });
     toolCalls = res.toolCalls;
   } catch (err) {
     return fail(`LLM unavailable: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const call = toolCalls.find((c) => c.name === TRIAGE_TOOL_NAME);
-  if (!call) return fail('LLM returned no submit_incident_assessment call');
-  let raw: unknown;
-  try {
-    raw = JSON.parse(call.argumentsJson);
-  } catch {
-    return fail('LLM tool arguments are not valid JSON');
-  }
-  const parsed = assessmentArgs.safeParse(raw);
-  if (!parsed.success) return fail(`LLM tool arguments failed validation: ${parsed.error.issues.map((i) => i.path.join('.') || i.message).join('; ')}`);
-  const decisions = parsed.data.incidents.map((i) => `${i.candidate_id}:${i.decision}`).join(', ');
+  const { items, notes, error } = collectAssessmentItems(toolCalls);
+  if (error) return fail(error, notes);
+  const decisions = items.map((i) => `${i.candidate_id}:${i.decision}`).join(', ');
   return {
-    items: parsed.data.incidents,
+    items,
+    notes,
     error: null,
     toolCall: {
       tool: TRIAGE_TOOL_NAME,
       args_summary: argsSummary,
-      result_summary: clip(`${parsed.data.incidents.length} assessment(s) in ${deps.now() - started} ms: ${decisions}`, 500),
+      result_summary: clip(`${items.length} assessment(s) in ${deps.now() - started} ms: ${decisions}`, 500),
       actor: 'nemotron',
     },
   };
@@ -824,14 +1005,16 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
   if (candidates.length === 0) {
     assessed = [];
   } else {
-    const payload = buildLlmPayload(obs, candidates, window);
-    const outcome = await askLlm(deps, payload, candidates, opts.maxTokens);
+    const payload = buildLlmPayload(obs, candidates, window, signals);
+    const outcome = await askLlm(deps, payload, candidates, opts.maxTokens ?? TRIAGE_MAX_TOKENS);
     toolCalls.push(outcome.toolCall);
     if (outcome.items) {
       usedLlm = true;
-      ({ assessed, overrides } = applyAssessment(obs, candidates, outcome.items, payload.allowedEvidence));
+      const applied = applyAssessment(obs, candidates, outcome.items, payload);
+      assessed = applied.assessed;
+      overrides = [...outcome.notes, ...applied.overrides];
     } else {
-      overrides = [`LLM assessment not used: ${outcome.error ?? 'unknown'}`];
+      overrides = [...outcome.notes, `LLM assessment not used: ${outcome.error ?? 'unknown'}`];
       assessed = candidates.map((c) => deterministicAssessment(obs, c, LLM_UNAVAILABLE_HYPOTHESIS));
     }
   }
@@ -872,7 +1055,7 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
 }
 
 /**
- * F-NV1 diagnose-stage event content (CONTRACTS �0.8). When Nemotron's assessment was used, the summary is its own
+ * F-NV1 diagnose-stage event content (CONTRACTS §0.8). When Nemotron's assessment was used, the summary is its own
  * one-sentence conclusion(s) (the stored hypotheses); otherwise it is clearly labelled deterministic. Never claims
  * `nemotron` when the LLM was not used. Callers pass `{ summary, actor, toolCalls }` straight into `events.emit`.
  */
