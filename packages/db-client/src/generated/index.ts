@@ -45,6 +45,7 @@ import InjectFaultReducer from "./inject_fault_reducer";
 import PauseRunReducer from "./pause_run_reducer";
 import PingReducer from "./ping_reducer";
 import PublishAgentEventReducer from "./publish_agent_event_reducer";
+import PublishEvaluationResultReducer from "./publish_evaluation_result_reducer";
 import RequestActionReducer from "./request_action_reducer";
 import StartActionReducer from "./start_action_reducer";
 import SubmitPlanReducer from "./submit_plan_reducer";
@@ -463,6 +464,7 @@ const reducersSchema = __reducers(
   __reducerSchema("pause_run", PauseRunReducer),
   __reducerSchema("ping", PingReducer),
   __reducerSchema("publish_agent_event", PublishAgentEventReducer),
+  __reducerSchema("publish_evaluation_result", PublishEvaluationResultReducer),
   __reducerSchema("request_action", RequestActionReducer),
   __reducerSchema("start_action", StartActionReducer),
   __reducerSchema("submit_plan", SubmitPlanReducer),

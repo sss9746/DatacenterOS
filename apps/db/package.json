@@ -8,7 +8,10 @@
     "build": "pnpm build:physics && spacetime build",
     "publish:dev": "pnpm build:physics && spacetime publish -s maincloud dcos-dev --yes=remote",
     "generate": "pnpm build:physics && spacetime generate --lang typescript --out-dir ../../packages/db-client/src/generated --module-path .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gate2": "tsx scripts/gate2.ts",
+    "smoke:ledger": "node scripts/ledger-smoke.mjs",
+    "smoke:workflow": "node scripts/workflow-smoke.mjs"
   },
   "dependencies": {
     "@dcos/contracts": "workspace:*",

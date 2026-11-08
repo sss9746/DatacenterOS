@@ -145,7 +145,8 @@ export function isDbError(e: unknown, code?: DbErrorCode): e is DbError {
 export function parseDbError(e: unknown): unknown {
   if (isDbError(e)) return e;
   const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
-  const m = /^\s*([A-Z_]+):\s*(.*)$/s.exec(msg);
+  // Optional "XxxError: " prefix, same convention as P3's dbErrorCode (§0.11 #14).
+  const m = /^\s*(?:[A-Za-z]*Error:\s*)?([A-Z][A-Z_]+):\s*(.*)$/s.exec(msg);
   if (m && CODE_SET.has(m[1]!)) return new DbError(m[1] as DbErrorCode, m[2] ?? '');
   return e;
 }
