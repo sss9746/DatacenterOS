@@ -13,7 +13,14 @@
 >
 > **Still open:**
 > - A SIGKILL *during* a round (interrupted) is unit-tested only.
-> - 4 web e2e failures predate this work.
+> - ~~4 web e2e failures predate this work.~~ **Resolved 2026-11-08:** the web e2e suite is **10/10**
+>   (and unit **244/244**). The apparent failures came from the suite not being hermetic: it defaulted
+>   to port 5173 and, via `reuseExistingServer`, attached to whatever dev server was already running.
+>   Against a presenter's live server the fixture, local-physics and benchmark specs failed 6/10 with
+>   misleading assertion errors. `playwright.config.ts` now defaults to port 5199 and pins
+>   `VITE_DATA_MODE=mock` / empty `VITE_ADMIN_TOKEN` on its own web server, so the result no longer
+>   depends on ambient env or on `apps/web/.env.local`. Verified 10/10 with no overrides while a live
+>   dev server was running on 5173.
 >
 > **Next work:** `plans/BACKEND-PROD-INTEGRATION.md`. The text below is the original handoff, kept for reference.
 
