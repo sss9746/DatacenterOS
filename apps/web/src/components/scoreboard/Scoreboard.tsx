@@ -17,7 +17,7 @@ const fmt = (value: number | null | undefined, digits = 1) => value === null || 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const list = (values: readonly string[]) => values.length ? values.join(', ') : 'none';
 
-export function Scoreboard({ results, mode, onLoadRehearsal }: { results: EvaluationResult[]; mode: 'mock' | 'live'; onLoadRehearsal?: () => void }) {
+export function Scoreboard({ results, mode, onLoadRehearsal, onLoadReal }: { results: EvaluationResult[]; mode: 'mock' | 'live'; onLoadRehearsal?: () => void; /** Mock only: loads the measured Nemotron batch fixture; the shell wires it. */ onLoadReal?: () => void }) {
   const view = useMemo(() => buildScoreboard(results), [results]);
   function download() {
     const blob = new Blob([JSON.stringify(exportPayload(view, mode, results), null, 2)], { type: 'application/json' });
@@ -27,7 +27,7 @@ export function Scoreboard({ results, mode, onLoadRehearsal }: { results: Evalua
   const source = mode === 'mock' ? 'mock data source' : 'live evaluation_result rows';
   return <Panel title="Policy benchmarks" id="scoreboard" detail={<Badge>Simulated workloads</Badge>}>
     <div className="scoreboard-intro"><p>Same scenarios. Same seeds. Every outcome, including ties and losses. No dollar or GPU-hour conversions.</p><Button variant="ghost" size="sm" onClick={download} disabled={!results.length}><Download size={14} aria-hidden="true"/>Export results</Button></div>
-    {!results.length ? <EmptyState onLoadRehearsal={mode === 'mock' ? onLoadRehearsal : undefined}/>
+    {!results.length ? <EmptyState onLoadRehearsal={mode === 'mock' ? onLoadRehearsal : undefined} onLoadReal={mode === 'mock' ? onLoadReal : undefined}/>
       : !view.comparable ? <Refusal view={view} source={source}/>
       : !view.cases.length ? <div className="benchmark-empty"><BarChart3 size={31} strokeWidth={1.3} aria-hidden="true"/><h3>No matched evaluation runs yet</h3><p>Comparisons appear after reactive, threshold and nemotron-policy results arrive for the same run, scenario and seed. {view.valid.length} valid row(s) received from the {source}; none form a complete case.</p></div>
       : <Comparison view={view} source={source}/>}
@@ -35,9 +35,10 @@ export function Scoreboard({ results, mode, onLoadRehearsal }: { results: Evalua
   </Panel>;
 }
 
-function EmptyState({ onLoadRehearsal }: { onLoadRehearsal?: () => void }) {
+function EmptyState({ onLoadRehearsal, onLoadReal }: { onLoadRehearsal?: () => void; onLoadReal?: () => void }) {
   return <div className="benchmark-empty"><BarChart3 size={31} strokeWidth={1.3} aria-hidden="true"/><h3>No matched evaluation runs yet</h3>
     <p>Comparisons appear after reactive, threshold and nemotron-policy results arrive for the same run, scenario and seed. No benchmark values are prefilled.</p>
+    {onLoadReal && <div className="sb-rehearsal"><Button variant="secondary" size="sm" onClick={onLoadReal}>Load Nemotron batch (mock only)</Button><small>Measured 12-case × 3-policy batch whose nemotron-policy rows record live model calls, cache hits and fallbacks per row.</small></div>}
     {onLoadRehearsal && <div className="sb-rehearsal"><Button variant="secondary" size="sm" onClick={onLoadRehearsal}>Load deterministic rehearsal batch (mock only)</Button><small>Measured 12-case × 3-policy rehearsal with no model calls. It cannot substantiate a Nemotron performance claim.</small></div>}
     <div>{['Reactive rule-based baseline', 'Threshold-based baseline', 'Nemotron policy'].map((name) => <span key={name}>{name}<small>Awaiting results</small></span>)}</div>
   </div>;
@@ -64,9 +65,11 @@ function Refusal({ view, source }: { view: ScoreboardView; source: string }) {
 function Comparison({ view, source }: { view: ScoreboardView; source: string }) {
   const { cases, names, shortNames, columns } = view;
   const countLine = `${cases.length} matched scenario/seed cases · ${cases.length * policies.length} policy runs · ${source}`;
+  const ours = view.headline.find((column) => column.policy === 'nemotron');
   return <>
-    <Hero view={view}/>
     <Headline view={view}/>
+    {ours && <p className="sb-line sb-line-tallies">{ours.tallies.map((t) => `${tallyText(t)} vs ${shortNames[t.versus]}`).join(' · ')}</p>}
+    <p className="sb-line sb-line-provenance"><Badge tone={columns[2].uniform?.tone ?? 'warning'}>{columns[2].headline}</Badge><span>{provenanceLine(view)}</span></p>
     {view.claim.banner &&<div className="sb-banner" role="note"><AlertTriangle size={16} aria-hidden="true"/><div><strong>Cannot substantiate a Nemotron performance claim</strong><p>{view.claim.banner}</p></div></div>}
     {/* the honesty point judges should see without clicking: every case where our column is worse on any metric */}
     <Outcomes title={`Cases where ${names.nemotron} loses or trades off`} open items={view.report.losses.flatMap((loss) => loss.worse.map((metric): Outcome => ({ scenario_id: loss.scenario_id, seed: loss.seed, baseline: loss.baseline, metric, ours: loss.nemotron[metric], theirs: loss.other[metric] })))} names={names} empty="No worse values on lost work, finite-horizon work deficit, GPU busy waste, unnecessary interventions, unsafe execution or failed recoveries."/>
@@ -74,46 +77,33 @@ function Comparison({ view, source }: { view: ScoreboardView; source: string }) 
       {view.legacyOnly ? <p className="data-warning">Provenance unavailable on every row (legacy results). Batch, revision, horizon and model use cannot be checked, so these results cannot be certified. Unfinished jobs are unknown.</p> : <BatchSummary view={view}/>}
       <ProvenanceColumns columns={columns} names={names}/>
     </details>
-    <Tallies cases={cases} name={names.nemotron} label={columns[2].headline}/>
-    <CaseTable cases={cases} names={shortNames} columns={columns}/>
-    <Aggregates view={view}/>
-    <Outcomes title={`Ties on lost work or finite-horizon work deficit`} items={view.outcomes.ties} names={names} empty="No ties on the headline metrics."/>
+    <details className="report-details sb-all"><summary>All results<small>per case · aggregates · distributions · ties</small></summary>
+      <Tallies cases={cases} name={names.nemotron} label={columns[2].headline}/>
+      <CaseTable cases={cases} names={shortNames} columns={columns}/>
+      <Aggregates view={view}/>
+      <Outcomes title={`Ties on lost work or finite-horizon work deficit`} items={view.outcomes.ties} names={names} empty="No ties on the headline metrics."/>
+    </details>
   </>;
 }
 
 const tallyText = (t: HeadlineTally) => `${plural(t.win, 'win')} · ${plural(t.tie, 'tie')} · ${plural(t.loss, 'loss', 'losses')}${t.unknown ? ` · ${t.unknown} unknown` : ''}`;
-/**
- * Hero totals: the nemotron-policy column's lost-work case counts against both baselines, summed, plus the number of
- * per-metric losses listed in the open "loses or trades off" disclosure. Case counts only; the provenance pill repeats
- * the column header so the numbers are never read as a Nemotron performance claim on their own.
- */
-function Hero({ view }: { view: ScoreboardView }) {
-  const ours = view.headline.find((column) => column.policy === 'nemotron');
-  if (!ours) return null;
-  const sum = (key: 'win' | 'tie' | 'loss') => ours.tallies.reduce((acc, t) => acc + t[key], 0);
-  const openLosses = view.report.losses.reduce((acc, loss) => acc + loss.worse.length, 0);
-  const pairs = ours.tallies.length;
-  const cells = [
-    { label: 'Wins', value: sum('win'), sub: `lost work lower than a baseline, ${pairs} pairings` },
-    { label: 'Ties', value: sum('tie'), sub: 'equal lost work' },
-    { label: 'Losses', value: sum('loss'), sub: 'lost work higher than a baseline' },
-    { label: 'Losses open', value: openLosses, sub: 'worse values on any metric, listed below' },
-  ];
-  return <section className="sb-hero" aria-label="Case counts for the nemotron-policy column">
-    {cells.map((cell) => <div key={cell.label} className="sb-hero-cell"><span className="sb-hero-label">{cell.label}</span><strong className="sb-hero-value">{cell.value}</strong><span className="sb-hero-sub">{cell.sub}</span></div>)}
-    <p className="sb-hero-note"><Badge tone={view.columns[2].uniform?.tone ?? 'warning'}>{view.columns[2].headline}</Badge>{view.names.nemotron} vs {view.headline.filter((c) => c.policy !== 'nemotron').map((c) => view.shortNames[c.policy]).join(' and ')} · {plural(view.cases.length, 'matched case')} · counts of cases, not percentages</p>
-  </section>;
+
+/** One line of model-use provenance summed from the rows' own provenance counts; nothing is inferred. */
+function provenanceLine(view: ScoreboardView): string {
+  if (view.legacyOnly) return 'Provenance unavailable on these rows (legacy results).';
+  const c = view.header.counts;
+  if (c.live_model_responses > 0 || c.cache_hits > 0 || c.fallback_decisions > 0) return `${c.live_model_responses} live Nemotron calls + ${c.cache_hits} cached + ${c.fallback_decisions} fallbacks, across ${c.model_requests} model requests`;
+  return 'No model calls in this batch: it cannot substantiate a Nemotron performance claim.';
 }
-/** First row: lost work per policy over the matched cases, with case-count tallies. Numbers come from `view.headline` only. */
+
+/** Headline: three big numbers only (lost work per policy over the matched cases). Numbers come from `view.headline` only. */
 function Headline({ view }: { view: ScoreboardView }) {
-  const { cases, shortNames, columns } = view;
+  const { cases, shortNames } = view;
   return <section className="sb-headline" aria-labelledby="sb-headline-heading">
-    <h3 id="sb-headline-heading">Lost work over {plural(cases.length, 'matched case')}<span>work units, summed · lower is better · wins, ties and losses are case counts on lost work</span></h3>
-    <ul className="sb-headline-grid">{view.headline.map((column, index) => <li key={column.policy} className="sb-headline-col" data-lowest={column.lowest || undefined}>
+    <h3 id="sb-headline-heading">Lost work over {plural(cases.length, 'matched case')}<span>work units, summed · lower is better</span></h3>
+    <ul className="sb-headline-grid">{view.headline.map((column) => <li key={column.policy} className="sb-headline-col" data-lowest={column.lowest || undefined}>
       <span className="sb-headline-name">{shortNames[column.policy]}</span>
-      <Badge tone={columns[index].uniform?.tone ?? 'warning'}>{columns[index].headline}</Badge>
       <strong className="sb-headline-value numeric">{fmt(column.lostWork)}</strong>
-      {column.tallies.map((t) => <span key={t.versus} className="sb-headline-tally"><span>vs {shortNames[t.versus]}</span>{tallyText(t)}</span>)}
     </li>)}</ul>
   </section>;
 }
