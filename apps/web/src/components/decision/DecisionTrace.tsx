@@ -108,7 +108,7 @@ function Options({ step, example }: { step: OptionsStep; example: boolean }) {
       <table className="dt-table" aria-label={`Options for ${job}`}>
         <caption>{job}</caption>
         <thead><tr><th scope="col">Option</th><th scope="col">Commands</th><th scope="col" className="dt-num">Lost work</th>{step.show_deficit && <th scope="col" className="dt-num">Work deficit</th>}<th scope="col" className="dt-num">GPU-busy waste</th><th scope="col">Decided by</th></tr></thead>
-        <tbody>{rows.map((r) => <tr key={r.option_id} className={`${r.chosen === true ? 'dt-row-chosen' : ''} ${r.lowest_cost ? 'dt-row-lowest' : ''}`} title={r.option_id}>
+        <tbody>{rows.map((r) => <tr key={r.key} className={`${r.chosen === true ? 'dt-row-chosen' : ''} ${r.lowest_cost ? 'dt-row-lowest' : ''}`} title={r.option_id}>
           <td><span className="dt-option-name">{r.chosen === true && <CheckCircle2 size={13} aria-hidden="true"/>}{r.name}</span>{r.chosen === true && <span className="dt-tag dt-tag-chosen">chosen</span>}{r.lowest_cost && <span className="dt-tag dt-tag-lowest">lowest cost</span>}</td>
           <td className="dt-cmds">{r.commands || NOT_RECORDED}</td>
           <td className="dt-num">{wu(r.lost_wu)}</td>
@@ -130,7 +130,7 @@ function Cost({ step }: { step: CostStep }) {
     return <div key={job.job} className="dt-cost-job">
       <h4>{job.job} · predicted lost work</h4>
       {!any && <p className="dt-muted">No option for {job.job} carries a predicted lost-work number ({NOT_RECORDED}).</p>}
-      {any && <ul className="dt-bars" aria-label={`Predicted lost work per option for ${job.job}`}>{job.bars.map((b) => <li key={b.option_id} className={b.chosen === true ? 'dt-bar-chosen' : ''}>
+      {any && <ul className="dt-bars" aria-label={`Predicted lost work per option for ${job.job}`}>{job.bars.map((b) => <li key={b.key} className={b.chosen === true ? 'dt-bar-chosen' : ''}>
         <span className="dt-bar-label">{b.chosen === true && <CheckCircle2 size={12} aria-hidden="true"/>}{b.name}</span>
         <span className="dt-bar-track" aria-hidden="true">{b.width_pct !== null && <span className="dt-bar-fill" style={{ width: `${Math.max(b.width_pct, b.lost_wu === 0 ? 0 : 2)}%` }}/>}{b.width_pct === null && <span className="dt-bar-none"/>}</span>
         <span className="dt-bar-value">{wu(b.lost_wu)}{b.chosen === true ? ' · chosen' : ''}</span>
@@ -153,7 +153,7 @@ function LedgerSafetyCell({ s, title }: { s: LedgerSafety | null; title: string 
 function Safety({ step }: { step: SafetyStep }) {
   return <>
     <h4>Per option (planner’s evaluate_safety)</h4>
-    {step.options.length ? <ul className="dt-list dt-safety-list">{step.options.map((r) => <li key={r.option_id} title={r.option_id}>
+    {step.options.length ? <ul className="dt-list dt-safety-list">{step.options.map((r) => <li key={r.key} title={r.option_id}>
       <span className="dt-safety-head"><SafetyPill safety={r.safety} label={r.safety_label}/><span className="dt-option-name">{r.job} · {r.name}</span>{r.chosen === true && <span className="dt-tag dt-tag-chosen">chosen</span>}</span>
       {r.violations.length > 0 && <ul className="dt-violations">{r.violations.map((v) => <li key={v.code}>{v.text} <code>{v.code}</code></li>)}</ul>}
       {r.safety === 'not_checked' && <span className="dt-meta">no command to check (or not separately simulated)</span>}
@@ -172,7 +172,7 @@ function Safety({ step }: { step: SafetyStep }) {
 
 function Decision({ step, example }: { step: DecisionStep; example: boolean }) {
   return <>
-    {step.lines.length ? <ul className="dt-list dt-decisions">{step.lines.map((l) => <li key={l.option_id}>
+    {step.lines.length ? <ul className="dt-list dt-decisions">{step.lines.map((l) => <li key={l.key}>
       <span className="dt-safety-head"><CheckCircle2 size={14} aria-hidden="true" className="dt-ok"/><strong>{l.job}</strong><span className="dt-option-name">{l.name}</span><DecidedBy actor={l.actor} example={example}/></span>
       <span className="dt-wrap dt-reason">{l.reason ?? `reason ${NOT_RECORDED}`}</span>
       <span className="dt-meta">snapshot epoch {l.snapshot_epoch ?? NOT_RECORDED} · as of {sim(l.as_of_sim_time_ms)}</span>

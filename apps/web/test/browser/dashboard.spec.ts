@@ -84,6 +84,18 @@ test('fixture: cluster, XID 79 rollback, reset, and the two-workflow scripted ex
   await expect(page.locator('#workflows .wf-card')).toHaveCount(2);
   await expect(page.locator('#workflows')).toContainText('wf-example-cooling');
   await expect(page.locator('#workflows')).toContainText('wf-example-xid');
+  // Decision trace: the seven steps of the selected (cooling) workflow, all open, with every option and the safety verdicts.
+  const trace = page.locator('#workflows .decision-trace');
+  await expect(trace).toBeVisible();
+  await expect(trace.locator('details[open]')).toHaveCount(7);
+  await expect(trace).toContainText('Options considered');
+  await expect(trace.locator('table.dt-table')).toHaveCount(2);
+  await expect(trace).toContainText('Denied');
+  await expect(trace).toContainText('BLOCKED');
+  await expect(trace).toContainText('saves 410 wu vs keep running');
+  await page.getByRole('group', { name: 'Choose a workflow to trace' }).getByRole('button', { name: /Independent GPU fault/ }).click();
+  await expect(page.locator('#workflows .decision-trace')).toContainText('Recovered');
+  await expect(page.locator('#workflows .decision-trace')).toContainText('1/1 checks passed');
   await expect(page.locator('#ledger')).toContainText('BLOCKED');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expectAccessibleAndContained(page);

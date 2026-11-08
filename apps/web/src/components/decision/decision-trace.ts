@@ -56,6 +56,8 @@ export interface TriageLine { actor: AgentActor | null; summary: string; sim_tim
 export interface DetectStep extends StepMeta { id: 'detect'; incidents: DetectIncident[]; triage: TriageLine[] }
 
 export interface OptionRow {
+  /** Unique within the round (`option_id#n`): two options of one job may share a kind, e.g. migrate_restart to r7 and r8. */
+  key: string;
   option_id: string;
   job: string;
   name: string;
@@ -83,7 +85,7 @@ export interface OptionsStep extends StepMeta {
   pending: boolean;
 }
 
-export interface CostBar { option_id: string; name: string; lost_wu: number | null; chosen: boolean | null; width_pct: number | null }
+export interface CostBar { key: string; option_id: string; name: string; lost_wu: number | null; chosen: boolean | null; width_pct: number | null }
 export interface CostJob {
   job: string;
   bars: CostBar[];
@@ -108,7 +110,7 @@ export interface LedgerSafetyLine {
 }
 export interface SafetyStep extends StepMeta { id: 'safety'; options: OptionRow[]; ledger: LedgerSafetyLine[] }
 
-export interface DecisionLine { job: string; option_id: string; name: string; actor: AgentActor | null; reason: string | null; snapshot_epoch: number | null; as_of_sim_time_ms: number | null }
+export interface DecisionLine { key: string; job: string; option_id: string; name: string; actor: AgentActor | null; reason: string | null; snapshot_epoch: number | null; as_of_sim_time_ms: number | null }
 export interface DecisionStep extends StepMeta {
   id: 'decision';
   lines: DecisionLine[];
@@ -176,12 +178,16 @@ function parseEventSafety(s: string | null): { safety: CandidateSafety | null; c
 
 function optionRows(round: CandidateRound | null): OptionRow[] {
   if (!round) return [];
+  const seen = new Map<string, number>();
   const rows = round.options.map<OptionRow>((o) => {
     const p = o.persisted;
+    const n = (seen.get(o.option_id) ?? 0) + 1;
+    seen.set(o.option_id, n);
     const ev = p ? null : parseEventSafety(o.safety);
     const safety = p ? p.safety : ev!.safety;
     const codes = p ? p.violations : ev!.codes;
     return {
+      key: n > 1 ? `${o.option_id}#${n}` : o.option_id,
       option_id: o.option_id,
       job: optionJob(o),
       name: optionName(o),
@@ -277,7 +283,7 @@ function costStep(rows: readonly OptionRow[]): CostStep {
   const jobs = groupByJob(rows).map<CostJob>(({ job, rows: mine }) => {
     const values = mine.map((r) => r.lost_wu).filter((x): x is number => x !== null);
     const max = values.length ? Math.max(...values) : 0;
-    const bars = mine.map<CostBar>((r) => ({ option_id: r.option_id, name: r.name, lost_wu: r.lost_wu, chosen: r.chosen, width_pct: r.lost_wu === null ? null : max > 0 ? Math.round((r.lost_wu / max) * 100) : 0 }));
+    const bars = mine.map<CostBar>((r) => ({ key: r.key, option_id: r.option_id, name: r.name, lost_wu: r.lost_wu, chosen: r.chosen, width_pct: r.lost_wu === null ? null : max > 0 ? Math.round((r.lost_wu / max) * 100) : 0 }));
     const chosen = mine.find((r) => r.chosen === true);
     const keep = mine.find((r) => r.keep_running);
     const saving = chosen && keep && chosen.lost_wu !== null && keep.lost_wu !== null && chosen !== keep ? { chosen: chosen.name, chosen_wu: chosen.lost_wu, keep_wu: keep.lost_wu, saved_wu: Math.round((keep.lost_wu - chosen.lost_wu) * 1000) / 1000 } : null;
@@ -305,10 +311,10 @@ function safetyStep(view: WorkflowView, rows: readonly OptionRow[]): SafetyStep 
 function decisionStep(view: WorkflowView, rows: readonly OptionRow[], ctx: TraceContext): DecisionStep {
   const round = view.candidates;
   const lines = rows.filter((r) => r.chosen === true).map<DecisionLine>((r) => {
-    const persisted = round?.options.find((o) => o.option_id === r.option_id)?.persisted;
+    const persisted = round?.options.filter((o) => o.option_id === r.option_id)[Number(r.key.split('#')[1] ?? 1) - 1]?.persisted;
     const actor = r.actor ?? round?.choice?.actor ?? null;
     const reason = r.reason ?? (round?.source === 'events' ? round.narrative.at(-1)?.summary ?? null : null);
-    return { job: r.job, option_id: r.option_id, name: r.name, actor, reason, snapshot_epoch: r.snapshot_epoch, as_of_sim_time_ms: persisted?.as_of_sim_time_ms ?? null };
+    return { key: r.key, job: r.job, option_id: r.option_id, name: r.name, actor, reason, snapshot_epoch: r.snapshot_epoch, as_of_sim_time_ms: persisted?.as_of_sim_time_ms ?? null };
   });
   const planRow = view.planId ? (ctx.plans ?? []).find((p) => p.plan_id === view.planId) ?? null : null;
   const plan = planRow ? { plan_id: planRow.plan_id, explanation: str(planRow.explanation), based_on_decision_epoch: planRow.based_on_decision_epoch, lost_wu: planRow.expected_lost_work_units, gpu_waste_s: planRow.expected_gpu_busy_waste_s, commands: planRow.command_keys.length } : null;
