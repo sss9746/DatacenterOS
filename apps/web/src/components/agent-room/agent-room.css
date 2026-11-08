@@ -1,0 +1,215 @@
+/* Agent room (hero). All colours come from the DESIGN-DIRECTION §1 tokens; the fallbacks let the room render on the
+   pre-redesign stylesheet while the slices merge. Animations are transform/opacity only. */
+
+#agent-room {
+  --ar-forest: var(--forest, #3E503C);
+  --ar-forest-deep: var(--forest-deep, #2C3A2B);
+  --ar-ink: var(--ink, #1F2A1E);
+  --ar-ink-muted: var(--ink-muted, #5B6650);
+  --ar-sage: var(--sage, #7F886A);
+  --ar-sage-soft: var(--sage-soft, #C9CDB7);
+  --ar-cream: var(--cream, #F3ECDB);
+  --ar-paper: var(--paper, #FAF6EC);
+  --ar-inset: var(--paper-inset, #EDE4CE);
+  --ar-orange: var(--orange, #FF6F3D);
+  --ar-orange-ink: var(--orange-ink, #A8380F);
+  --ar-orange-soft: var(--orange-soft, #FFD9CB);
+  --ar-amber: var(--amber, #E3B35A);
+  --ar-amber-ink: var(--amber-ink, #7A5A12);
+  --ar-nvidia: var(--nvidia, #76B900);
+  --ar-focus: var(--focus, #1F2A1E);
+  --ar-display: var(--font-display, "Bricolage Grotesque", "Inter", system-ui, sans-serif);
+  --ar-ui: var(--font-ui, "Inter", system-ui, sans-serif);
+  --ar-mono: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+  --ar-ease: var(--ease-out, cubic-bezier(.2,.7,.2,1));
+  --ar-t-fast: var(--t-fast, 160ms);
+  --ar-t-base: var(--t-base, 280ms);
+  --ar-t-drama: var(--t-drama, 1400ms);
+
+  display: flex; flex-direction: column; min-height: 560px; min-width: 0;
+  background: var(--ar-inset); color: var(--ar-ink); font-family: var(--ar-ui);
+  border: 1px solid var(--ar-forest-deep); border-radius: var(--r-panel, 14px); overflow: hidden;
+  box-shadow: inset 0 1px 0 var(--ar-forest-deep); padding: 0;
+  font-feature-settings: "tnum" 1;
+}
+#agent-room *, #agent-room *::before, #agent-room *::after { box-sizing: border-box; }
+#agent-room :focus-visible { outline: 2px solid var(--ar-focus); outline-offset: 3px; }
+
+/* ---------------------------------------------------------------- header strip (forest) */
+#agent-room > .panel-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  min-height: 56px; padding: 10px 16px; margin: 0;
+  background: var(--ar-forest); color: var(--ar-cream); border-bottom: 1px solid var(--ar-forest-deep);
+}
+#agent-room > .panel-heading h2 {
+  margin: 0; font-family: var(--ar-ui); font-size: 11.5px; line-height: 1; font-weight: 650; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ar-cream); opacity: .85;
+}
+#agent-room > .panel-heading :focus-visible { outline-color: var(--ar-cream); }
+#agent-room .ar-head-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+#agent-room .ar-head-line { font-family: var(--ar-display); font-size: 19px; line-height: 1.25; font-weight: 650; letter-spacing: -.015em; color: var(--ar-cream); }
+#agent-room .ar-head-badges { display: inline-flex; gap: 6px; }
+
+/* ---------------------------------------------------------------- badges (scoped, so the room is right before/after the shell merge) */
+#agent-room .badge {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 4px;
+  font-family: var(--ar-ui); font-size: 11.5px; line-height: 1; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap;
+  background: var(--ar-inset); color: var(--ar-ink); border: 1px solid transparent;
+}
+#agent-room .badge-nemotron { background: var(--ar-forest); color: var(--ar-cream); border-radius: 999px; }
+#agent-room .badge-nemotron::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ar-nvidia); flex: none; }
+#agent-room .badge-code { background: transparent; color: var(--ar-ink-muted); border-color: var(--ar-sage); border-radius: 999px; }
+#agent-room .badge-unknown { background: transparent; color: var(--ar-ink-muted); border: 1px dashed var(--ar-sage); }
+#agent-room .badge-example, #agent-room .badge-mock { background: var(--ar-orange-soft); color: var(--ar-orange-ink); }
+#agent-room .badge-blocked, #agent-room .badge-danger { background: var(--ar-orange); color: var(--ar-ink); font-weight: 700; }
+#agent-room .badge-neutral { background: var(--ar-paper); color: var(--ar-ink); }
+#agent-room .panel-heading .badge-neutral { background: var(--ar-cream); }
+
+/* ---------------------------------------------------------------- seats */
+#agent-room .ar-seats {
+  list-style: none; margin: 0; padding: 14px 16px 12px; display: grid; gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent);
+}
+#agent-room .ar-seat {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; row-gap: 3px; align-items: center;
+  padding: 8px 10px; background: var(--ar-paper); border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); border-radius: 10px; min-width: 0;
+}
+#agent-room .ar-avatar {
+  grid-row: 1 / span 3; position: relative; width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center;
+  font-family: var(--ar-display); font-size: 19px; font-weight: 700; letter-spacing: -.02em;
+  background: var(--ar-paper); color: var(--ar-ink); box-shadow: 0 0 0 1px var(--ar-sage-soft);
+}
+#agent-room .ar-seat-nemotron .ar-avatar { background: var(--ar-forest); color: var(--ar-cream); }
+#agent-room .ar-seat-nemotron .ar-avatar::after { content: ""; position: absolute; right: -1px; top: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--ar-nvidia); border: 2px solid var(--ar-paper); }
+#agent-room .ar-seat-code .ar-avatar { background: var(--ar-inset); }
+#agent-room .ar-seat-unknown .ar-avatar { background: transparent; box-shadow: none; border: 1px dashed var(--ar-sage); color: var(--ar-ink-muted); }
+#agent-room .ar-seat.is-done .ar-avatar { box-shadow: 0 0 0 1px var(--ar-forest); }
+#agent-room .ar-seat.is-thinking .ar-avatar { box-shadow: 0 0 0 2px var(--ar-forest); animation: ar-pulse 1.8s var(--ar-ease) infinite; }
+#agent-room .ar-avatar-check {
+  position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--ar-forest); color: var(--ar-cream); border: 2px solid var(--ar-paper);
+}
+#agent-room .ar-seat-name { font-size: 14px; line-height: 1.3; font-weight: 600; color: var(--ar-ink); }
+#agent-room .ar-seat .badge { justify-self: start; }
+#agent-room .ar-seat-role { grid-column: 2; font-family: var(--ar-mono); font-size: 12px; line-height: 1.3; color: var(--ar-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@keyframes ar-pulse {
+  0% { box-shadow: 0 0 0 2px var(--ar-forest), 0 0 0 2px color-mix(in srgb, var(--ar-forest) 45%, transparent); }
+  100% { box-shadow: 0 0 0 2px var(--ar-forest), 0 0 0 9px color-mix(in srgb, var(--ar-forest) 0%, transparent); }
+}
+
+/* ---------------------------------------------------------------- thread tabs */
+#agent-room .ar-tabs { display: flex; gap: 6px; padding: 10px 16px 0; overflow-x: auto; scrollbar-width: thin; }
+#agent-room .ar-tab {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px;
+  background: transparent; color: var(--ar-ink-muted); border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; text-align: left; transition: background-color var(--ar-t-fast) var(--ar-ease), color var(--ar-t-fast) var(--ar-ease);
+}
+#agent-room .ar-tab:hover { background: color-mix(in srgb, var(--ar-paper) 60%, transparent); color: var(--ar-ink); }
+#agent-room .ar-tab.is-selected { background: var(--ar-paper); color: var(--ar-ink); border-color: color-mix(in srgb, var(--ar-sage) 45%, transparent); font-weight: 600; }
+#agent-room .ar-tab-swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--ar-sage-soft); }
+#agent-room .ar-accent-a .ar-tab-swatch, #agent-room .ar-accent-a { --ar-accent: var(--ar-forest); }
+#agent-room .ar-accent-b { --ar-accent: var(--ar-amber); }
+#agent-room .ar-accent-run { --ar-accent: var(--ar-sage); }
+#agent-room .ar-tab .ar-tab-swatch { background: var(--ar-accent); }
+#agent-room .ar-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#agent-room .ar-tab-count { flex: none; font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); padding: 1px 6px; border-radius: 999px; background: var(--ar-inset); }
+#agent-room .ar-tab.is-selected .ar-tab-count { background: var(--ar-cream); }
+#agent-room .ar-tab-state, #agent-room .ar-tab-silent { flex: none; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; }
+#agent-room .ar-tab-state { background: var(--ar-forest); color: var(--ar-cream); }
+#agent-room .ar-tab-silent { background: var(--ar-orange-soft); color: var(--ar-orange-ink); }
+
+/* ---------------------------------------------------------------- stream */
+#agent-room .ar-stream {
+  flex: 1 1 auto; min-height: 0; max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  margin: 0 16px 16px; padding: 14px 14px 10px; background: var(--ar-paper);
+  border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); border-radius: 0 10px 10px 10px;
+}
+#agent-room .ar-tabs + .ar-stream { border-top-left-radius: 0; }
+#agent-room .ar-seats + .ar-stream { margin-top: 12px; border-radius: 10px; }
+#agent-room .ar-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+#agent-room .ar-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 10px; align-items: start; min-width: 0; }
+#agent-room .ar-msg.is-new { animation: ar-enter var(--ar-t-base) var(--ar-ease) both; }
+@keyframes ar-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+#agent-room .ar-msg-avatar {
+  width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; margin-top: 2px;
+  font-family: var(--ar-display); font-size: 13px; font-weight: 700; background: var(--ar-inset); color: var(--ar-ink); box-shadow: 0 0 0 1px var(--ar-sage-soft);
+}
+#agent-room .ar-msg-nemotron .ar-msg-avatar { background: var(--ar-forest); color: var(--ar-cream); box-shadow: 0 0 0 1px var(--ar-forest); }
+#agent-room .ar-msg-unknown .ar-msg-avatar { background: transparent; box-shadow: none; border: 1px dashed var(--ar-sage); color: var(--ar-ink-muted); }
+
+#agent-room .ar-bubble {
+  min-width: 0; padding: 10px 12px 10px 14px; background: var(--ar-cream); border-radius: 4px 12px 12px 12px;
+  border-left: 2px solid var(--ar-accent, var(--ar-forest)); overflow-wrap: anywhere;
+}
+#agent-room .ar-msg.is-blocked .ar-bubble { background: var(--ar-orange-soft); }
+#agent-room .ar-msg-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+#agent-room .ar-msg-seat { font-size: 14px; line-height: 1.3; font-weight: 600; color: var(--ar-ink); }
+#agent-room .ar-msg-stage { margin-left: auto; font-family: var(--ar-mono); font-size: 12px; color: var(--ar-ink-muted); white-space: nowrap; }
+#agent-room .ar-msg-text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ar-ink); }
+
+#agent-room .ar-tools { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+#agent-room .ar-tool { position: relative; }
+#agent-room .ar-tool summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px;
+  background: var(--ar-paper); border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); font-family: var(--ar-mono); font-size: 12.5px; line-height: 1.4; color: var(--ar-ink);
+  transition: background-color var(--ar-t-fast) var(--ar-ease);
+}
+#agent-room .ar-tool summary::-webkit-details-marker { display: none; }
+#agent-room .ar-tool summary:hover { background: var(--ar-inset); }
+#agent-room .ar-tool[open] summary { background: var(--ar-inset); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+#agent-room .ar-tool code { font: inherit; }
+#agent-room .ar-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ar-sage); flex: none; }
+#agent-room .ar-tool-nemotron .ar-dot { background: var(--ar-nvidia); box-shadow: 0 0 0 1px var(--ar-forest); }
+#agent-room .ar-tool-unknown .ar-dot { background: transparent; border: 1px dashed var(--ar-sage); }
+#agent-room .ar-tool-body {
+  margin: 0; padding: 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; background: var(--ar-inset);
+  border: 1px solid color-mix(in srgb, var(--ar-sage) 45%, transparent); border-top: none; border-radius: 0 4px 4px 4px;
+  font-family: var(--ar-mono); font-size: 12px; line-height: 1.45; color: var(--ar-ink); max-width: 100%;
+}
+#agent-room .ar-tool-body dt { color: var(--ar-ink-muted); text-transform: uppercase; letter-spacing: .06em; font-size: 11.5px; padding-top: 1px; }
+#agent-room .ar-tool-body dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- handoff (line + travelling dot) */
+#agent-room .ar-handoff { grid-column: 2; display: flex; align-items: center; gap: 8px; margin: 6px 0 -2px 6px; }
+#agent-room .ar-handoff-track { position: relative; width: 56px; height: 8px; flex: none; }
+#agent-room .ar-handoff-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--ar-sage); transform-origin: left center; }
+#agent-room .ar-handoff-dot { position: absolute; left: 0; top: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--ar-forest); transform: translateX(48px); }
+#agent-room .ar-handoff.is-travelling .ar-handoff-track::before { animation: ar-draw var(--ar-t-drama) var(--ar-ease) both; }
+#agent-room .ar-handoff.is-travelling .ar-handoff-dot { animation: ar-travel var(--ar-t-drama) var(--ar-ease) both; background: var(--ar-orange); }
+@keyframes ar-draw { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes ar-travel { 0% { transform: translateX(0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateX(48px); opacity: 1; } }
+#agent-room .ar-handoff-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; line-height: 1; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--ar-ink-muted); }
+
+/* ---------------------------------------------------------------- system divider (resume) */
+#agent-room .ar-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0; min-width: 0; }
+#agent-room .ar-divider::before, #agent-room .ar-divider::after { content: ""; flex: 1 1 0; height: 1px; background: var(--ar-orange-ink); opacity: .6; }
+#agent-room .ar-divider span { flex: 0 1 auto; text-align: center; font-size: 11.5px; line-height: 1.35; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ar-orange-ink); }
+
+/* ---------------------------------------------------------------- empty */
+#agent-room .ar-empty { margin: auto; padding: 24px; text-align: center; border: 1px dashed var(--ar-sage); border-radius: 10px; }
+#agent-room .ar-empty strong { display: block; font-family: var(--ar-display); font-size: 19px; font-weight: 650; letter-spacing: -.015em; color: var(--ar-ink); }
+#agent-room .ar-empty p { margin: 4px 0 0; font-size: 14px; color: var(--ar-ink-muted); }
+
+/* ---------------------------------------------------------------- responsive */
+@media (max-width: 1199px) and (min-width: 931px) {
+  #agent-room .ar-seats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  #agent-room .ar-seats { display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding: 12px 16px; gap: 8px; scrollbar-width: thin; }
+  #agent-room .ar-seat { flex: 0 0 200px; scroll-snap-align: start; }
+  #agent-room .ar-stream { max-height: 440px; margin: 0 12px 12px; padding: 12px 10px 8px; }
+  #agent-room .ar-tabs { padding: 10px 12px 0; }
+  #agent-room .ar-tab-state, #agent-room .ar-tab-silent { display: none; }
+  #agent-room .ar-msg-stage { margin-left: 0; width: 100%; }
+}
+
+/* ---------------------------------------------------------------- reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  #agent-room .ar-seat.is-thinking .ar-avatar { animation: none; box-shadow: 0 0 0 2px var(--ar-forest), 0 0 0 5px color-mix(in srgb, var(--ar-forest) 25%, transparent); }
+  #agent-room .ar-msg.is-new { animation-duration: 160ms; }
+  #agent-room .ar-handoff.is-travelling .ar-handoff-track::before, #agent-room .ar-handoff.is-travelling .ar-handoff-dot { animation: none; }
+  #agent-room .ar-tab, #agent-room .ar-tool summary { transition: none; }
+}
