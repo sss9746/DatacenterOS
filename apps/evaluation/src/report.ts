@@ -50,3 +50,30 @@ export function summarizeResults(input: readonly unknown[]) {
   });
   return { summaries, losses, matchedCount: matched.length, incompleteCount: groups.size - matched.length, invalidCount: invalid, duplicateCount: duplicates, conflictingCount: conflicts.size };
 }
+
+/**
+ * Reasons a set of rows must not be compared: mixed batch_id, mixed code_revision, provenance present on only some rows,
+ * or different horizons for one scenario/seed. Rows without provenance (legacy) are only reported as a mix, never defaulted.
+ */
+export function provenanceConflicts(rows: readonly EvaluationResult[]): string[] {
+  const out: string[] = [];
+  const withProv = rows.filter((r) => r.provenance);
+  if (withProv.length === 0) return out;
+  if (withProv.length !== rows.length) out.push(`${rows.length - withProv.length} row(s) lack provenance while ${withProv.length} carry it`);
+  const distinct = (pick: (r: EvaluationResult) => string) => [...new Set(withProv.map(pick))].sort();
+  const batches = distinct((r) => r.provenance!.batch_id);
+  if (batches.length > 1) out.push(`mixed batch_id: ${batches.join(', ')}`);
+  const revisions = distinct((r) => r.provenance!.code_revision);
+  if (revisions.length > 1) out.push(`mixed code_revision: ${revisions.join(', ')}`);
+  const horizons = new Map<string, Set<number>>();
+  for (const r of withProv) {
+    const key = `${r.scenario_id}/${r.seed}`;
+    horizons.set(key, (horizons.get(key) ?? new Set()).add(r.provenance!.horizon_sim_s));
+  }
+  for (const [key, set] of horizons) if (set.size > 1) out.push(`mixed horizon_sim_s for ${key}: ${[...set].sort((a, b) => a - b).join(', ')}`);
+  return out;
+}
+export function assertConsistentProvenance(rows: readonly EvaluationResult[]): void {
+  const problems = provenanceConflicts(rows);
+  if (problems.length) throw new Error(`Refusing to compare mismatched evaluation batches: ${problems.join('; ')}.`);
+}
