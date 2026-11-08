@@ -5,6 +5,7 @@ import {
   FIXTURE_TYPES,
   RAW_FIXTURES,
   REAL_GPU_ID,
+  REAL_NODE_ID,
   THERMAL_THROTTLE_BIT,
   loadDemoSnapshot,
   loadPumpDegradedSnapshot,
@@ -37,6 +38,13 @@ describe('gpu_demo_8 topology (CONTRACTS §0.3)', () => {
     expect(real.config.allocatable).toBe(false);
     expect(s.allocations.some((a) => a.gpu_id === REAL_GPU_ID)).toBe(false);
   });
+  it('gpu-real-0 sits on node-real-0 (kind node, brev_real, no rack, not allocatable) (§0.11 #4)', () => {
+    expect(REAL_NODE_ID).toBe('node-real-0');
+    expect(s.gpus.find((g) => g.resource_id === REAL_GPU_ID)!.node_id).toBe('node-real-0');
+    const node = s.resources.find((r) => r.resource_id === 'node-real-0')!;
+    expect([node.kind, node.profile, node.parent_id, node.config.allocatable]).toEqual(['node', 'brev_real', null, false]);
+    expect(s.dependencies.some((e) => e.consumer_id === 'node-real-0' && e.relation === 'hosted_on')).toBe(false);
+  });
   it('pump-a -> loop-a cools r2–r4; pump-b -> loop-b cools r1, r5–r8', () => {
     const cooledBy = (rack: string) => s.dependencies.find((e) => e.consumer_id === rack && e.relation === 'cooled_by')!.provider_id;
     expect(['rack-r2', 'rack-r3', 'rack-r4'].map(cooledBy)).toEqual(['loop-a', 'loop-a', 'loop-a']);
@@ -63,7 +71,9 @@ describe('pump-degraded snapshot', () => {
     for (const g of hot) {
       expect(g.temp_c).toBeGreaterThanOrEqual(84);
       expect(g.temp_c).toBeLessThanOrEqual(88);
-      expect((g.clocks_event_reasons & THERMAL_THROTTLE_BIT) !== 0).toBe(g.temp_c >= 85);
+      expect(THERMAL_THROTTLE_BIT).toBe(0x20);
+      expect((g.clocks_event_reasons & 0x20) !== 0).toBe(g.temp_c >= 85);
+      expect(g.clocks_event_reasons & 0x04).toBe(0); // no power cap active
     }
     expect(hot.filter((g) => g.temp_c >= 85).length).toBeGreaterThanOrEqual(18);
   });

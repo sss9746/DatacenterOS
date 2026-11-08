@@ -23,6 +23,8 @@ import type {
   SignalEvent,
 } from '@dcos/contracts';
 
+import { CLOCKS_EVENT_SW_THERMAL } from '../../src/ports.js';
+
 export const RUN_ID = 'run-demo-1';
 const V = '1.1.0' as const;
 
@@ -32,8 +34,10 @@ export const rackId = (r: number) => `rack-r${r}`;
 export const nodeId = (r: number) => `node-r${r}-n1`;
 export const gpuId = (r: number, g: number) => `gpu-r${r}-n1-${g}`;
 export const REAL_GPU_ID = 'gpu-real-0';
-/** Not frozen in CONTRACTS §0.3 — see CONTRACT request in the P3 report. */
-export const REAL_GPU_HOST_ID = 'brev-host-0';
+/** CONTRACTS §0.11 #4: gpu-real-0 sits on node `node-real-0` (kind node, brev_real, no rack, never allocatable). */
+export const REAL_NODE_ID = 'node-real-0';
+/** Alias kept for existing imports; equals REAL_NODE_ID since §0.11 #4. */
+export const REAL_GPU_HOST_ID = REAL_NODE_ID;
 
 export const PUMP_DEGRADED_AT_MS = 420_000;
 export const PUMP_DEGRADED_SNAPSHOT_MS = 540_000;
@@ -43,11 +47,8 @@ export const SM_CLOCK_NOMINAL_MHZ = 1980;
 export const THROTTLE_TEMP_C = 85;
 export const GPU_POWER_W = 700;
 export const NODE_POWER_BUDGET_W = 6400;
-/**
- * DCGM clocks_event_reasons bit used for thermal slowdown (DCGM_CLOCKS_EVENT_REASON_SW_THERMAL = 0x20).
- * §0.4 says "thermal bit" without a value — see CONTRACT request.
- */
-export const THERMAL_THROTTLE_BIT = 0x20;
+/** DCGM clocks_event_reasons thermal-slowdown bit, 0x20 (CONTRACTS §0.11 #5); power cap is 0x04. */
+export const THERMAL_THROTTLE_BIT = CLOCKS_EVENT_SW_THERMAL;
 
 const loopFor = (r: number) => (r >= 2 && r <= 4 ? 'loop-a' : 'loop-b');
 
@@ -86,7 +87,8 @@ function buildResources(): ResourceSpec[] {
     out.push(res(`link-r${r}`, 'network_link', null, `link-r${r}`, 'demo_facility'));
   }
   out.push(res('fan-sensor-r3', 'fan_sensor', 'rack-r3', 'rack-r3', 'pico_fan'));
-  out.push(res(REAL_GPU_ID, 'gpu', null, REAL_GPU_ID, 'brev_real', { allocatable: false, hardware_backed: true }));
+  out.push(res(REAL_NODE_ID, 'node', null, REAL_NODE_ID, 'brev_real', { allocatable: false, hardware_backed: true }));
+  out.push(res(REAL_GPU_ID, 'gpu', REAL_NODE_ID, REAL_NODE_ID, 'brev_real', { allocatable: false, hardware_backed: true }));
   return out;
 }
 
@@ -269,7 +271,7 @@ function buildLive(degraded: boolean, simMs: number) {
     });
   }
   // Real Brev GPU tile (F-NV2): present in gpu_current, never allocatable.
-  gpus.push(gpuRow(REAL_GPU_ID, REAL_GPU_HOST_ID, { temp: 41.0, power: 62 }, simMs, 1));
+  gpus.push(gpuRow(REAL_GPU_ID, REAL_NODE_ID, { temp: 41.0, power: 62 }, simMs, 1));
 
   const cooling: CoolingCurrent[] = [
     {

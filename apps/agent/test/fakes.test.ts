@@ -2,8 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { validatePayload, type ActionCommand, type ObservedSnapshot } from '@dcos/contracts';
-import { DbError, isDbError, type DbChange } from '../src/ports.js';
-import { FakeDb, FakeLlm, FakePhysics, FAKE_PHYSICS_BANNER } from './fakes/index.js';
+import { CLOCKS_EVENT_SW_POWER_CAP, CLOCKS_EVENT_SW_THERMAL, DbError, isDbError, isSafetyRejected, type DbChange } from '../src/ports.js';
+import { FakeDb, FakeLlm, FakePhysics, FAKE_PHYSICS_BANNER, commandPayloadHash } from './fakes/index.js';
 import { gpuId, loadPumpDegradedSnapshot, loadSignalXid79Dest, loadSignalXid79R7 } from './fixtures/index.js';
 
 const rackGpus = (r: number) => Array.from({ length: 8 }, (_, g) => gpuId(r, g));
@@ -117,11 +117,45 @@ describe('FakeDb actions (TEST-ONLY)', () => {
     const obs = loadPumpDegradedSnapshot();
     const db = new FakeDb({ snapshot: obs, physics: new FakePhysics() });
     db.bumpDecisionEpoch();
-    const stale = await expectDbError(db.requestAction(cmd(obs)), 'SAFETY_REJECTED');
-    expect(stale.violations).toContain('STALE_DECISION_EPOCH');
+    const stale = await db.requestAction(cmd(obs)); // no throw (§0.11 #3)
+    expect(isSafetyRejected(stale)).toBe(true);
+    expect(stale.result.violations).toContain('STALE_DECISION_EPOCH');
     const fresh = await db.getObservedSnapshot();
-    const toR6 = await expectDbError(db.requestAction(migrateA(fresh, rackGpus(6).concat(rackGpus(7)))), 'SAFETY_REJECTED');
-    expect(toR6.violations).toContain('DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT');
+    const toR6 = await db.requestAction(migrateA(fresh, rackGpus(6).concat(rackGpus(7))));
+    expect(isSafetyRejected(toR6)).toBe(true);
+    expect(toR6.result.violations).toContain('DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT');
+  });
+
+  it('persists a safety deny as failed/SAFETY_REJECTED, logs an action event, and replays it idempotently (§0.11 #3)', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const db = new FakeDb({ snapshot: obs, physics: new FakePhysics() });
+    const changes: DbChange[] = [];
+    db.onChange((c) => changes.push(c));
+    const c = migrateA(obs, rackGpus(6).concat(rackGpus(7)));
+    const s = await db.requestAction(c);
+    expect([s.status, s.reason_code]).toEqual(['failed', 'SAFETY_REJECTED']);
+    expect(validatePayload('ActionStatus', s)).toEqual({ ok: true });
+    expect(await db.getActionStatus(c.command_key)).toEqual(s);
+    expect(db.listActions()).toHaveLength(1);
+    expect(db.actionEvents).toEqual([expect.objectContaining({ command_key: c.command_key, status: 'failed', reason_code: 'SAFETY_REJECTED' })]);
+    expect(changes.filter((x) => x.kind === 'action_status')).toHaveLength(1);
+    expect(await db.requestAction({ ...c, requested_sim_time_ms: 1 })).toEqual(s); // idempotent
+    await expectDbError(db.requestAction({ ...c, arguments: { destination_gpu_ids: rackGpus(7) } }), 'COMMAND_KEY_COLLISION');
+    await expectDbError(db.claimAction(c.command_key, s.version, 'w'), 'INVALID_TRANSITION');
+  });
+
+  it('still throws and persists nothing for malformed payloads and key collisions (§0.11 #3)', async () => {
+    const obs = loadPumpDegradedSnapshot();
+    const db = new FakeDb({ snapshot: obs, physics: new FakePhysics() });
+    await expectDbError(db.requestAction({ ...cmd(obs), operation: 'bogus' } as never), 'INVALID_PAYLOAD');
+    expect(db.listActions()).toHaveLength(0);
+    expect(db.actionEvents).toHaveLength(0);
+  });
+
+  it('payload hash excludes requested_sim_time_ms but not arguments (§0.11 #2)', () => {
+    const obs = loadPumpDegradedSnapshot();
+    expect(commandPayloadHash(cmd(obs, { requested_sim_time_ms: 1 }))).toBe(commandPayloadHash(cmd(obs, { requested_sim_time_ms: 999 })));
+    expect(commandPayloadHash(cmd(obs))).not.toBe(commandPayloadHash(cmd(obs, { job_id: 'job-b' })));
   });
 
   it('injectSignal marks the GPU, bumps versions + decision_epoch and emits changes', async () => {
@@ -222,6 +256,31 @@ describe('FakePhysics (TEST-ONLY toy model)', () => {
 
     const withReal = [...rackGpus(7), ...rackGpus(1).slice(1), 'gpu-real-0'];
     expect(physics.evaluateSafety(obs, migrateA(obs, withReal), ctx).violations).toContain('REAL_GPU_NOT_ALLOCATABLE');
+  });
+
+  it('accepts the frozen argument shapes and rejects others with UNSUPPORTED_OPERATION (§0.11 #1)', () => {
+    const dest = rackGpus(7).concat(rackGpus(8));
+    const viol = (c: ActionCommand) => physics.evaluateSafety(obs, c, ctx).violations;
+    expect(viol(cmd(obs))).toEqual([]);
+    expect(viol(migrateA(obs, dest))).not.toContain('UNSUPPORTED_OPERATION');
+    expect(viol(cmd(obs, { operation: 'power_cap', arguments: { power_limit_w: 500 } }))).toEqual([]);
+    expect(viol(cmd(obs, { operation: 'escalate', arguments: { reason: 'no safe destination' } }))).toEqual([]);
+    expect(viol(cmd(obs, { operation: 'keep_running' }))).toEqual([]);
+    const bad: Partial<ActionCommand>[] = [
+      { operation: 'power_cap', arguments: {} },
+      { operation: 'power_cap', arguments: { power_limit_w: '500' } },
+      { operation: 'power_cap', arguments: { power_cap_w: 500 } },
+      { operation: 'escalate', arguments: {} },
+      { operation: 'escalate', arguments: { reason: 1 } },
+      { operation: 'migrate_restart', arguments: { gpus: dest } },
+      { operation: 'migrate_restart', arguments: { destination_gpu_ids: 'gpu-r7-n1-0' } },
+      { operation: 'checkpoint', arguments: { reason: 'x' } },
+    ];
+    for (const b of bad) expect(viol(cmd(obs, b)), JSON.stringify(b)).toContain('UNSUPPORTED_OPERATION');
+  });
+
+  it('exports the DCGM clock-event bits (§0.11 #5)', () => {
+    expect([CLOCKS_EVENT_SW_THERMAL, CLOCKS_EVENT_SW_POWER_CAP]).toEqual([0x20, 0x04]);
   });
 
   it('thresholdPolicy emits valid power_cap commands for hot jobs only', () => {

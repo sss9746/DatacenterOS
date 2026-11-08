@@ -45,6 +45,14 @@ export interface FakeDbOptions {
   defaultOpDurationMs?: number;
 }
 
+export interface FakeActionEvent {
+  command_key: string;
+  status: ActionStatus['status'];
+  reason_code: string | null;
+  version: number;
+  sim_time_ms: number;
+}
+
 interface ActionRecord {
   cmd: ActionCommand;
   payloadHash: string;
@@ -79,6 +87,8 @@ const clone = <T>(v: T): T => structuredClone(v);
 export class FakeDb implements DbPort {
   readonly calls: FakeDbCall[] = [];
   readonly agentEvents: AgentEventInput[] = [];
+  /** Append-only `action_event` log: one row per ActionStatus creation/transition (incl. safety rejections). */
+  readonly actionEvents: FakeActionEvent[] = [];
   readonly plans = new Map<string, PlanCandidate>();
   readonly incidents = new Map<string, Incident>();
   readonly links: IncidentLink[] = [];
@@ -124,8 +134,19 @@ export class FakeDb implements DbPort {
 
   private transition(rec: ActionRecord, status: ActionStatus['status'], patch: Partial<ActionStatus> = {}): ActionStatus {
     rec.status = { ...rec.status, ...patch, status, updated_sim_time_ms: this.simMs, version: rec.status.version + 1 };
+    this.logActionEvent(rec.status);
     this.emit({ kind: 'action_status', status: clone(rec.status) });
     return clone(rec.status);
+  }
+
+  private logActionEvent(s: ActionStatus): void {
+    this.actionEvents.push({
+      command_key: s.command_key,
+      status: s.status,
+      reason_code: s.reason_code,
+      version: s.version,
+      sim_time_ms: this.simMs,
+    });
   }
 
   private nextFencingToken(): bigint {
@@ -316,22 +337,22 @@ export class FakeDb implements DbPort {
       });
       if (d.decision === 'deny') violations.push(...d.violations);
     }
-    if (violations.length > 0) {
-      throw new DbError('SAFETY_REJECTED', `request_action rejected for ${cmd.command_key}`, [...new Set(violations)]);
-    }
+    // CONTRACTS §0.11 #3: a safety deny is persisted as a failed action and returned (never thrown).
+    const rejected = violations.length > 0;
     const status: ActionStatus = {
       schema_version: V,
       run_id: cmd.run_id,
       action_id: cmd.action_id,
       command_key: cmd.command_key,
-      status: 'requested',
+      status: rejected ? 'failed' : 'requested',
       attempt: 1,
       updated_sim_time_ms: this.simMs,
-      result: {},
-      reason_code: null,
+      result: rejected ? { violations: [...new Set(violations)] } : {},
+      reason_code: rejected ? 'SAFETY_REJECTED' : null,
       version: 1,
     };
     this.actions.set(cmd.command_key, { cmd: clone(cmd), payloadHash: hash, status, fencingToken: null, dueSimMs: null });
+    this.logActionEvent(status);
     this.emit({ kind: 'action_status', status: clone(status) });
     return clone(status);
   }
