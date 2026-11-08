@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { validatePayload, type ObservedSnapshot } from '@dcos/contracts';
 import type { LlmChatRequest } from '../src/ports.js';
+import { diagnoseEvent } from '../src/triage.js';
 import {
   DETERMINISTIC_CONFIDENCE,
   LLM_PAYLOAD_MAX_BYTES,
@@ -290,5 +291,40 @@ describe('runTriage', () => {
     expect(r.evidenceIdsByIncident[PUMP_INC]).not.toContain('sig-made-up-9');
     // The other candidate's valid assessment is still used.
     expect(r.incidents.find((i) => i.incident_id === R7_INC)!.hypothesis).toBe(`LLM: ${R7_INC}`);
+  });
+});
+
+describe('F-NV1 actor tags (triage)', () => {
+  const actorOf = (r: TriageResult, tool: string) => r.toolCalls.find((t) => t.tool === tool)?.actor;
+
+  it('tags the assessment nemotron and evidence/grouping/upserts code when the LLM answers', async () => {
+    const llm = new FakeLlm([
+      confirmAll({ [PUMP_INC]: { hypothesis: '24 GPUs on racks r2-r4 + pump-a degraded -> one cooling incident' } }),
+    ]);
+    const r = await runTriage({ db: setup(), llm, now });
+    expect(actorOf(r, TRIAGE_TOOL_NAME)).toBe('nemotron');
+    for (const t of ['get_incident_evidence', 'group_symptoms', 'upsert_symptoms', 'upsert_incident']) expect(actorOf(r, t)).toBe('code');
+    const ev = diagnoseEvent(r);
+    expect(ev.actor).toBe('nemotron');
+    expect(ev.summary).toContain('pump-a degraded -> one cooling incident');
+    expect(ev.summary.length).toBeLessThanOrEqual(200);
+  });
+
+  it('truncates an over-long hypothesis to 200 chars', async () => {
+    const r = await runTriage({ db: setup(), llm: new FakeLlm([confirmAll({ [PUMP_INC]: { hypothesis: 'x'.repeat(500) } })]), now });
+    for (const i of r.incidents) expect((i.hypothesis ?? '').length).toBeLessThanOrEqual(200);
+    expect(diagnoseEvent(r).summary.length).toBeLessThanOrEqual(200);
+  });
+
+  it('never tags nemotron when the LLM is null or failed', async () => {
+    for (const llm of [null, new FakeLlm([new Error('503')])]) {
+      const r = await runTriage({ db: setup(), llm, now });
+      expect(r.toolCalls.some((t) => t.actor === 'nemotron')).toBe(false);
+      expect(actorOf(r, TRIAGE_TOOL_NAME)).toBe('code');
+      const ev = diagnoseEvent(r);
+      expect(ev.actor).toBe('code');
+      expect(ev.summary.startsWith('deterministic:')).toBe(true);
+      expect(ev.summary.length).toBeLessThanOrEqual(200);
+    }
   });
 });

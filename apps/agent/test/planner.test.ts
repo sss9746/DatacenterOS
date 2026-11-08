@@ -340,3 +340,40 @@ describe('reservedGpuIds and fresh checkpoint reuse', () => {
     expect(ids.some((i) => i.includes('ckpt-reuse'))).toBe(false);
   });
 });
+
+describe('F-NV1 actor tags (planner)', () => {
+  it('tags choose_options nemotron and simulate/safety code; summary is the Nemotron sentence', async () => {
+    const r = await run(new FakeLlm([pickTop()]));
+    const actors = (tool: string) => r.tool_calls.filter((t) => t.tool === tool).map((t) => t.actor);
+    expect(actors(CHOOSE_OPTIONS_TOOL_NAME)).toEqual(['nemotron']);
+    expect(actors('simulate_plan').every((a) => a === 'code')).toBe(true);
+    expect(actors('evaluate_safety').every((a) => a === 'code')).toBe(true);
+    expect(r.actor).toBe('nemotron');
+    expect(r.summary).toContain('picked by test');
+    expect(r.summary!.length).toBeLessThanOrEqual(200);
+  });
+
+  it('truncates a long Nemotron explanation to 200 chars', async () => {
+    const llm = new FakeLlm([
+      (req: LlmChatRequest) => {
+        const step = pickTop()(req) as ReturnType<typeof FakeLlm.toolCall>;
+        const args = JSON.parse(step.toolCalls[0]!.argumentsJson) as { choices: { explanation: string }[] };
+        for (const c of args.choices) c.explanation = 'y'.repeat(900);
+        return FakeLlm.toolCall(CHOOSE_OPTIONS_TOOL_NAME, args);
+      },
+    ]);
+    const r = await run(llm);
+    for (const p of r.job_plans) expect(p.explanation.length).toBeLessThanOrEqual(200);
+    expect(r.summary!.length).toBeLessThanOrEqual(200);
+  });
+
+  it('never claims nemotron when the LLM failed or returned garbage', async () => {
+    for (const llm of [new FakeLlm([new Error('down')]), new FakeLlm([FakeLlm.toolCall(CHOOSE_OPTIONS_TOOL_NAME, '{"choices": "nope"')])]) {
+      const r = await run(llm);
+      expect(r.tool_calls.some((t) => t.actor === 'nemotron')).toBe(false);
+      expect(r.actor).toBe('code');
+      expect(r.summary!.startsWith('deterministic:')).toBe(true);
+      expect(r.summary!.length).toBeLessThanOrEqual(200);
+    }
+  });
+});

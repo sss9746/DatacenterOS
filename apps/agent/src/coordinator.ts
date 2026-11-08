@@ -419,7 +419,13 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
     }
 
     private async emitExec(cmd: ActionCommand, summary: string, toolCalls: ToolCallSummary[]): Promise<void> {
-      await events.emit('execute', { workflowId: this.workflowId, incidentId: cmd.incident_ids[0], summary, toolCalls });
+      await events.emit('execute', {
+        workflowId: this.workflowId,
+        incidentId: cmd.incident_ids[0],
+        summary,
+        actor: 'code',
+        toolCalls: toolCalls.map((t) => ({ ...t, actor: 'code' as const })),
+      });
     }
 
     private async runCommand(cmd: ActionCommand, index: number): Promise<void> {
@@ -490,11 +496,13 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
         workflowId: this.workflowId,
         incidentId: cmd.incident_ids[0],
         summary: `BLOCKED ${describe(cmd)}: ${violations.join(', ')}`,
+        actor: 'code',
         toolCalls: [
           {
             tool: where === 'local' ? 'evaluate_safety' : 'request_action',
             args_summary: describe(cmd),
             result_summary: `denied: ${violations.join(',')}`,
+            actor: 'code',
           },
         ],
       });

@@ -1,7 +1,7 @@
 // F-NV1 agent event publisher (P3-6). Emits compact, redacted feed rows: tool calls + a one-line
 // summary. NEVER raw chain-of-thought (CONTRACTS §0.8). Publishing failures never crash the agent.
 
-import type { AgentEventInput, AgentStage, DbPort, ToolCallSummary } from './ports.js';
+import type { AgentActor, AgentEventInput, AgentStage, DbPort, ToolCallSummary } from './ports.js';
 
 export const MAX_SUMMARY_CHARS = 200;
 export const MAX_TOOL_FIELD_CHARS = 160;
@@ -38,6 +38,8 @@ export interface EmitInput {
   summary: string;
   evidenceIds?: string[];
   toolCalls?: ToolCallSummary[];
+  /** Overrides the derived event actor. */
+  actor?: AgentActor;
 }
 
 export interface EventPublisher {
@@ -89,8 +91,14 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
  * `simulate_plan(job-a: checkpoint→migrate r7)` → `lost 0 wu · delay 150 s`.
  * Output is NOT redacted/trimmed here; the publisher does that on emit.
  */
-export function summarizeToolCall(name: string, args: unknown, result: unknown): ToolCallSummary {
-  return { tool: name, args_summary: summarizeArgs(args), result_summary: summarizeResult(result) };
+export function summarizeToolCall(
+  name: string,
+  args: unknown,
+  result: unknown,
+  actor?: AgentActor,
+): ToolCallSummary {
+  const base = { tool: name, args_summary: summarizeArgs(args), result_summary: summarizeResult(result) };
+  return actor ? { ...base, actor } : base;
 }
 
 function summarizeArgs(args: unknown): string {
@@ -179,6 +187,7 @@ export function createEventPublisher(deps: EventPublisherDeps): EventPublisher {
 
   return {
     emit(stage, input) {
+      const toolCalls = input.toolCalls ?? [];
       const ev: AgentEventInput = {
         agent_event_id: `ae-${runId}-${String(seq++).padStart(6, '0')}`,
         run_id: runId,
@@ -187,11 +196,13 @@ export function createEventPublisher(deps: EventPublisherDeps): EventPublisher {
         stage,
         summary: clean(input.summary, MAX_SUMMARY_CHARS),
         evidence_ids: [...new Set(input.evidenceIds ?? [])].slice(0, MAX_EVIDENCE_IDS),
-        tool_calls: (input.toolCalls ?? []).map((t) => ({
+        tool_calls: toolCalls.map((t) => ({
           tool: clean(t.tool, 64),
           args_summary: clean(t.args_summary, MAX_TOOL_FIELD_CHARS),
           result_summary: clean(t.result_summary, MAX_TOOL_FIELD_CHARS),
+          ...(t.actor ? { actor: t.actor } : {}),
         })),
+        actor: input.actor ?? (toolCalls.some((t) => t.actor === 'nemotron') ? 'nemotron' : 'code'),
         sim_time_ms: clock.simTimeMs(),
         observed_unix_ms: clock.unixMs(),
       };

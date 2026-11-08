@@ -10,7 +10,7 @@
 import { validatePayload, type ActionCommand, type Checkpoint, type Incident, type PlanCandidate, type SafetyDecision } from '@dcos/contracts';
 import { z } from 'zod';
 import { summarizeToolCall } from './events.js';
-import type { DbPort, Evidence, LlmChatResponse, LlmPort, PhysicsPort, PlanMetrics, ToolCallSummary } from './ports.js';
+import type { AgentActor, DbPort, Evidence, LlmChatResponse, LlmPort, PhysicsPort, PlanMetrics, ToolCallSummary } from './ports.js';
 import { CHOOSE_OPTIONS_TOOL, CHOOSE_OPTIONS_TOOL_NAME, PLANNER_SYSTEM_PROMPT, buildPlannerUserMessage } from './prompts/planner.js';
 import { buildCommand, commandKey, type PartialCommand } from './tools/command.js';
 import { placementCandidates } from './tools/placement-tool.js';
@@ -45,6 +45,10 @@ export interface PlanResult {
   job_plans: JobPlan[];
   tool_calls: ToolCallSummary[];
   used_llm: boolean;
+  /** F-NV1: the one-sentence plan-stage event summary (Nemotron's own conclusion, or `deterministic: ...`). */
+  summary?: string;
+  /** F-NV1: `nemotron` only when at least one final job decision came from the LLM. */
+  actor?: AgentActor;
 }
 
 export interface PlannerDeps {
@@ -79,7 +83,7 @@ export const RANKING_ASSUMPTION =
   'ranking: unsafe excluded; lost work within max(one restart of the job, 5% of avoidable loss) of the best counts as a tie; ' +
   'then completion delay, GPU-busy waste, preemptions, command count';
 
-const MAX_EXPLANATION_CHARS = 400;
+const MAX_EXPLANATION_CHARS = 200;
 const PLAN_EXPLANATION_MAX = 2_000;
 const MAX_ASSUMPTIONS = 50;
 
@@ -274,8 +278,8 @@ function scoreOption(physics: PhysicsPort, ix: SnapshotIndex, d: DraftOption, ca
         }))
       : [{ operation: 'keep_running', job_id: d.job_id }],
   };
-  calls.push(summarizeToolCall('simulate_plan', argsSummary, metrics));
-  calls.push(summarizeToolCall('evaluate_safety', { option_id: d.option_id }, { allowed: violations.length === 0, violations }));
+  calls.push(summarizeToolCall('simulate_plan', argsSummary, metrics, 'code'));
+  calls.push(summarizeToolCall('evaluate_safety', { option_id: d.option_id }, { allowed: violations.length === 0, violations }, 'code'));
   return { ...d, metrics, safety, violations };
 }
 
@@ -383,7 +387,7 @@ async function askNemotron(
       toolChoice: 'required',
     });
   } catch (e) {
-    calls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, `LLM unavailable: ${e instanceof Error ? e.name : 'error'}`));
+    calls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, `LLM unavailable: ${e instanceof Error ? e.name : 'error'}`, 'code'));
     return null;
   }
   const call = res.toolCalls.find((c) => c.name === CHOOSE_OPTIONS_TOOL_NAME);
@@ -396,7 +400,7 @@ async function askNemotron(
     }
   }
   if (!parsed?.success) {
-    calls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, 'invalid or missing choose_options call'));
+    calls.push(summarizeToolCall(CHOOSE_OPTIONS_TOOL_NAME, { jobs: ranked.size }, 'invalid or missing choose_options call', 'code'));
     return null;
   }
   const choices = parsed.data.choices;
@@ -405,6 +409,7 @@ async function askNemotron(
       CHOOSE_OPTIONS_TOOL_NAME,
       { jobs: ranked.size },
       choices.map((c) => `${c.option_id}${c.needs_approval ? ' (approval)' : ''}`).join(', '),
+      'nemotron',
     ),
   );
   return choices;
@@ -515,7 +520,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   const commands = jobPlans.flatMap((p) => p.chosen.commands);
   const plan = await buildPlan({ physics, ix, planId, runId, workflowId, attempt, incidentIds, jobPlans, commands, llmUp, toolCalls });
   await db.submitPlan(plan);
-  return { plan, commands, job_plans: jobPlans, tool_calls: toolCalls, used_llm: llmUp };
+  return { plan, commands, job_plans: jobPlans, tool_calls: toolCalls, used_llm: llmUp, ...planNarrative(jobPlans, llmUp) };
 }
 
 interface BuildPlanArgs {
@@ -535,7 +540,7 @@ interface BuildPlanArgs {
 async function buildPlan(a: BuildPlanArgs): Promise<PlanCandidate> {
   // Score the combined plan once: per-option metrics are whole-cluster, so summing them would double count.
   const combined = a.physics.simulatePlan(a.ix.snap, { commands: a.commands }, { horizon_s: PLANNER_HORIZON_S });
-  a.toolCalls.push(summarizeToolCall('simulate_plan', { commands: a.commands.map((c) => ({ operation: c.operation, job_id: c.job_id })) }, combined));
+  a.toolCalls.push(summarizeToolCall('simulate_plan', { commands: a.commands.map((c) => ({ operation: c.operation, job_id: c.job_id })) }, combined, 'code'));
 
   // PlanCandidate needs >= 1 command key; an all-keep plan records its (never executed) keep_running keys.
   const keepKeys =
@@ -578,4 +583,15 @@ async function buildPlan(a: BuildPlanArgs): Promise<PlanCandidate> {
   const v = validatePayload('PlanCandidate', plan);
   if (!v.ok) throw new Error(`planIncidents: invalid PlanCandidate: ${v.errors.join('; ')}`);
   return plan;
+}
+
+/**
+ * F-NV1 plan/replan event narrative. Nemotron's own one-sentence explanations when the LLM made at least one final
+ * decision (`actor: 'nemotron'`); otherwise a clearly labelled deterministic sentence (`actor: 'code'`).
+ */
+export function planNarrative(jobPlans: JobPlan[], usedLlm: boolean): { summary: string; actor: AgentActor } {
+  const nem = usedLlm ? jobPlans.filter((p) => p.decided_by === 'nemotron') : [];
+  if (nem.length > 0) return { summary: clip(nem.map((p) => p.explanation).join(' | '), 200), actor: 'nemotron' };
+  const text = jobPlans.length > 0 ? jobPlans.map((p) => `${p.job_id}: ${p.chosen.label}`).join('; ') : 'no running job affected, keep running';
+  return { summary: clip(`deterministic: ${text}`, 200), actor: 'code' };
 }

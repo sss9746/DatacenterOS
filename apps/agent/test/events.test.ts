@@ -160,3 +160,21 @@ describe('summarizeToolCall', () => {
     expect(summarizeToolCall('n', undefined, undefined)).toMatchObject({ args_summary: '', result_summary: '' });
   });
 });
+
+describe('F-NV1 actor tags', () => {
+  it('summarizeToolCall carries the optional actor', () => {
+    expect(summarizeToolCall('x', {}, {}, 'nemotron').actor).toBe('nemotron');
+    expect(summarizeToolCall('x', {}, {})).not.toHaveProperty('actor');
+  });
+
+  it('derives the event actor: nemotron if any call is nemotron, else code; explicit actor wins', async () => {
+    const { pub } = setup();
+    const call = (actor?: 'nemotron' | 'code') => ({ tool: 't', args_summary: '', result_summary: '', ...(actor ? { actor } : {}) });
+    expect((await pub.emit('plan', { summary: 's', toolCalls: [call('code'), call('nemotron')] })).actor).toBe('nemotron');
+    expect((await pub.emit('plan', { summary: 's', toolCalls: [call('code')] })).actor).toBe('code');
+    expect((await pub.emit('plan', { summary: 's' })).actor).toBe('code');
+    expect((await pub.emit('plan', { summary: 's', toolCalls: [call('nemotron')], actor: 'code' })).actor).toBe('code');
+    const e = await pub.emit('plan', { summary: 's', toolCalls: [call('nemotron')] });
+    expect(e.tool_calls[0]?.actor).toBe('nemotron');
+  });
+});

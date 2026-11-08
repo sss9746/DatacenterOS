@@ -39,7 +39,8 @@ export const LLM_UNAVAILABLE_HYPOTHESIS = 'deterministic grouping (LLM unavailab
 const MAX_DETERMINISTIC_EVIDENCE = 20;
 const MAX_REASON = 500;
 const MAX_TITLE = 180;
-const MAX_HYPOTHESIS = 600;
+/** F-NV1: a hypothesis is ONE conclusion sentence (evidence -> conclusion). */
+const MAX_HYPOTHESIS = 200;
 
 export type SymptomKind =
   | 'thermal_throttle'
@@ -119,6 +120,8 @@ export interface TriageResult {
   links: IncidentLink[];
   toolCalls: ToolCallSummary[];
   usedLlm: boolean;
+  /** Incident ids whose hypothesis is Nemotron's own conclusion (LLM assessment accepted). */
+  llmIncidentIds?: string[];
   symptoms: SymptomRecord[];
   /** Non-primary symptoms with no degraded provider (e.g. near-throttle on a healthy rack): watched, no incident. */
   unassignedSymptoms: SymptomRecord[];
@@ -695,7 +698,7 @@ async function askLlm(deps: TriageDeps, payload: LlmPayload, candidates: Candida
   const fail = (error: string): LlmOutcome => ({
     items: null,
     error,
-    toolCall: { tool: TRIAGE_TOOL_NAME, args_summary: argsSummary, result_summary: `fallback to deterministic grouping: ${clip(error, 200)}` },
+    toolCall: { tool: TRIAGE_TOOL_NAME, args_summary: argsSummary, result_summary: `fallback to deterministic grouping: ${clip(error, 200)}`, actor: 'code' },
   });
   if (!deps.llm) return fail('no LLM configured');
   const started = deps.now();
@@ -732,6 +735,7 @@ async function askLlm(deps: TriageDeps, payload: LlmPayload, candidates: Candida
       tool: TRIAGE_TOOL_NAME,
       args_summary: argsSummary,
       result_summary: clip(`${parsed.data.incidents.length} assessment(s) in ${deps.now() - started} ms: ${decisions}`, 500),
+      actor: 'nemotron',
     },
   };
 }
@@ -801,6 +805,7 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
     tool: 'get_incident_evidence',
     args_summary: `incident_ids=[] window_sim_ms=${window}`,
     result_summary: `${evidence.signals.length} signal(s), ${evidence.telemetry.length} telemetry, ${evidence.incidents.length} incident(s)`,
+    actor: 'code',
   });
 
   const existingIncidents = await deps.db.listIncidents();
@@ -810,6 +815,7 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
     tool: 'group_symptoms',
     args_summary: `${symptoms.length} symptom(s), window_sim_ms=${window}`,
     result_summary: `${candidates.length} candidate(s): ${candidates.map((c) => c.candidate_id).join(', ') || 'none'}; ${unassigned.length} unassigned`,
+    actor: 'code',
   });
 
   let assessed: Assessed[];
@@ -837,12 +843,14 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
       tool: 'upsert_symptoms',
       args_summary: `${symptoms.length} symptom(s)`,
       result_summary: `persisted ${symptoms.length} symptom(s) before linking incidents`,
+      actor: 'code',
     });
   }
 
   const incidents: Incident[] = [];
   const links: IncidentLink[] = [];
   const evidenceIdsByIncident: Record<string, string[]> = {};
+  const llmIncidentIds: string[] = [];
   const existingById = new Map(existingIncidents.map((i) => [i.incident_id, i]));
   for (const a of assessed) {
     const incident = toIncident(obs, a, existingById.get(a.candidate.candidate_id));
@@ -851,12 +859,27 @@ export async function runTriage(deps: TriageDeps, opts: TriageOptions = {}): Pro
     incidents.push(saved);
     links.push(...incLinks);
     evidenceIdsByIncident[saved.incident_id] = a.evidence_ids;
+    if (a.source === 'llm') llmIncidentIds.push(saved.incident_id);
     toolCalls.push({
       tool: 'upsert_incident',
       args_summary: `${saved.incident_id} (${a.source}), ${incLinks.length} link(s)`,
       result_summary: `v${saved.version} ${saved.state} ${saved.severity}: ${clip(saved.title, 120)}`,
+      actor: 'code',
     });
   }
 
-  return { incidents, links, toolCalls, usedLlm, symptoms, unassignedSymptoms: unassigned, overrides, evidenceIdsByIncident };
+  return { incidents, links, toolCalls, usedLlm, llmIncidentIds, symptoms, unassignedSymptoms: unassigned, overrides, evidenceIdsByIncident };
+}
+
+/**
+ * F-NV1 diagnose-stage event content (CONTRACTS §0.8). When Nemotron's assessment was used, the summary is its own
+ * one-sentence conclusion(s) (the stored hypotheses); otherwise it is clearly labelled deterministic. Never claims
+ * `nemotron` when the LLM was not used. Callers pass `{ summary, actor, toolCalls }` straight into `events.emit`.
+ */
+export function diagnoseEvent(result: TriageResult): { summary: string; actor: 'nemotron' | 'code'; toolCalls: ToolCallSummary[] } {
+  const llmIds = new Set(result.llmIncidentIds ?? []);
+  const llmHyps = result.usedLlm ? result.incidents.filter((i) => llmIds.has(i.incident_id)).map((i) => i.hypothesis).filter((h): h is string => !!h) : [];
+  if (llmHyps.length > 0) return { summary: clip(llmHyps.join(' | '), MAX_HYPOTHESIS), actor: 'nemotron', toolCalls: result.toolCalls };
+  const titles = result.incidents.map((i) => i.title).join('; ') || 'no incident candidates';
+  return { summary: clip(`deterministic: ${titles}`, MAX_HYPOTHESIS), actor: 'code', toolCalls: result.toolCalls };
 }

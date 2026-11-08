@@ -237,10 +237,10 @@ export async function verifyRecovery(deps: VerifyDeps, input: VerifyInput): Prom
   for (const c of checks) {
     try {
       await db.verifyAction(c.command_key, { verified: c.ok, note: c.note, ...c.evidence });
-      toolCalls.push({ tool: 'verify_action', args_summary: c.command_key, result_summary: c.ok ? 'verified' : 'unverified' });
+      toolCalls.push({ tool: 'verify_action', args_summary: c.command_key, result_summary: c.ok ? 'verified' : 'unverified', actor: 'code' });
     } catch (e) {
       ledgerOk = false;
-      toolCalls.push({ tool: 'verify_action', args_summary: c.command_key, result_summary: `error: ${(e as Error).message}` });
+      toolCalls.push({ tool: 'verify_action', args_summary: c.command_key, result_summary: `error: ${(e as Error).message}`, actor: 'code' });
     }
   }
 
@@ -255,6 +255,7 @@ export async function verifyRecovery(deps: VerifyDeps, input: VerifyInput): Prom
     workflowId,
     incidentId: plan.plan.incident_ids[0],
     summary: `${escalate ? 'needs operator review' : 'verified'}: ${checks.filter((c) => c.ok).length}/${checks.length} checks passed`,
+    actor: 'code',
     toolCalls,
   });
   await deps.persist?.(stage, { verification: { verified, escalate, handoff, as_of_sim_time_ms: s2.clock.sim_time_ms } });

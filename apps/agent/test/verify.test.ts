@@ -193,3 +193,17 @@ describe('verifyRecovery', () => {
     expect(rep.handoff.length).toBeLessThanOrEqual(600);
   });
 });
+
+describe('F-NV1 actor tags (verify)', () => {
+  it('tags the verify event and ledger calls as code', async () => {
+    const a = setup();
+    const p = makePlan(a.snap);
+    const result = await a.coord.execute(WF, p);
+    await verifyRecovery({ db: a.db, events: a.events, waitSim: progressingWait(a), persist: a.coord.updateStage }, { workflowId: WF, plan: p, result });
+    const ev = a.db.agentEvents.find((e) => e.stage === 'verify')!;
+    expect(ev.actor).toBe('code');
+    expect(ev.tool_calls.length).toBeGreaterThan(0);
+    for (const t of ev.tool_calls) expect(t.actor).toBe('code');
+    expect(ev.summary.length).toBeLessThanOrEqual(200);
+  });
+});

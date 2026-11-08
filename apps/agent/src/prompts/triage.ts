@@ -14,14 +14,16 @@ export const TRIAGE_SYSTEM_PROMPT = [
   'Rules:',
   '- Use only the data in the user message. Do not invent resources, events or measurements.',
   '- Every assessment must cite evidence_ids copied verbatim from the input (symptom ids or event ids).',
-  '- decision "confirm": the grouping is right. Write a short hypothesis (1-2 sentences) naming the likely cause.',
+  '- decision "confirm": the grouping is right. Write `hypothesis` as ONE conclusion sentence (max 200 characters) that',
+  '  states the evidence, an arrow, then the conclusion. Example: "24 GPUs on racks r2-r4 + pump-a degraded -> one cooling incident".',
+  '  For independent faults: "XID 79 on gpu-r7-n1-3, no shared failing provider -> separate incident".',
   '- decision "split": some symptoms do not share the cause. List them in split_symptom_ids; they become a separate incident.',
   '- decision "merge_into": this candidate has the same cause as candidate `target`. Only merge candidates that share a',
   '  cooling or hosting provider; never merge just because events happened at the same time.',
   '- An XID error (48/74/79) on a GPU whose providers are healthy is an independent hardware fault, not a cooling symptom.',
   '- Never claim a GPU or pump is repaired or recovered. Cordoning or moving work is not a repair.',
   '- If you are unsure, confirm the candidate with confidence <= 0.5 and say "needs_approval" in the hypothesis.',
-  '- Keep hypotheses short and factual. Do not include step-by-step reasoning.',
+  '- The hypothesis is your stated conclusion, not your reasoning: one sentence, no step-by-step reasoning.',
 ].join('\n');
 
 export const TRIAGE_TOOL: LlmToolDef = {
@@ -48,7 +50,7 @@ export const TRIAGE_TOOL: LlmToolDef = {
               items: { type: 'string' },
               description: 'split only: symptom ids to move into a separate incident',
             },
-            hypothesis: { type: 'string', maxLength: 600 },
+            hypothesis: { type: 'string', maxLength: 600, description: 'ONE sentence, <= 200 chars: evidence -> conclusion' },
             confidence: { type: 'number', minimum: 0, maximum: 1 },
             evidence_ids: { type: 'array', items: { type: 'string' }, minItems: 1 },
           },

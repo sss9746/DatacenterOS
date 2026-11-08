@@ -92,11 +92,16 @@ export type AgentStage = 'triage' | 'diagnose' | 'plan' | 'safety' | 'execute' |
  */
 export type WorkflowStage = 'idle' | AgentStage | 'escalated' | 'done';
 
+/** F-NV1 actor tag (CONTRACTS ง0.8). */
+export type AgentActor = 'nemotron' | 'code';
+
 /** One tool call shown in the F-NV1 feed (CONTRACTS ยง0.8 `tool_calls_json` item). Local until @dcos/db-client exists. */
 export interface ToolCallSummary {
   tool: string;
   args_summary: string;
   result_summary: string;
+  /** F-NV1: who produced this step. `nemotron` = LLM reasoning; `code` = deterministic code. */
+  actor?: AgentActor;
 }
 
 /**
@@ -113,6 +118,8 @@ export interface AgentEventInput {
   summary: string;
   evidence_ids: string[];
   tool_calls: ToolCallSummary[];
+  /** F-NV1: event-level actor (nemotron if any tool call is nemotron, else code). */
+  actor?: AgentActor;
   sim_time_ms: number;
   observed_unix_ms: number;
 }

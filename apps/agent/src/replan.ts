@@ -20,7 +20,7 @@
 import type { ActionCommand, ActionStatus, Incident, ObservedSnapshot, SignalEvent } from '@dcos/contracts';
 import type { CommandOutcome, ExecutablePlan, ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
-import { planIncidents, type JobPlan, type PlanResult, type RankedOption } from './planner.js';
+import { planIncidents, planNarrative, type JobPlan, type PlanResult, type RankedOption } from './planner.js';
 import { isDbError, type DbChange, type DbPort, type LlmPort, type PhysicsPort, type ToolCallSummary } from './ports.js';
 import { runTriage } from './triage.js';
 
@@ -372,7 +372,8 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
   await events.emit('replan', {
     workflowId,
     incidentId: firstIncident,
-    summary: `Replanning ${previousPlanId}: ${input.reason}`,
+    summary: `deterministic: replanning ${previousPlanId}: ${input.reason}`,
+    actor: 'code',
   });
 
   // (2) cancel only what is safe to cancel; remember what is still holding GPUs
@@ -427,13 +428,17 @@ export async function runReplan(deps: ReplanDeps, input: ReplanInput): Promise<R
     });
   }
 
+  const ledgerSummary =
+    `superseded ${previousPlanId} -> ${newPlan.plan.plan_id}; cancelled ${pass.cancelled.length}, kept ${kept.length}` +
+    (newIncidentIds.length ? `; new incident ${newIncidentIds.join(', ')}` : '');
+  const narrative = planNarrative(newPlan.job_plans, newPlan.used_llm);
+  const chooseCall = narrative.actor === 'nemotron' ? newPlan.tool_calls.find((t) => t.actor === 'nemotron') : undefined;
   await events.emit('replan', {
     workflowId,
     incidentId: newIncidentIds[0] ?? firstIncident,
-    summary:
-      `Superseded ${previousPlanId} -> ${newPlan.plan.plan_id}; cancelled ${pass.cancelled.length}, kept ${kept.length}` +
-      (newIncidentIds.length ? `; new incident ${newIncidentIds.join(', ')}` : ''),
-    toolCalls: [...pass.calls, ...triage.toolCalls.slice(-2), ...newPlan.tool_calls.slice(-1)],
+    summary: narrative.actor === 'nemotron' ? narrative.summary : `deterministic: ${ledgerSummary}`,
+    actor: narrative.actor,
+    toolCalls: [...pass.calls, ...triage.toolCalls.slice(-2), ...(chooseCall ? [chooseCall] : []), ...newPlan.tool_calls.slice(-1)],
   });
 
   return {

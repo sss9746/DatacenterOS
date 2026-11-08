@@ -157,6 +157,14 @@ describe('replan on XID 79 at a planned destination (mid-checkpoint)', () => {
     expect(wf?.state).toMatchObject({ previous_plan_id: plan.plan.plan_id, superseded: true, cancelled_keys: [], new_plan_id: out.new_plan.plan.plan_id });
     expect(wf?.incident_ids).toContain(xidIncident);
     expect(db.agentEvents.some((e) => e.stage === 'replan' && e.summary.includes(XID_GPU))).toBe(true);
+    // F-NV1: the announce is deterministic code; the decision event is Nemotron's own sentence (LLM chose the plan)
+    const replanEvents = db.agentEvents.filter((e) => e.stage === 'replan');
+    expect(replanEvents[0]?.actor).toBe('code');
+    const decision = replanEvents[replanEvents.length - 1]!;
+    expect(decision.actor).toBe('nemotron');
+    expect(decision.summary).toContain('test choice');
+    expect(decision.summary.length).toBeLessThanOrEqual(200);
+    expect(decision.tool_calls.some((t) => t.actor === 'nemotron')).toBe(true);
 
     // execute the new plan to success
     await coord.ensureWorkflow(WF, [...out.new_plan.plan.incident_ids]);

@@ -345,3 +345,17 @@ describe('coordinator lease', () => {
     expect((await a.db.getWorkflow(WF))?.lease_owner).toBe('worker-2');
   });
 });
+
+describe('F-NV1 actor tags (coordinator)', () => {
+  it('tags every execute/safety event and tool call as code', async () => {
+    const { db, coord, snap } = setup();
+    await coord.ensureWorkflow(WF, ['inc-1']);
+    await coord.execute(WF, makePlan(snap));
+    const evs = db.agentEvents.filter((e) => e.stage === 'execute' || e.stage === 'safety');
+    expect(evs.length).toBeGreaterThan(0);
+    for (const e of evs) {
+      expect(e.actor).toBe('code');
+      for (const t of e.tool_calls) expect(t.actor).toBe('code');
+    }
+  });
+});
