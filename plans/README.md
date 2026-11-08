@@ -22,7 +22,7 @@ Write your name in the Person column of [`../PLAN.md`](../PLAN.md) and in your s
    - P4: §9, §11
 4. **Your lane file.**
 
-Background only: [`RESEARCH.md`](RESEARCH.md) (incident stats) and [`NICHE-DECISION.md`](NICHE-DECISION.md) (why GPU reliability). Older plans are in `archive/`; ignore them.
+Background only: [`RESEARCH.md`](RESEARCH.md) (incident stats) and [`NICHE-DECISION.md`](NICHE-DECISION.md) (why GPU reliability). Older plans live only in git history.
 
 ## First 15 minutes (everyone)
 ```bash
@@ -35,7 +35,7 @@ cp .env.example .env.local                # never commit .env.local; P2 sends to
 ```
 Then fill in `plans/status/<P1|P2|P3|P4|HW>.md` and push your branch.
 
-> ⚠️ **Never force-push to `main`.** Kaushik's original kit is kept read-only in `docs/implementation-kit/`; the live versions are `plans/` + `packages/contracts/`.
+> ⚠️ **Never force-push to `main`.** Kaushik's original kit (commit `3dd17d0`) now lives in `plans/ARCHITECTURE.md`, `plans/CONTRACTS.md` and `packages/contracts/`; its IMPLEMENTATION_TASKS became the lane files.
 
 **Running TypeScript:** `@dcos/contracts` and `@dcos/physics` point at `.ts` source. Run Node apps with **`tsx`** (`pnpm add -D tsx`, then `tsx src/main.ts`). Vite and vitest handle it natively.
 

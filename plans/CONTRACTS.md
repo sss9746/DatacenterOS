@@ -165,7 +165,7 @@ The browser can read public tables without a token. **Tokens are handed out by P
 
 # Design kit contracts (Kaushik, v1.1.0 with §0 adaptations)
 
-**This file replaces the earlier broad `CONTRACTS.md`, which is now in `plans/archive/`.** The attached `contracts.schema.json` is the canonical cross-service **wire schema**; `example-payloads.json` contains five validated examples. No team member changes field names independently. All public JSON uses `snake_case` and `schema_version: "1.0.0"`.
+**This replaces the earlier broad `CONTRACTS.md` (see git history).** The attached `contracts.schema.json` is the canonical cross-service **wire schema**; `example-payloads.json` contains five validated examples. No team member changes field names independently. All public JSON uses `snake_case` and `schema_version: "1.0.0"`.
 
 ## A. Cross-cutting rules
 

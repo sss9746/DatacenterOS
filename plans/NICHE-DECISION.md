@@ -1,5 +1,7 @@
 # Niche decision: what we learned (Sat Nov 7, 2026)
 
+> **Historical.** This records *why* we picked GPU reliability. The build details below are outdated; [`../PLAN.md`](../PLAN.md) and the lane files are current.
+
 This file records how we picked DataCenterOS's niche, and why, so the team can check the reasoning.
 - **Sources:** [`RESEARCH.md`](RESEARCH.md) has the incident and industry research, with links.
 - **GPU numbers:** GPU research was skipped for time; the current plan is [`../PLAN.md`](../PLAN.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).

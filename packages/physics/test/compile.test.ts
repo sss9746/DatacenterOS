@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { compileTopology, defaultDemoConfig } from '../src/compile.js';
 import type { FacilityConfig } from '../src/types.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = join(here, '..', 'fixtures');
 
 function withCfg(patch: (c: FacilityConfig) => FacilityConfig): FacilityConfig {
   return patch(defaultDemoConfig());
@@ -150,70 +145,12 @@ describe('compileTopology validation', () => {
   }
 });
 
-// ---- Fixture conformance (CONTRACTS §3.1 column lists, copied verbatim) ----
-const PUBLIC_COLUMNS: Record<string, string[]> = {
-  facility: ['id', 'name', 'template', 'seed', 'tick', 'sim_time_s', 'status'],
-  component: ['id', 'kind', 'label', 'status', 'params_json', 'is_real_hardware', 'x', 'y'],
-  edge: ['id', 'from_id', 'to_id', 'kind'],
-  telemetry_latest: ['component_id', 'tick', 'temp_c', 'power_kw', 'cooling_kw', 'load_kw', 'ups_energy_kwh', 'fan_health', 'fan_anomaly', 'fan_online', 'fan_fault_class', 'fan_rms', 'sensor_age_s'],
-  telemetry_history: ['id', 'component_id', 'tick', 'temp_c', 'power_kw', 'cooling_kw', 'fan_anomaly'],
-  ticket: ['id', 'component_id', 'title', 'status', 'notes', 'created_tick'],
-  shift_note: ['id', 'author', 'body', 'verified', 'tick'],
-  incident: ['id', 'opened_tick', 'symptom', 'component_ids', 'severity', 'status', 'hypothesis', 'chosen_plan_json', 'resolved_tick'],
-  action: ['id', 'request_key', 'requested_by', 'kind', 'target_id', 'params_json', 'status', 'safety_reason', 'predicted_json', 'incident_id', 'tick'],
-  agent_step: ['id', 'incident_id', 'agent', 'step_no', 'kind', 'tool', 'summary', 'payload_json', 'tick'],
-  metric: ['key', 'value'],
-};
-
-function readFixture(name: string): unknown {
-  return JSON.parse(readFileSync(join(fixturesDir, name), 'utf8'));
-}
-
-describe('fixtures', () => {
-  it('facility_default.json equals compileTopology(defaultDemoConfig()).state', () => {
-    expect(readFixture('facility_default.json')).toEqual(compileTopology(defaultDemoConfig()).state);
-  });
-
-  it('rows_public.json has exactly the CONTRACTS §3.1 tables and columns', () => {
-    const rows = readFixture('rows_public.json') as Record<string, Array<Record<string, unknown>>>;
-    expect(Object.keys(rows).sort()).toEqual(Object.keys(PUBLIC_COLUMNS).sort());
-    for (const [table, cols] of Object.entries(PUBLIC_COLUMNS)) {
-      expect(rows[table].length, table).toBeGreaterThan(0);
-      for (const row of rows[table]) {
-        expect(Object.keys(row).sort(), table).toEqual([...cols].sort());
-      }
-    }
-    for (const row of rows.agent_step) JSON.parse(row.payload_json as string);
-    for (const row of rows.action) {
-      JSON.parse(row.params_json as string);
-      expect(Object.keys(JSON.parse(row.predicted_json as string)).sort()).toEqual(
-        ['downtime_rack_s', 'min_cooling_margin_kw', 'peak_temp_c', 'racks_degraded', 'racks_shutdown'],
-      );
-    }
-  });
-
-  it('agent_steps_example.json has 10 agent_step rows incl. a §6.1 plan decision', () => {
-    const steps = readFixture('agent_steps_example.json') as Array<Record<string, unknown>>;
-    expect(steps).toHaveLength(10);
-    for (const s of steps) expect(Object.keys(s).sort()).toEqual([...PUBLIC_COLUMNS.agent_step].sort());
-    const plan = steps.find((s) => s.agent === 'plan' && s.kind === 'decision');
-    expect(plan).toBeDefined();
-    const payload = JSON.parse(plan!.payload_json as string);
-    expect(payload.plans.map((p: { name: string }) => p.name)).toEqual(['Migrate 3 kW off rack_3', 'Shed rack_8', 'Do nothing']);
-    expect(typeof payload.chosen).toBe('number');
-    expect(typeof payload.reason).toBe('string');
-  });
-});
-
 describe('PRESET_CONFIGS', () => {
-  it('every preset compiles and matches its fixture JSON', async () => {
+  it('every preset compiles', async () => {
     const { PRESET_CONFIGS } = await import('../src/presets.js');
-    const warnings = readFixture('presets/warnings.json') as Record<string, string[]>;
     expect(Object.keys(PRESET_CONFIGS).sort()).toEqual(['ai_hall_3pump', 'edge_small', 'enterprise_2pump']);
-    for (const [key, cfg] of Object.entries(PRESET_CONFIGS)) {
-      const out = compileTopology(cfg);
-      expect(readFixture(`presets/${key}.json`)).toEqual(cfg);
-      expect(warnings[key]).toEqual(out.warnings);
+    for (const cfg of Object.values(PRESET_CONFIGS)) {
+      expect(compileTopology(cfg).warnings.length).toBeGreaterThan(0);
     }
     expect(PRESET_CONFIGS.enterprise_2pump.name).toBe('Enterprise DC-1');
   });

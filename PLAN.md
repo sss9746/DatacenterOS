@@ -1,6 +1,6 @@
 # DataCenterOS: master plan (v3, Sat Nov 7, 2026, HackUTD "Zero Day")
 
-> **Start here, then read [`plans/README.md`](plans/README.md).** The design is [`plans/ARCHITECTURE.md`](plans/ARCHITECTURE.md) (Kaushik's kit), and every shared name is in [`plans/CONTRACTS.md`](plans/CONTRACTS.md) (**read §0 first**). The older broad plan is in `plans/archive/`; ignore it.
+> **Start here, then read [`plans/README.md`](plans/README.md).** The design is [`plans/ARCHITECTURE.md`](plans/ARCHITECTURE.md) (Kaushik's kit), and every shared name is in [`plans/CONTRACTS.md`](plans/CONTRACTS.md) (**read §0 first**). Older plans live only in git history (before commit `85e2653`).
 
 ## One line
 **When a GPU data center starts failing, our Nemotron agents decide, job by job, whether to keep running, cap power, or checkpoint and move.** They keep separate failures separate, survive their own crash mid-recovery, and waste less training work than rule-based baselines.
