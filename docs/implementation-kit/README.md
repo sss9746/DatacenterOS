@@ -1,3 +1,7 @@
+> **Reference copy, don't edit.** This is Kaushik's original kit. The adopted, repo-adapted versions are
+> [`plans/ARCHITECTURE.md`](../../plans/ARCHITECTURE.md), [`plans/CONTRACTS.md`](../../plans/CONTRACTS.md) (read §0) and
+> [`packages/contracts/`](../../packages/contracts/) (schema **v1.1.0**, generated types). Code must import `@dcos/contracts`, never this folder.
+
 # DataCenterOS implementation kit — v1.1.0 (four software developers)
 
 **Read in order:**

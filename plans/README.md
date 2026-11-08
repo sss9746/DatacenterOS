@@ -35,7 +35,7 @@ cp .env.example .env.local                # never commit .env.local; P2 sends to
 ```
 Then fill in `plans/status/<P1|P2|P3|P4|HW>.md` and push your branch.
 
-> ⚠️ **Never force-push, and never merge the `Architecture` branch.** That branch is an empty commit that deletes the whole repo. Its kit files are already in `plans/`.
+> ⚠️ **Never force-push to `main`.** Kaushik's original kit is kept read-only in `docs/implementation-kit/`; the live versions are `plans/` + `packages/contracts/`.
 
 **Running TypeScript:** `@dcos/contracts` and `@dcos/physics` point at `.ts` source. Run Node apps with **`tsx`** (`pnpm add -D tsx`, then `tsx src/main.ts`). Vite and vitest handle it natively.
 
