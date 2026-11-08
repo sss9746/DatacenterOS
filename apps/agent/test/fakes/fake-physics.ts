@@ -33,6 +33,26 @@ const destGpuIds = (cmd: ActionCommand): string[] => {
   return Array.isArray(d) ? d.filter((x): x is string => typeof x === 'string') : [];
 };
 
+/**
+ * Frozen `ActionCommand.arguments` shapes per operation (CONTRACTS §0.11 #1). Returns true when `args`
+ * has exactly the keys of the operation's shape with the right types.
+ */
+export function hasValidArguments(cmd: ActionCommand): boolean {
+  const a = cmd.arguments as Record<string, unknown>;
+  const keys = Object.keys(a);
+  const only = (...want: string[]) => keys.length === want.length && want.every((k) => k in a);
+  switch (cmd.operation) {
+    case 'migrate_restart':
+      return only('destination_gpu_ids') && Array.isArray(a.destination_gpu_ids) && a.destination_gpu_ids.every((x) => typeof x === 'string');
+    case 'power_cap':
+      return only('power_limit_w') && typeof a.power_limit_w === 'number' && Number.isFinite(a.power_limit_w) && a.power_limit_w > 0;
+    case 'escalate':
+      return only('reason') && typeof a.reason === 'string';
+    default: // checkpoint, pause_job, cordon_gpu, uncordon_gpu, keep_running take {}
+      return keys.length === 0;
+  }
+}
+
 interface JobSim {
   spec: JobSpec;
   state: JobState;
@@ -150,6 +170,8 @@ export class FakePhysics implements PhysicsPort {
     for (const [id, expected] of Object.entries(cmd.expected_resource_versions)) {
       if (versions.get(id) !== expected) v.add('STALE_RESOURCE_VERSION');
     }
+
+    if (!hasValidArguments(cmd)) v.add('UNSUPPORTED_OPERATION'); // wrong/missing arguments for the operation (§0.11 #1)
 
     const spec = cmd.job_id ? obs.job_specs.find((s) => s.job_id === cmd.job_id) : undefined;
     const state = cmd.job_id ? obs.job_states.find((s) => s.job_id === cmd.job_id) : undefined;

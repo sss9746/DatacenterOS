@@ -1216,10 +1216,24 @@
     {
       "schema_version": "1.1.0",
       "run_id": "run-demo-1",
+      "resource_id": "node-real-0",
+      "kind": "node",
+      "parent_id": null,
+      "failure_domain_id": "node-real-0",
+      "profile": "brev_real",
+      "config": {
+        "allocatable": false,
+        "hardware_backed": true
+      },
+      "enabled": true
+    },
+    {
+      "schema_version": "1.1.0",
+      "run_id": "run-demo-1",
       "resource_id": "gpu-real-0",
       "kind": "gpu",
-      "parent_id": null,
-      "failure_domain_id": "gpu-real-0",
+      "parent_id": "node-real-0",
+      "failure_domain_id": "node-real-0",
       "profile": "brev_real",
       "config": {
         "allocatable": false,
@@ -3113,7 +3127,7 @@
       "schema_version": "1.1.0",
       "run_id": "run-demo-1",
       "resource_id": "gpu-real-0",
-      "node_id": "brev-host-0",
+      "node_id": "node-real-0",
       "availability": "ready",
       "temp_c": 41,
       "sm_clock_mhz": 1980,

@@ -69,6 +69,12 @@ export const SAFETY_REASON_CODES = [
 ] as const;
 export type SafetyReasonCode = (typeof SAFETY_REASON_CODES)[number];
 
+/** DCGM `clocks_event_reasons` bits (CONTRACTS §0.11 #5). */
+/** DCGM SW thermal slowdown: throttling because of temperature. */
+export const CLOCKS_EVENT_SW_THERMAL = 0x20;
+/** DCGM SW power cap: set when a power cap is active. */
+export const CLOCKS_EVENT_SW_POWER_CAP = 0x04;
+
 /** Convenience aliases over wire enums (derived, not duplicated). */
 export type ActionOperation = ActionCommand['operation'];
 export type ActionLifecycle = ActionStatus['status'];
@@ -181,7 +187,7 @@ export type DbChange =
 /** Error codes a DbPort implementation throws (as DbError). Local until @dcos/db-client exists. */
 export type DbErrorCode =
   | 'COMMAND_KEY_COLLISION' // same command_key, different payload hash
-  | 'SAFETY_REJECTED' // request_action's fresh safety re-check denied; see `violations`
+  | 'SAFETY_REJECTED' // legacy/unused since §0.11 #3: a safety deny is RETURNED as a failed ActionStatus, not thrown
   | 'VERSION_CONFLICT' // CAS expected_version mismatch
   | 'STALE_FENCING_TOKEN' // token older than the current lease
   | 'LEASE_HELD' // another worker holds an unexpired workflow lease
@@ -200,6 +206,13 @@ export class DbError extends Error {
     this.violations = violations;
   }
 }
+
+/**
+ * True when `requestAction` (or a later read-back) shows a safety rejection (CONTRACTS §0.11 #3):
+ * `status: "failed"` with `reason_code: "SAFETY_REJECTED"`. Violations are in `status.result.violations`.
+ */
+export const isSafetyRejected = (status: ActionStatus): boolean =>
+  status.status === 'failed' && status.reason_code === 'SAFETY_REJECTED';
 
 export const isDbError = (e: unknown, code?: DbErrorCode): e is DbError =>
   e instanceof DbError && (code === undefined || e.code === code);
@@ -225,7 +238,13 @@ export interface DbPort {
   /**
    * `request_action`: DB re-runs safety and epoch/version checks. Idempotent by `command_key`:
    * a retry with the same payload returns the persisted record; a different payload under the same
-   * key throws DbError('COMMAND_KEY_COLLISION'). A safety denial throws DbError('SAFETY_REJECTED').
+   * key throws DbError('COMMAND_KEY_COLLISION').
+   *
+   * CONTRACTS §0.11 #3: a safety deny (or stale decision epoch) does NOT throw. It persists the action
+   * with `status: "failed"`, `reason_code: "SAFETY_REJECTED"`, `result.violations` = the §0.7 codes, appends
+   * an action event, and RETURNS that ActionStatus (the UI shows it as BLOCKED). Test it with
+   * `isSafetyRejected(status)`. Malformed payloads (INVALID_PAYLOAD), COMMAND_KEY_COLLISION, stale fencing
+   * tokens and held leases still throw DbError and persist nothing.
    */
   requestAction(cmd: ActionCommand): Promise<ActionStatus>;
 
