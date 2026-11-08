@@ -5,51 +5,14 @@
 //   node apps/db/scripts/ledger-smoke.mjs [db]      (default db: dcos-dev; RESETS run-demo-1)
 //
 // The CLI identity must be admin (admin passes the agent role check).
-import { spawnSync } from 'node:child_process';
+import { arg, connectCli, jsonArg, sleep, waitFor } from './stdb.mjs';
 
 const DB = process.argv[2] ?? 'dcos-dev';
 const RUN = 'run-demo-1';
-const SERVER = ['-s', 'maincloud'];
-let failures = 0;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const arg = (v) => JSON.stringify(v); // the CLI parses every argument as JSON
-const jsonArg = (obj) => JSON.stringify(JSON.stringify(obj)); // a string reducer arg holding JSON
-
-function call(reducer, args = [], { anonymous = false } = {}) {
-  const r = spawnSync('spacetime', ['call', ...SERVER, ...(anonymous ? ['--anonymous'] : []), DB, reducer, ...args], { encoding: 'utf8' });
-  const out = `${r.stdout}\n${r.stderr}`;
-  const m = /Response text: (.*)/.exec(out);
-  return { ok: r.status === 0 && !m, error: m ? m[1].trim() : r.status === 0 ? null : out.trim() };
-}
-
-function sql(query) {
-  const r = spawnSync('spacetime', ['sql', ...SERVER, '--format', 'json', DB, query], { encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(`sql failed: ${query}\n${r.stderr}`);
-  const [res] = JSON.parse(r.stdout);
-  const cols = res.schema.elements.map((e) => e.name.some);
-  const unopt = (v) => (Array.isArray(v) && v.length === 2 && (v[0] === 0 || v[0] === 1) ? (v[0] === 0 ? v[1] : null) : v);
-  return res.rows.map((row) => Object.fromEntries(row.map((v, i) => [cols[i], unopt(v)])));
-}
-
-function check(name, cond, detail = '') {
-  console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
-  if (!cond) failures++;
-}
-const expectError = (name, res, code) => check(name, !res.ok && res.error?.startsWith(`${code}:`), res.error ?? 'no error');
+const { call, sql, check, expectError, done } = connectCli(DB);
 const action = (key) => sql(`SELECT * FROM action WHERE command_key = '${key}'`)[0];
 const run = () => sql(`SELECT * FROM run WHERE run_id = '${RUN}'`)[0];
 const job = (id) => sql(`SELECT * FROM job_current WHERE job_id = '${id}'`)[0];
-
-async function waitFor(name, fn, timeoutMs = 60_000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const v = fn();
-    if (v) return v;
-    await sleep(1000);
-  }
-  throw new Error(`timed out waiting for ${name}`);
-}
 
 function command(over) {
   const r = run();
@@ -211,5 +174,4 @@ call('configure_run', [arg(RUN), jsonArg({ speed: 1 })]);
 const allEvents = sql(`SELECT * FROM action_event WHERE command_key = 'ck-job-a-1'`).map((e) => e.status);
 check('action_event on every transition', allEvents.join('>') === 'requested>claimed>running>succeeded>succeeded', allEvents.join('>'));
 
-console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+done();

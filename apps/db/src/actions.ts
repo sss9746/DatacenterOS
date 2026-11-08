@@ -30,6 +30,7 @@ import spacetimedb, { type Ctx } from './schema';
 import { reject, requireRole } from './auth';
 import { loadWorld, saveWorld } from './run';
 import { sha256Hex, stableStringify } from './hash';
+import { nextFencingToken } from './tokens';
 
 type RowOf<K extends keyof Ctx['db']> = Ctx['db'][K] extends { iter(): Iterable<infer R> } ? R : never;
 type ActionRow = RowOf<'action'>;
@@ -133,14 +134,6 @@ function leasedByOthers(ctx: Ctx, runId: string, exceptActionId?: string): strin
 function releaseLeases(ctx: Ctx, actionId: string): void {
   const mine = [...ctx.db.resource_lease.iter()].filter((l) => l.action_id === actionId);
   for (const l of mine) ctx.db.resource_lease.resource_id.delete(l.resource_id);
-}
-
-/** Next fencing token: strictly greater than any token ever issued for an action. */
-function nextFencingToken(ctx: Ctx): bigint {
-  let max = 0n;
-  for (const a of ctx.db.action.iter()) if (a.lease_token > max) max = a.lease_token;
-  for (const l of ctx.db.resource_lease.iter()) if (l.fencing_token > max) max = l.fencing_token;
-  return max + 1n;
 }
 
 const parentOf = (world: PhysicsWorld, id: string) =>

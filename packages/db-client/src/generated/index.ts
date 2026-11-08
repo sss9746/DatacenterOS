@@ -36,14 +36,21 @@ import {
 // Import all reducer arg schemas
 import CancelActionReducer from "./cancel_action_reducer";
 import ClaimActionReducer from "./claim_action_reducer";
+import ClaimWorkflowReducer from "./claim_workflow_reducer";
 import ConfigureRunReducer from "./configure_run_reducer";
 import CreateRunReducer from "./create_run_reducer";
 import GrantRoleReducer from "./grant_role_reducer";
+import HeartbeatWorkflowReducer from "./heartbeat_workflow_reducer";
 import InjectFaultReducer from "./inject_fault_reducer";
 import PauseRunReducer from "./pause_run_reducer";
 import PingReducer from "./ping_reducer";
+import PublishAgentEventReducer from "./publish_agent_event_reducer";
 import RequestActionReducer from "./request_action_reducer";
 import StartActionReducer from "./start_action_reducer";
+import SubmitPlanReducer from "./submit_plan_reducer";
+import UpdateWorkflowReducer from "./update_workflow_reducer";
+import UpsertIncidentReducer from "./upsert_incident_reducer";
+import UpsertSymptomsReducer from "./upsert_symptoms_reducer";
 import VerifyActionReducer from "./verify_action_reducer";
 
 // Import all procedure arg schemas
@@ -447,14 +454,21 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("cancel_action", CancelActionReducer),
   __reducerSchema("claim_action", ClaimActionReducer),
+  __reducerSchema("claim_workflow", ClaimWorkflowReducer),
   __reducerSchema("configure_run", ConfigureRunReducer),
   __reducerSchema("create_run", CreateRunReducer),
   __reducerSchema("grant_role", GrantRoleReducer),
+  __reducerSchema("heartbeat_workflow", HeartbeatWorkflowReducer),
   __reducerSchema("inject_fault", InjectFaultReducer),
   __reducerSchema("pause_run", PauseRunReducer),
   __reducerSchema("ping", PingReducer),
+  __reducerSchema("publish_agent_event", PublishAgentEventReducer),
   __reducerSchema("request_action", RequestActionReducer),
   __reducerSchema("start_action", StartActionReducer),
+  __reducerSchema("submit_plan", SubmitPlanReducer),
+  __reducerSchema("update_workflow", UpdateWorkflowReducer),
+  __reducerSchema("upsert_incident", UpsertIncidentReducer),
+  __reducerSchema("upsert_symptoms", UpsertSymptomsReducer),
   __reducerSchema("verify_action", VerifyActionReducer),
 );
 

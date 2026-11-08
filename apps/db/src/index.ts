@@ -10,6 +10,8 @@ export { create_run, pause_run, configure_run } from './run';
 export { advance_tick } from './tick';
 export { inject_fault } from './faults';
 export { request_action, claim_action, start_action, cancel_action, verify_action } from './actions';
+export { claim_workflow, heartbeat_workflow, update_workflow } from './workflow';
+export { upsert_incident, upsert_symptoms, submit_plan, publish_agent_event } from './incidents';
 
 // Smoke test: proves the module runs, @dcos/physics bundles, and @dcos/contracts' validator
 // (ajv) works inside the SpacetimeDB runtime.
