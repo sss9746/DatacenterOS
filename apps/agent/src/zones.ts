@@ -39,7 +39,22 @@ export function resourceZone(snap: ObservedSnapshot, resourceId: string, racks: 
   return null;
 }
 
-/** Zone of an incident: the most common zone among its linked resources (ties: lexicographic), or null. */
+/** Every resource id of the snapshot that appears inside `text` (longest first), e.g. `gpu-r7-n1-3` in an incident id. */
+export function resourceIdsIn(snap: ObservedSnapshot, text: string): string[] {
+  const ids = new Set<string>([
+    ...snap.resources.map((r) => r.resource_id),
+    ...snap.gpus.map((g) => g.resource_id),
+    ...snap.nodes.map((n) => n.resource_id),
+    ...snap.cooling.map((c) => c.resource_id),
+  ]);
+  return [...ids].filter((id) => text.includes(id)).sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
+}
+
+/**
+ * Zone of an incident: the most common zone among its linked resources (ties: lexicographic). With no resolvable
+ * resource link (a live incident may carry only symptom links), the resource named in the incident id itself
+ * (`inc-<family>-<resource>-b<bucket>`, e.g. `inc-compute-gpu-r7-n1-3-b1`) decides. Null when neither resolves.
+ */
 export function incidentZone(incidentId: string, links: readonly IncidentLink[], snap: ObservedSnapshot): Zone | null {
   const racks = rackZones(snap);
   const counts = new Map<Zone, number>();
@@ -52,7 +67,12 @@ export function incidentZone(incidentId: string, links: readonly IncidentLink[],
   for (const [z, n] of [...counts].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (best === null || n > (counts.get(best) ?? 0)) best = z;
   }
-  return best;
+  if (best !== null) return best;
+  for (const id of resourceIdsIn(snap, incidentId)) {
+    const z = resourceZone(snap, id, racks);
+    if (z) return z;
+  }
+  return null;
 }
 
 /** Racks hosting the given GPU ids (unknown GPUs are skipped), sorted. */

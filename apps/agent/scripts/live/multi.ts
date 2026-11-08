@@ -4,7 +4,7 @@
 
 import type { ObservedSnapshot } from '@dcos/contracts';
 import type { ActionDetail, AgentEventInput, WorkflowRecord } from '@dcos/db-client';
-import { messagesIn, type AgentMessage, type MessageTopic } from '../../src/agent-messages.js';
+import { agentNameOfWorker, messagesIn, type AgentMessage, type MessageTopic } from '../../src/agent-messages.js';
 import { incidentZone, type Zone } from '../../src/zones.js';
 import type { IncidentLink } from '@dcos/contracts';
 import { check, intentOf, type Check } from './asserts.js';
@@ -12,17 +12,22 @@ import { rackOfGpu } from './faults.js';
 
 export interface AgentIdentity {
   name: string;
+  /** Pid of the process the harness spawned (a tsx/node wrapper on Windows: NOT necessarily the pid in the worker id). Informational. */
   pid: number;
   zone: Zone | null;
 }
 
-/** The worker id main.ts derives from AGENT_NAME + pid (config.ts workerIdFor). */
+/** The worker id main.ts derives from AGENT_NAME + the AGENT's pid (config.ts workerIdFor); only exact when no wrapper is involved. */
 export const workerIdOf = (a: Pick<AgentIdentity, 'name' | 'pid'>): string => `${a.name}-${a.pid}`;
 
-/** Which spawned agent owns a lease (`<name>-<pid>`), or null for an unknown / absent owner. */
-export function agentForOwner<A extends Pick<AgentIdentity, 'name' | 'pid'>>(owner: string | null | undefined, agents: readonly A[]): A | null {
+/**
+ * Which spawned agent owns a lease. Matched by the AGENT_NAME prefix of the worker id (`<name>-<pid>` with the
+ * trailing pid stripped), never by pid: the harness only knows the wrapper's pid, the agent writes its own.
+ */
+export function agentForOwner<A extends Pick<AgentIdentity, 'name'>>(owner: string | null | undefined, agents: readonly A[]): A | null {
   if (!owner) return null;
-  return agents.find((a) => workerIdOf(a) === owner) ?? null;
+  const name = agentNameOfWorker(owner);
+  return agents.find((a) => a.name === name) ?? null;
 }
 
 /** Demo GPU ids only (`gpu-rN-nM-K`): the real-GPU twin and anything unrecognised are never faulted. */

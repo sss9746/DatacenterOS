@@ -35,12 +35,16 @@ const ev = (id: string, sim: number, calls: AgentEventInput['tool_calls'], workf
 const msg = (from: string, to: string, topic: string, text: string) => ({ tool: 'agent_message', args_summary: `from=${from} to=${to} topic=${topic}`, result_summary: text });
 
 describe('agent identity', () => {
-  it('maps lease owners `<name>-<pid>` back to the spawned agent; unknown owners are null', () => {
+  it('maps lease owners `<name>-<pid>` back to the spawned agent by AGENT_NAME, never by pid (the harness only knows the tsx/node wrapper pid)', () => {
     expect(workerIdOf(ALPHA)).toBe('agent-alpha-111');
     expect(agentForOwner('agent-beta-222', [ALPHA, BETA])).toBe(BETA);
-    expect(agentForOwner('agent-beta-999', [ALPHA, BETA])).toBeNull();
+    // the live case: the agent's own pid (27560) differs from the wrapper pid the harness spawned (111)
+    expect(agentForOwner('agent-alpha-27560', [ALPHA, BETA])).toBe(ALPHA);
+    expect(agentForOwner('agent-beta-999', [ALPHA, BETA])).toBe(BETA);
     expect(agentForOwner('agent-host-5', [ALPHA, BETA])).toBeNull();
+    expect(agentForOwner('agent-alphabet-5', [ALPHA, BETA])).toBeNull();
     expect(agentForOwner(null, [ALPHA, BETA])).toBeNull();
+    expect(checkOwnedByDifferentAgents({ a: 'agent-alpha-27560', b: 'agent-beta-23036' }, 'a', 'b', [ALPHA, BETA]).ok).toBe(true);
   });
 
   it('buildAgentEnv sets AGENT_NAME/AGENT_ZONE per child and never inherits them from the harness env', () => {

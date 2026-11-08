@@ -9,6 +9,7 @@ import type { ActionCommand, ActionStatus } from '@dcos/contracts';
 import { isDbError, type ActionDetail, type DbClient, type WorkflowRecord } from '@dcos/db-client';
 import { spawnAgent, buildAgentEnv, type AgentHandle } from './agent-process.js';
 import type { CaseId, HarnessArgs, TargetPolicy } from './args.js';
+import { agentNameOfWorker } from '../../src/agent-messages.js';
 import {
   allPassed,
   allWorkflowsSettled,
@@ -146,7 +147,7 @@ class CaseRun {
   }
   agentByOwner(owner: string | null): AgentHandle | null {
     const id = agentForOwner(owner, this.identities());
-    return id ? (this.everSpawned.find((h) => h.name === id.name && h.pid === id.pid) ?? null) : null;
+    return id ? (this.everSpawned.find((h) => h.name === id.name) ?? null) : null;
   }
   private record(h: AgentHandle, how: AgentGenerationRecord['how_ended']) {
     const g = this.generations.find((x) => x.generation === h.generation);
@@ -685,15 +686,15 @@ async function caseL7(run: CaseRun): Promise<LiveState> {
   const wfAfter = await waitReclaim(run, wfPump, wfBefore.lease_owner);
   run.add(checkWorkflowReclaimed(wfBefore, wfAfter));
   const newOwner = run.agentByOwner(wfAfter.lease_owner);
-  run.add(check('reclaimed by the surviving agent without a restart', newOwner?.pid === survivor.pid && run.generations.length === 2 && survivor.isAlive(), `owner ${wfAfter.lease_owner} -> ${newOwner?.name ?? 'unknown'} pid ${newOwner?.pid ?? '-'}; ${run.generations.length} agent processes spawned in total`, {
+  run.add(check('reclaimed by the surviving agent without a restart', newOwner !== null && newOwner.name === survivor.name && run.generations.length === 2 && survivor.isAlive(), `owner ${wfAfter.lease_owner} -> ${newOwner?.name ?? 'unknown'} (wrapper pid ${newOwner?.pid ?? '-'}); ${run.generations.length} agent processes spawned in total`, {
     owner_after: wfAfter.lease_owner,
-    survivor: survivor.workerId,
+    survivor: survivor.name,
     generations: run.generations.length,
   }));
 
   const { wf, state } = await waitWorkflowSettled(run, wfPump, 60_000);
   const resumed = (wf.state as { resumed?: { by_worker?: string; previous_owner?: string | null } }).resumed;
-  run.add(check('handoff recorded: resume marker names survivor and dead owner', resumed?.by_worker === survivor.workerId && resumed?.previous_owner === wfBefore.lease_owner, JSON.stringify(resumed ?? null), { resumed: resumed ?? null }));
+  run.add(check('handoff recorded: resume marker names survivor and dead owner', !!resumed?.by_worker && agentNameOfWorker(resumed.by_worker) === survivor.name && resumed.previous_owner === wfBefore.lease_owner, JSON.stringify(resumed ?? null), { resumed: resumed ?? null }));
   run.add(checkKeysReconciled(before.details, state.details, { allowReplan: true }));
   finalChecks(run, state, wf, false);
 

@@ -1,6 +1,6 @@
 import type { IncidentLink } from '@dcos/contracts';
 import { describe, expect, it } from 'vitest';
-import { claimsImmediately, incidentZone, orderByZone, rackZones, racksOfGpus, resourceZone, zonesOfRacks } from '../src/zones.js';
+import { claimsImmediately, incidentZone, orderByZone, rackZones, racksOfGpus, resourceIdsIn, resourceZone, zonesOfRacks } from '../src/zones.js';
 import { loadPumpDegradedSnapshot, RUN_ID } from './fixtures/index.js';
 
 const link = (incident: string, resource: string): IncidentLink => ({ schema_version: '1.1.0', run_id: RUN_ID, incident_id: incident, link_kind: 'resource', linked_id: resource, reason: 'test' });
@@ -32,6 +32,16 @@ describe('zones (derived from observed cooling topology)', () => {
     expect(incidentZone('inc-pump', links, snap)).toBe('loop-a');
     expect(incidentZone('inc-xid', links, snap)).toBe('loop-b');
     expect(incidentZone('inc-none', links, snap)).toBeNull();
+  });
+
+  it('falls back to the resource named in the incident id when there are no resource links (live: symptom links only)', () => {
+    expect(incidentZone('inc-compute-gpu-r7-n1-3-b1', [], snap)).toBe('loop-b');
+    expect(incidentZone('inc-thermal-pump-a-b1', [], snap)).toBe('loop-a');
+    expect(incidentZone('inc-compute-node-r2-n1-b3', [link('inc-compute-node-r2-n1-b3', 'inc-x')], snap)).toBe('loop-a');
+    expect(incidentZone('inc-power-power-main-b1', [], snap)).toBeNull();
+    expect(resourceIdsIn(snap, 'inc-compute-gpu-r7-n1-3-b1')[0]).toBe('gpu-r7-n1-3');
+    // explicit resource links still win over the id
+    expect(incidentZone('inc-compute-gpu-r7-n1-3-b1', [link('inc-compute-gpu-r7-n1-3-b1', 'pump-a')], snap)).toBe('loop-a');
   });
 
   it('orders fresh incidents own zone -> unknown -> other, ties by id; no agent zone keeps id order', () => {
