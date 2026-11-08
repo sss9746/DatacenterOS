@@ -126,3 +126,42 @@
 .wf-plan-facts dt { color: var(--muted); font-size: 0.75rem; }
 .wf-plan-facts dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .wf-assumptions > summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+
+/* v2 card: plain-English title, owner chip row, status sentence, stage track, handoff card, candidate lines, evidence disclosure. */
+.wf-card-head h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; color: var(--foreground); text-transform: none; }
+.wf-card-head h3::first-letter { text-transform: uppercase; }
+.wf-owner-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; max-width: none; }
+.wf-card .chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-raised); color: #c9d4de; font-size: 12px; font-weight: 500; line-height: 1.3; white-space: nowrap; }
+.wf-card .wf-owner { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11.5px; cursor: help; }
+.wf-card .wf-owner-none { color: var(--muted); border-style: dashed; background: transparent; }
+.wf-card .wf-attempt { color: #f5d49e; border-color: #6b5634; background: #2c291f; cursor: help; }
+.wf-card .wf-chip-blocked { color: #ffbcb3; border-color: #8c565b; background: #442a2d; cursor: help; }
+.wf-card .wf-chip-human { color: #f5d49e; border-color: #8a7149; background: #3a3123; font-weight: 600; }
+.wf-resume-line { display: flex; align-items: flex-start; gap: 7px; margin-top: 10px; font-size: 13px; line-height: 1.5; color: #a3e1bf; font-weight: 500; max-width: none; overflow-wrap: anywhere; }
+.wf-resume-line > svg { flex: none; margin-top: 3px; }
+.wf-step-attempt { color: #f5d49e; font-weight: 600; }
+.wf-card > .wf-handoff-card { margin-top: 14px; }
+
+.wf-candidates { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.wf-cand { display: grid; grid-template-columns: auto minmax(90px, max-content) minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; padding: 8px 12px; border-radius: 6px; background: #141c25; border: 1px solid var(--line); font-size: 12px; min-width: 0; }
+.wf-cand-chosen { border-color: #4f8a6d; }
+.wf-cand-blocked { border-color: #6a4448; }
+.wf-cand-verdict { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.wf-cand-chosen .wf-cand-verdict { color: #a3e1bf; }
+.wf-cand-blocked .wf-cand-verdict { color: #ffbcb3; }
+.wf-cand-verdict > svg { position: relative; top: 2px; }
+.wf-cand-name { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11.5px; color: #d6e0e9; overflow-wrap: anywhere; }
+.wf-cand-reason { color: #c6d2dd; line-height: 1.5; }
+.wf-cand-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (max-width: 930px) {
+  .wf-cand { grid-template-columns: auto minmax(0, 1fr); }
+  .wf-cand-reason { grid-column: 1 / -1; }
+  .wf-cand-meta { grid-column: 1 / -1; white-space: normal; }
+}
+
+.wf-evidence > summary small { margin-left: 10px; font-weight: 400; font-size: 12px; color: var(--muted); }
+.wf-evidence > .wf-section-body { padding-top: 12px; }
+.wf-evidence .wf-incidents { margin-top: 0; }
+.wf-evidence .wf-labels { margin-top: 4px; }
+.wf-card-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 11px; color: #8d9cab; max-width: none; }
+.wf-card-foot code { font-size: 11px; color: #8d9cab; cursor: help; overflow-wrap: anywhere; }
