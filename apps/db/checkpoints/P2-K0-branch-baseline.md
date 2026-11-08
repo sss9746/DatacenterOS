@@ -23,11 +23,24 @@ Start from the integrated code, record real test counts, and have a local databa
 Do not name the local DB `dcos` as the P2-8 rehearsal did. `gate2.ts` picks its server from `STDB_URI`, so a forgotten env var would reset prod.
 
 ## Done when
-- [ ] Branch is at `origin/int/r-sprint` and the commit is recorded
-- [ ] Baseline test and typecheck counts recorded below
-- [ ] `STDB_SERVER=local pnpm --filter db smoke:ledger dcos-r-local` passes
-- [ ] `STDB_URI=ws://127.0.0.1:3000 pnpm --filter db gate2 dcos-r-local` passes
+- [x] Branch is at `origin/int/r-sprint` and the commit is recorded
+- [x] Baseline test and typecheck counts recorded below
+- [x] `STDB_SERVER=local pnpm --filter db smoke:ledger dcos-r-local` passes
+- [x] `STDB_URI=ws://127.0.0.1:3000 pnpm --filter db gate2 dcos-r-local` passes
 
 ## Architect notes (Codex)
 
 ## Implementation report (Claude)
+**Status: ☑ (2026-11-08).** Branch `lane/p2-r-sprint` at `9897e0b` (base `777b2bf`). Node 22.23.4, pnpm 10.29.3, SpacetimeDB CLI 2.14.1, lockfile sha256 `e15088ba9015…`.
+
+| Package | Tests |
+|---|---|
+| contracts | 15 |
+| db-client | 24 |
+| physics | 353 |
+| evaluation | 9 |
+| agent | 304 |
+| web | 6 |
+| **Total** | **711** |
+
+`db` and `@dcos/db-client` typecheck clean. Only change: both smoke scripts now read `STDB_SERVER`, default `maincloud`. Local target `dcos-r-local` published and bootstrapped; tokens in `~/.dcos-tokens/dcos-r-local.local.env`. `smoke:ledger` and Gate 2 pass on it before any K1 change. `smoke:workflow` was not run in K0.

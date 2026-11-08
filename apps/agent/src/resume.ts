@@ -204,7 +204,9 @@ async function reclaim(ctx: Ctx, coord: Coordinator, key: string, s0: ActionStat
     try {
       const { fencing_token } = await ctx.db.claimAction(key, s.version, ctx.workerId);
       try {
-        return { status: await ctx.db.startAction(key, fencing_token), decision: 'reclaim_after_timeout' };
+        const started = await ctx.db.startAction(key, fencing_token);
+        // start_action can return a safety rejection: report it as blocked so the persisted plan gets replanned.
+        return { status: started, decision: isSafetyRejected(started) ? 'blocked' : 'reclaim_after_timeout' };
       } catch {
         await ctx.db.cancelAction(key, 'RESUME_START_FAILED', fencing_token).catch(() => undefined);
         return { status: await ctx.db.getActionStatus(key), decision: 'needs_operator' };
