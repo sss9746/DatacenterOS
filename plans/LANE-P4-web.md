@@ -1,3 +1,13 @@
+# P4 — current remaining work (2026-11-08)
+
+The dashboard and evaluator exist on main (P4's branch is recorded as `P4` in its handoff). Start with **R4** live integration using `onActionDetails` and per-workflow progress, then **R6** checked-in adapter/provenance and **R7** rehearsal. Required fault controls: pump degradation and Xid79; no topology editor. `actor=model` gets a Nemotron badge; code/fallback events get a code badge. Use 5 °C modeled headroom, not the old 7 °C example. Older live-client/loop-row blockers are resolved upstream.
+
+**Current instructions:** [implementation tasks](IMPLEMENTATION-TASKS.md), [fixed scope](IMPLEMENTATION-SCOPE.md), [audited status](IMPLEMENTATION-STATUS.md). These replace the kickoff schedule and acceptance assumptions below. Ownership boundaries remain. Historical times, test counts, build-from-scratch tasks and old demo instructions below are retained for traceability, not current priorities.
+
+---
+
+## Archived kickoff plan
+
 # Lane P4: frontend + evaluation + demo + pitch
 
 **Owns:**

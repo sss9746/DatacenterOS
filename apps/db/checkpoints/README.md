@@ -1,5 +1,7 @@
 # P2 checkpoints (Kaushik): SpacetimeDB + durability
 
+> **Current follow-up (2026-11-08):** [audited status](../../../plans/IMPLEMENTATION-STATUS.md) and [remaining tasks](../../../plans/IMPLEMENTATION-TASKS.md) supersede the original deadlines. Complete R2 start-time safety and support R0/R5 before optional P2-9. Existing Gate 2 proves DB/caller durability; full agent crash/overlap and live browser proof remain open. Historical test counts below were not rerun for this documentation update.
+
 The P2 lane split into one file per task. Source of truth for scope: [`plans/LANE-P2-db.md`](../../../plans/LANE-P2-db.md). If a checkpoint file and the lane file disagree, the lane file wins (and CONTRACTS §0 beats both).
 
 ## Board
@@ -16,7 +18,7 @@ The P2 lane split into one file per task. Source of truth for scope: [`plans/LAN
 | 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ◐ (prod live, P3 verified; P4 open) |
 | 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ☐ next |
 
-**Where things stand (2026-11-08 ~00:40):** all of P2 is merged to `main` (`08f39d3`; full suite 697 tests green). Prod `dcos` is live on Maincloud with role tokens. P3's agent + real Nemotron handled the pump-a incident end to end on both `dcos-dev` and `dcos`. Open: P4 dashboard live check, P2-9.
+**Historical report (2026-11-08 ~00:40):** completed P2 work merged to `main` (`08f39d3`; reported suite 697 tests green). Prod `dcos` is live on Maincloud with role tokens. P3's agent + real Nemotron handled the pump-a incident end to end on both `dcos-dev` and `dcos`. Open: P4 dashboard live check, optional P2-9, and the follow-up safety/recovery proof above.
 
 Status key: ☐ not started · ◐ in progress · ☑ done (all "Done when" boxes ticked) · ⛔ blocked (say why in the file).
 

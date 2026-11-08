@@ -1,3 +1,13 @@
+# P2 — current remaining work (2026-11-08)
+
+The DB, real client, action details, leases, workflows and reported live pump integration exist. Start with **R2**: reject every start-time safety violation, including stale evidence. Support R0 provenance round-trip and R5 actual-agent recovery proof. P2-9 ingestion is optional after software proof; caller-kill Gate 2 is not full Gate 3.
+
+**Current instructions:** [implementation tasks](IMPLEMENTATION-TASKS.md), [fixed scope](IMPLEMENTATION-SCOPE.md), [audited status](IMPLEMENTATION-STATUS.md). These replace the kickoff schedule and acceptance assumptions below. Ownership boundaries remain. Historical times, test counts, build-from-scratch tasks and old demo instructions below are retained for traceability, not current priorities.
+
+---
+
+## Archived kickoff plan
+
 # Lane P2: SpacetimeDB + durable execution
 
 **Owns:** `apps/db/` (SpacetimeDB TypeScript module), `packages/db-client/` (generated bindings + typed wrapper + mock), database publishing, identities and tokens.

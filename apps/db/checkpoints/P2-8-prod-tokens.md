@@ -6,8 +6,8 @@ P3 and P4 run against the real `dcos` database with their own tokens, and we can
 
 ## Steps
 1. Publish `dcos` from a **gate-passing commit** only.
-2. `bootstrap.ts`: mint identities with `POST /v1/identity` for **admin**, **agent**, **gateway**; `grant_role` each; `create_run('run-demo-1', 42, 'gpu_demo_8')`. Prints tokens to stdout only, **never writes them to a tracked file**.
-3. Post tokens in team chat (`STDB_ADMIN_TOKEN`, `STDB_AGENT_TOKEN`, `STDB_GATEWAY_TOKEN`). They go into each person's `.env.local`.
+2. `bootstrap.ts`: mint identities with `POST /v1/identity` for **admin**, **agent**, **gateway**; grant each role. Tokens are written to private `~/.dcos-tokens/<db>.env` (mode 600), never printed or tracked. Stop agents and close old clients before creating/resetting a run.
+3. Give each team member only their needed role token through the agreed private handoff; never post tokens in team chat. Keep presenter admin credentials local.
 4. Offline rehearsal on the demo laptop: `spacetime start` + `spacetime publish -s local dcos` + bootstrap against local.
 5. `/cso` security pass over role checks and private tables before tokens go out.
 
@@ -19,7 +19,7 @@ P3 and P4 run against the real `dcos` database with their own tokens, and we can
 ## Architect notes (Codex)
 
 ## Implementation report (Claude)
-**Status: ◐. Prod `dcos` is live (2026-11-08 00:23 CST); remaining: P3 / P4 smoke against `dcos` with their tokens.**
+**Status: ◐. Prod `dcos` is live (2026-11-08 00:23 CST); P3 pump recovery subsequently verified below; P4 live browser proof remains open. This does not establish the full R5 crash/overlap gate.**
 
 - **Prod `dcos`** published to Maincloud from `ca5d8d4` (Kaushik's OK) → `pnpm bootstrap dcos --create-run`: admin / agent / gateway granted + verified, tokens in `~/.dcos-tokens/dcos.env` → `pnpm gate2 dcos`: **GATE 2 ALL PASS on prod**. Role check with the minted tokens: agent reads the snapshot; agent `createRun` and gateway `pauseRun` → `UNAUTHORIZED`; admin `createRun` ok. Left a fresh run-demo-1 (ticking, epoch 0, no actions).
 
