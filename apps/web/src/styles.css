@@ -66,7 +66,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .sidebar nav { display: flex; flex-direction: column; gap: 6px; }
 .sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 550; }
 .sidebar nav a svg { width: 16px; height: 16px; }
-.sidebar nav a:first-child { background: #243341; color: #e2edf6; }
+.sidebar nav a.is-active, .sidebar nav a[aria-current="page"] { background: #243341; color: #e2edf6; }
 .sidebar nav a:hover { background: var(--surface-raised); color: var(--foreground); }
 .sidebar-note { margin: 0 12px; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .sidebar-note p { margin: 10px 0 24px; }
