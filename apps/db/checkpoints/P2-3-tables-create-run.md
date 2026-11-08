@@ -1,5 +1,5 @@
 # P2-3: Tier 1 tables + `create_run`
-**Due:** 10:45 PM · **Status:** ☐
+**Due:** 10:45 PM · **Status:** ☑
 **Owns:** `apps/db/src/schema.ts`, `apps/db/src/run.ts`, `apps/db/src/auth.ts`
 
 ## Goal
@@ -17,11 +17,11 @@ Define them all now, even if later checkpoints fill them: adding tables after 9 
 - One `projection.ts`-style function `projectWorld(ctx, world)` reused by the tick in P2-4.
 
 ## Done when
-- [x] `create_run('run-demo-1', 42, 'gpu_demo_8')` → `SELECT COUNT(*) FROM gpu_current` = **65** (64 + `gpu-real-0`)
+- [ ] `create_run('run-demo-1', 42, 'gpu_demo_8')` → `SELECT COUNT(*) FROM gpu_current` = **65** (64 + `gpu-real-0`). *Was 65 with the stand-in preset; with P1's real `buildPreset` it is **64** on dev and prod, because P1 leaves `gpu-real-0` out on purpose. P2-9 ingest creates that row from the first nvidia-smi sample.*
 - [x] 3 rows in `job_current`; allocations match CONTRACTS §0.3 (job-a r2+r3, job-b r4, job-c r6)
 - [x] Non-admin identity calling `create_run` → `UNAUTHORIZED`
 - [x] No private field visible in any public table
-- [x] Bindings regenerated; [ ] P3/P4 told (message drafted in the report below)
+- [x] Bindings regenerated; [x] P3/P4 told (both run against the live tables)
 
 ## Blocked by
 P1's `buildPreset` (P1-3, due 10:00 PM). If late, build against P1's fixture snapshot to keep moving.
@@ -32,6 +32,8 @@ Review of the uncommitted P2-3 diff (codex exec, read-only):
 - [P2] `workflow` / `resource_lease` are public, but §B says service-readable plus a safe view. **Kept public, on purpose (Kaushik/Codex may overrule before P2-6):** fencing tokens are monotonic counters, not secrets, so hiding them doesn't make them unguessable. Authorization comes from `role_grant` (agent role), not from secrecy. P3's `getWorkflow` / `listOpenWorkflows` already read `fencing_token` via subscription, and the UI shows workflow stage and locks. The columns hold no fault truth.
 
 ## Implementation report (Claude)
+> **Update 2026-11-08:** the `preset.ts` stand-in described below is gone. P1's real `buildPreset` / `step` were merged in P2-4, so `gpu_current` now has 64 rows and `gpu-real-0` comes from P2-9 ingest.
+
 **Files** (`apps/db/src/`)
 - `schema.ts`: all 25 Tier 1 tables + private `world_state`, `fault_injection_truth`, `tick_schedule`, `role_grant`. `Ctx` type. Column conventions are in the header comment: sim ms / versions u32, unix ms + `source_seq` f64, fencing tokens u64, contract `null` → `t.option`, objects → `*_json`, composite-unique pairs → concatenated string PK (`job-a/gpu-r2-n1-0`). Columns that later checkpoints need were added now so they don't have to be added to existing tables later: `plan.incident_ids_json` / `command_keys_json`; `action.incident_ids_json` / `depends_on_command_keys_json` / `requested_sim_time_ms` / `updated_sim_time_ms` / `claimed_by`; `signal_event.message`; `agent_event.actor` / `tool_calls_json`; `world_state.preset_id` / `seed` / `config_json`; `run_id` on `action_dependency`.
 - `auth.ts`: `init` grants the owner `admin`; `grant_role(identity, role)` (admin; `""` revokes; an admin can't demote itself); `requireRole(ctx, …)` (admin and scheduled calls always pass); `reject(code, msg)` throws `SenderError("CODE: msg")` for db-client's `parseDbError`.

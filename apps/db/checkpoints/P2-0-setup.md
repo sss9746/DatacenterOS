@@ -1,5 +1,5 @@
 # P2-0: Setup + booth questions
-**Due:** 8:15 PM · **Status:** ☐ · **Owns:** `plans/status/P2.md`
+**Due:** 8:15 PM · **Status:** ☑ · **Owns:** `plans/status/P2.md`
 
 ## Goal
 A working toolchain on this Mac and a SpacetimeDB identity, plus answers to the four booth questions.
@@ -26,7 +26,7 @@ cp .env.example .env.local                   # never commit
 ## Done when
 - [x] `node -v` ≥ 22, `pnpm -r test` green, `pnpm contracts:validate` green
 - [x] `spacetime login show` prints an identity
-- [ ] Booth answers written in `plans/status/P2.md`
+- [x] Booth answers written in `plans/status/P2.md` (never asked at the booth; answered from what we observed, see P2.md)
 
 ## Architect notes (Codex)
 

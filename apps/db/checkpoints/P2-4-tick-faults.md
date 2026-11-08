@@ -1,5 +1,5 @@
 # P2-4: `advance_tick` + `inject_fault`
-**Due:** 11:30 PM · **Gate:** 1 · **Status:** ☐
+**Due:** 11:30 PM · **Gate:** 1 · **Status:** ◐
 **Owns:** `apps/db/src/tick.ts`, `apps/db/src/faults.ts`, `apps/db/src/projection.ts`
 
 ## Goal
@@ -19,7 +19,7 @@ The world runs on its own: a scheduled tick advances physics, faults take effect
 - [x] XID 79 on `gpu-r3-n1-0` → `signal_event` row + job-a `failed`/`restarting`, progress back to `durable_work_units` (real P1 physics)
 - [x] `telemetry_recent` stays ≤ 2,000 rows
 - [x] `pause_run` stops time; `configure_run` speed 5 → 5 s per wall second
-- [ ] Reducer time stays under the limit from the booth answer at speed 5× (no booth answer yet; at 5× with real physics the tick keeps pace and the logs show no errors; locally 50 steps incl. JSON round-trips = 75 ms)
+- [x] Reducer time stays under the limit at speed 5× (no booth answer; at 5× with real physics the tick keeps pace and the logs show no errors; locally 50 steps incl. JSON round-trips = 75 ms; the live agent runs on dev and prod at speed 2 kept pace too)
 - [ ] Dashboard (P4) sees it live (needs P4)
 
 ## Blocked by
