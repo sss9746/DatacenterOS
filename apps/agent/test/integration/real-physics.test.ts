@@ -82,6 +82,28 @@ describe('P1 <-> P3 contract surface', () => {
   });
 });
 
+describe('real physics epoch semantics the coordinator must live with', () => {
+  it('a checkpoint starting and completing each bump decision_epoch (material change, step.ts)', async () => {
+    const d = newDriver(117, [demoPumpFault()]);
+    runUntil(d, 730_000);
+    const { plan } = await triageAndPlan(observe(d), d.signals, 'wf-epoch');
+    const [ck, mv] = plan!.commands.filter((c) => c.job_id === 'job-a');
+    const e0 = observe(d).clock.decision_epoch;
+    expect(mv!.expected_decision_epoch).toBe(e0);
+    startCommands(d, [ck!]);
+    const e1 = observe(d).clock.decision_epoch;
+    runUntil(d, simNow(d) + 31_000);
+    const after = observe(d);
+    expect(d.completed).toContain(ck!.command_key);
+    expect(e1).toBeGreaterThan(e0);
+    expect(after.clock.decision_epoch).toBeGreaterThan(e1);
+    // => the plan-time migrate (expected_decision_epoch = e0) is STALE once its own dependency has run
+    const dec = physics.evaluateSafety(after, mv!, { decision_epoch: after.clock.decision_epoch, leased_resource_ids: [] });
+    expect(dec.violations).toContain('STALE_DECISION_EPOCH');
+    expect(dec.decision).toBe('retry_new_snapshot');
+  });
+});
+
 describe('(i) healthy gpu_demo_8', () => {
   it('no incidents, no plan, no threshold actions at run start and after 60 healthy sim-s', async () => {
     const d = newDriver(1);
