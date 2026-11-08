@@ -252,8 +252,8 @@ describe('scripted recovery example through the real mock APIs', () => {
     expect(cool.attempt).toBe(2);
     expect(cool.candidates?.options.find((o) => o.option_id === 'job-b:cap')?.chosen).toBe(true);
     expect(xid.status.kind).toBe('verified');
-    expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-1', count: 1 });
-    expect(xid.workflow.lease_owner).toBe('example-agent-2');
+    expect(xid.resumed).toMatchObject({ source: 'workflow_state', previous_owner: 'example-agent-alpha-1', count: 1 });
+    expect(xid.workflow.lease_owner).toBe('example-agent-beta-2');
     expect(xid.infra.relatedGpus.map((g) => g.resource_id)).toEqual(['gpu-r7-n1-0']);
     expect(events.every((e) => e.summary.startsWith('Example:'))).toBe(true);
   });

@@ -23,6 +23,12 @@ export interface Bubble {
   handoffTo: Seat | null;
   /** Owning agent process for this event (from the workflow's lease/resume markers); null when not recorded. */
   process: string | null;
+  /** Zone derived from the owning worker id (e.g. `@loopA`, `loop-a`) or the message's `zone=` token; null when absent. */
+  zone: string | null;
+  /** Home thread of the event (its workflow). */
+  threadId: string;
+  /** Present when a tool call is a well-formed `agent_message`; the bubble then renders as a cross-agent message. */
+  message: AgentMessage | null;
   simTimeMs: number;
   observedUnixMs: number;
 }
@@ -30,14 +36,30 @@ export interface Bubble {
 export interface Divider { kind: 'divider'; id: string; text: string; simTimeMs: number }
 export type StreamItem = Bubble | Divider;
 
+export const AGENTS_THREAD_ID = 'agents';
+export const TOPICS = ['cross_zone_move', 'ack', 'conflict', 'incident_update', 'takeover', 'stand_by'] as const;
+export type Topic = (typeof TOPICS)[number];
+export interface ParsedAgentMessage { from: string; to: string; topic: Topic; zone: string | null }
+export interface AgentMessage extends ParsedAgentMessage {
+  /** Display names: processName() of both, unless they collide (same process, different pids) — then the raw ids. */
+  fromLabel: string;
+  toLabel: string;
+  text: string;
+  /** Threads whose lease_owner / resume markers name the sender / receiver; null when unknown (no travel animation). */
+  fromThreadId: string | null;
+  toThreadId: string | null;
+}
+
 export interface Thread {
   id: string;
   title: string;
-  accent: 'a' | 'b' | 'run';
+  accent: 'a' | 'b' | 'run' | 'agents';
   workflowStage: WorkflowRecord['stage'] | null;
   closed: boolean;
   items: StreamItem[];
   lastObservedUnixMs: number | null;
+  /** True when every event in the thread carries the "Example:" prefix (the EXAMPLE chip then sits on the tab, not on bubbles). */
+  allExample: boolean;
   /** Owning process from `workflow.lease_owner` only; null when absent. */
   owner: string | null;
   /** True when the lease expiry is in the past and the workflow is still open. */
@@ -79,7 +101,7 @@ export function resumeDividerText(e: { by_worker: string | null; count: number |
 /** `agent-alpha-12345` → `agent-alpha`; strips one trailing numeric pid segment. Null for null/empty. */
 export function processName(workerId: string | null | undefined): string | null {
   if (!workerId) return null;
-  const name = workerId.replace(/-\d+$/, '');
+  const name = workerId.replace(/@[a-z0-9_-]+$/i, '').replace(/-\d+$/, '');
   return name || null;
 }
 
@@ -108,10 +130,43 @@ export function dividerText(resumed: { by_worker: string | null; count: number |
   return resumeDividerText(resumed);
 }
 
+/** `from=<name> to=<name|all> topic=<Topic> [zone=<text>]` in any order; unknown topic or missing from/to → null. */
+export function parseAgentMessage(call: ToolCallSummary): ParsedAgentMessage | null {
+  if (call.tool !== 'agent_message') return null;
+  const tokens = new Map<string, string>();
+  for (const m of call.args_summary.matchAll(/(\w+)=((?:"[^"]*")|(?:\S+))/g)) tokens.set(m[1]!.toLowerCase(), m[2]!.replace(/^"|"$/g, ''));
+  const from = tokens.get('from');
+  const to = tokens.get('to');
+  const topic = tokens.get('topic');
+  if (!from || !to || !(TOPICS as readonly string[]).includes(topic ?? '')) return null;
+  return { from, to, topic: topic as Topic, zone: normaliseZone(tokens.get('zone')) };
+}
+
+function normaliseZone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = /^loop[\s_-]?([a-z0-9]+)$/i.exec(raw.trim());
+  return m ? `loop ${m[1]!.toUpperCase()}` : raw.trim();
+}
+/** Zone carried by a worker id: `agent-alpha@loopA`, or a name containing `loop-a` / `loop_b`; null when absent. */
+export function zoneOfWorker(workerId: string | null | undefined): string | null {
+  if (!workerId) return null;
+  const at = /@([a-z0-9_-]+)$/i.exec(workerId)?.[1];
+  if (at) return normaliseZone(at);
+  const inName = /loop[-_]([a-z0-9])(?![a-z0-9])/i.exec(workerId)?.[1];
+  return inName ? `loop ${inName.toUpperCase()}` : null;
+}
+/** "agent-alpha · loop A" when a zone is known, else the process alone. */
+export const processLabel = (process: string | null, zone: string | null): string | null => process ? zone ? `${process} · ${zone}` : process : null;
+
+const takeoverDivider = (b: Bubble): Divider => ({ kind: 'divider', id: `${b.id}-takeover`, text: `${b.message!.fromLabel} → ${b.message!.toLabel} · takeover`, simTimeMs: b.simTimeMs });
+
 /** Which process owned an event: before the resume marker → previous_owner, at/after → by_worker; no marker → lease_owner. */
 export function processOfEvent(simTimeMs: number, marker: ResumeMarker | null, leaseOwner: string | null): string | null {
-  if (marker) return processName(simTimeMs < marker.at_sim_time_ms ? marker.previous_owner : marker.by_worker);
-  return processName(leaseOwner);
+  return processName(workerOfEvent(simTimeMs, marker, leaseOwner));
+}
+export function workerOfEvent(simTimeMs: number, marker: ResumeMarker | null, leaseOwner: string | null): string | null {
+  if (marker) return simTimeMs < marker.at_sim_time_ms ? marker.previous_owner : marker.by_worker;
+  return leaseOwner;
 }
 
 const isClosed = (stage: WorkflowRecord['stage'] | null): boolean => stage === 'done' || stage === 'escalated';
@@ -148,6 +203,35 @@ export function buildRoomView(input: RoomInput): RoomView {
     if (list) list.push(e); else groups.set(key, [e]);
   }
 
+  // Worker ids named by each workflow (lease owner + resume markers), for resolving message senders/receivers to threads.
+  const workersOf = new Map<string, string[]>();
+  for (const [id] of groups) {
+    const w = workflows.find((x) => x.workflow_id === id);
+    if (!w) continue;
+    const m = readResumeMarker(w.state);
+    workersOf.set(id, [w.lease_owner, m?.by_worker ?? null, m?.previous_owner ?? null].filter((x): x is string => Boolean(x)));
+  }
+  const threadOfWorker = (name: string): string | null => {
+    for (const [id, ws] of workersOf) if (ws.includes(name)) return id;
+    const proc = processName(name);
+    for (const [id, ws] of workersOf) if (ws.some((w) => processName(w) === proc)) return id;
+    return null;
+  };
+  const messageOf = (e: AgentEventInput, threadId: string): AgentMessage | null => {
+    for (const call of e.tool_calls) {
+      const parsed = parseAgentMessage(call);
+      if (!parsed) continue;
+      const fromProc = processName(parsed.from);
+      const toProc = parsed.to === 'all' ? 'all' : processName(parsed.to);
+      const collide = parsed.to !== 'all' && fromProc !== null && fromProc === toProc;
+      return {
+        ...parsed, fromLabel: collide ? parsed.from : fromProc ?? parsed.from, toLabel: parsed.to === 'all' ? 'all' : collide ? parsed.to : toProc ?? parsed.to,
+        text: boundSummary(call.result_summary).text, fromThreadId: threadOfWorker(parsed.from) ?? threadId, toThreadId: parsed.to === 'all' ? null : threadOfWorker(parsed.to),
+      };
+    }
+    return null;
+  };
+
   let wfIndex = 0;
   const threads: Thread[] = [];
   for (const [id, list] of groups) {
@@ -162,16 +246,18 @@ export function buildRoomView(input: RoomInput): RoomView {
       return {
         kind: 'bubble', id: e.agent_event_id, seat: seats[i]!, stage: e.stage, summary: text, example: ex,
         blocked: /\bBLOCKED\b/.test(e.summary), toolCalls: e.tool_calls, handoffTo: next !== null && next !== seats[i] ? next : null,
-        process: wf ? processOfEvent(e.sim_time_ms, marker, leaseOwner) : null,
-        simTimeMs: e.sim_time_ms, observedUnixMs: e.observed_unix_ms,
+        process: wf ? processOfEvent(e.sim_time_ms, marker, leaseOwner) : null, threadId: id, message: messageOf(e, id),
+        zone: null, simTimeMs: e.sim_time_ms, observedUnixMs: e.observed_unix_ms,
       };
     });
 
+    const zoned: Bubble[] = bubbles.map((b) => ({ ...b, zone: b.message?.zone ?? zoneOfWorker(wf ? workerOfEvent(b.simTimeMs, marker, leaseOwner) : null) }));
     const items: StreamItem[] = [];
     const resumed = wf ? resumeEvidence(list, wf.state) : null;
     const anchor = resumed ? resumeAnchorIndex(list, resumed.event_id, resumed.sim_time_ms) : -1;
-    bubbles.forEach((b, i) => {
+    zoned.forEach((b, i) => {
       if (resumed && i === anchor) items.push({ kind: 'divider', id: `${id}-resume-${resumed.event_id}`, text: dividerText(resumed), simTimeMs: resumed.sim_time_ms });
+      if (b.message?.topic === 'takeover') items.push(takeoverDivider(b));
       items.push(b);
     });
     if (resumed && anchor === bubbles.length) items.push({ kind: 'divider', id: `${id}-resume-${resumed.event_id}`, text: dividerText(resumed), simTimeMs: resumed.sim_time_ms });
@@ -183,15 +269,23 @@ export function buildRoomView(input: RoomInput): RoomView {
     const silentForS = !example && last && !closed && id !== RUN_THREAD_ID && quietMs > SILENT_AFTER_MS ? Math.floor(quietMs / 1000) : null;
     const owner = processName(leaseOwner);
     const leaseLapsed = wf !== null && owner !== null && !closed && wf.lease_expires_unix_ms < nowUnixMs;
-    threads.push({ id, title: id === RUN_THREAD_ID ? 'Run' : threadTitle(id, workflows, incidents), accent, workflowStage: wf?.stage ?? null, closed, items, lastObservedUnixMs: last?.observed_unix_ms ?? null, owner, leaseLapsed, silentForS });
+    threads.push({ id, title: id === RUN_THREAD_ID ? 'Run' : threadTitle(id, workflows, incidents), accent, workflowStage: wf?.stage ?? null, closed, items, lastObservedUnixMs: last?.observed_unix_ms ?? null, allExample: bubbles.length > 0 && bubbles.every((b) => b.example), owner, leaseLapsed, silentForS });
+  }
+
+  // Shared "Between agents" lane: only cross-agent messages, across all workflows, in time order.
+  const crossAgent = threads.flatMap((t) => t.items.filter((i): i is Bubble => i.kind === 'bubble' && i.message !== null)).sort((a, b) => a.simTimeMs - b.simTimeMs || a.observedUnixMs - b.observedUnixMs);
+  if (crossAgent.length) {
+    const items: StreamItem[] = [];
+    for (const b of crossAgent) { if (b.message?.topic === 'takeover') items.push(takeoverDivider(b)); items.push(b); }
+    threads.push({ id: AGENTS_THREAD_ID, title: 'Agents ↔', accent: 'agents', workflowStage: null, closed: false, items, lastObservedUnixMs: crossAgent.at(-1)?.observedUnixMs ?? null, allExample: crossAgent.every((b) => b.example), owner: null, leaseLapsed: false, silentForS: null });
   }
 
   // Seat states.
   const seatStates = Object.fromEntries([...SEATS.map((s) => s.id), 'unattributed'].map((s) => [s, 'idle'])) as Record<Seat, SeatState>;
   for (const s of sorted.map(seatOf)) seatStates[s] = 'done';
-  const openThreads = threads.filter((t) => !t.closed && t.id !== RUN_THREAD_ID);
+  const openThreads = threads.filter((t) => !t.closed && t.id !== RUN_THREAD_ID && t.id !== AGENTS_THREAD_ID);
   if (example) {
-    const active = openThreads.at(-1) ?? threads.filter((t) => t.id !== RUN_THREAD_ID).at(-1);
+    const active = openThreads.at(-1) ?? threads.filter((t) => t.id !== RUN_THREAD_ID && t.id !== AGENTS_THREAD_ID).at(-1);
     const lastBubble = active?.items.filter((i): i is Bubble => i.kind === 'bubble').at(-1);
     if (lastBubble) seatStates[lastBubble.seat] = 'thinking';
   } else {

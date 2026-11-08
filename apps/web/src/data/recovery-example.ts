@@ -68,7 +68,7 @@ export async function loadRecoveryExample(client: MockDbClient) {
   const coolWf = 'wf-example-cooling';
   const cool = workflow(coolWf);
   await publish(null, null, 'triage', 'code', '1 incident(s), 1 new: Cooling degradation on loop A');
-  await cool.claim('example-agent-1');
+  await cool.claim('example-agent-alpha-1');
   await cool.stage('diagnose', { incident_ids: [cooling.incident_id] });
   await publish(coolWf, cooling.incident_id, 'diagnose', 'nemotron', 'group the cooling symptoms on racks r2–r4 into one incident.', [call('get_incident_evidence', 'incident_ids: [example-cooling]', 'Example evidence: shared loop A and reduced pump capacity.', 'code')]);
 
@@ -90,7 +90,7 @@ export async function loadRecoveryExample(client: MockDbClient) {
   ]);
   await publish(coolWf, cooling.incident_id, 'safety', 'code', 'BLOCKED by deterministic safety: job-b:move:r6 (DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT). Illustrative; no safety engine ran.', [call('evaluate_safety', 'job-b:move:r6', 'denied: DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT')]);
   await cool.stage('execute', { command_keys: [ckpt.command_key, move.command_key], current_command_key: ckpt.command_key });
-  await publish(coolWf, cooling.incident_id, 'execute', 'code', 'job-a checkpoint running.', await start(ckpt, 'example-agent-1'));
+  await publish(coolWf, cooling.incident_id, 'execute', 'code', 'job-a checkpoint running.', await start(ckpt, 'example-agent-alpha-1'));
 
   // An independent XID 79 lands on the planned destination: the snapshot epoch moves on.
   await client.injectFault({ schema_version: V, run_id: run, fault_id: 'example-fault-xid', target_resource_id: 'gpu-r7-n1-0', kind: 'gpu_xid_79', start_sim_time_ms: t, duration_sim_ms: null, severity: 1, parameters: {}, seed_offset: 0 });
@@ -105,6 +105,13 @@ export async function loadRecoveryExample(client: MockDbClient) {
   const cap = command(coolWf, plan2, cooling.incident_id, 'example-cooling-2-cap-job-b', 'power_cap', 'job-b', 'job-b', { power_limit_w: 500 }, e1);
   await cool.stage('replan', { previous_plan_id: plan1, superseded: true, plan_id: plan2, attempt: 2, kept_keys: [ckpt.command_key], reason: 'destination gpu-r7-n1-0 reported XID 79 and the move was rejected' });
   await publish(coolWf, cooling.incident_id, 'replan', 'code', `replanning ${plan1}: destination gpu-r7-n1-0 reported XID 79.`);
+  // Scripted cross-agent exchange: the cooling owner checks a loop-B placement with the second worker before listing it.
+  await publish(coolWf, cooling.incident_id, 'replan', 'code', 'message to example-agent-beta-2: rack r8 is on loop B, your zone; any objection to listing it as a job-b fallback?', [
+    call('agent_message', 'from=example-agent-alpha-1 to=example-agent-beta-2 topic=cross_zone_move zone="loop B"', 'r8 sits on loop B; listing it as a fallback for job-b unless you object.'),
+  ]);
+  await publish(coolWf, cooling.incident_id, 'replan', 'code', 'message from example-agent-beta-2: no objection, r8 has thermal headroom.', [
+    call('agent_message', 'from=example-agent-beta-2 to=example-agent-alpha-1 topic=ack zone="loop B"', 'no objection: r8 has headroom and no incident of its own.'),
+  ]);
   await publish(coolWf, cooling.incident_id, 'replan', 'nemotron', 'keep the job-a checkpoint; cap job-b at 500 W instead of moving it (scripted choice).', [
     call('choose_options', '{"jobs":1}', 'job-b:cap', 'nemotron'),
     call('simulate_plan', 'job-b: power_cap', `lost 0 wu · delay 40 s ${EXAMPLE}`),
@@ -116,7 +123,7 @@ export async function loadRecoveryExample(client: MockDbClient) {
     ...option('job-b:keep', 'after job-a:ckpt→job-b: keep_running', 'lost 180 wu · delay 0 s'),
   ]);
   await cool.stage('execute', { command_keys: [cap.command_key], current_command_key: cap.command_key });
-  const capCalls = await start(cap, 'example-agent-1');
+  const capCalls = await start(cap, 'example-agent-alpha-1');
   await tick(); // the cap's due time (one step) passes; the 30 s checkpoint keeps running
   await cool.stage('execute', { current_command_key: ckpt.command_key });
   await publish(coolWf, cooling.incident_id, 'execute', 'code', 'job-b power_cap succeeded; waiting on the kept job-a checkpoint.', [...capCalls, call('get_action_status', cap.command_key, 'succeeded')]);
@@ -124,7 +131,7 @@ export async function loadRecoveryExample(client: MockDbClient) {
   // ------------------------------------------------------------------ workflow 2: XID 79 (cordon, resume, verified)
   const xidWf = 'wf-example-xid';
   const gpuWf = workflow(xidWf);
-  await gpuWf.claim('example-agent-1');
+  await gpuWf.claim('example-agent-alpha-1');
   await gpuWf.stage('diagnose', { incident_ids: [xid.incident_id] });
   await publish(xidWf, xid.incident_id, 'diagnose', 'nemotron', 'keep the XID incident separate from the cooling incident.', [call('list_placement_candidates', 'job_id: job-b', 'Example: exclude gpu-r7-n1-0 from the next placement.')]);
   const plan3 = 'plan-example-xid-1';
@@ -136,16 +143,19 @@ export async function loadRecoveryExample(client: MockDbClient) {
     ...option('gpu-r7-n1-0:escalate', 'gpu-r7-n1-0: escalate', 'lost 0 wu · delay 0 s'),
   ]);
   await gpuWf.stage('execute', { command_keys: [cordon.command_key], current_command_key: cordon.command_key });
-  const cordonCalls = await start(cordon, 'example-agent-1');
+  const cordonCalls = await start(cordon, 'example-agent-alpha-1');
   await tick();
   await publish(xidWf, xid.incident_id, 'execute', 'code', 'cordon_gpu gpu-r7-n1-0 succeeded.', [...cordonCalls, call('get_action_status', cordon.command_key, 'succeeded')]);
 
   // The first agent stops; a second one takes the lapsed lease and reconciles the ledger before continuing.
-  await gpuWf.lapse('example-agent-1');
-  await gpuWf.claim('example-agent-2');
+  await gpuWf.lapse('example-agent-alpha-1');
+  await gpuWf.claim('example-agent-beta-2');
   await publish(xidWf, xid.incident_id, 'execute', 'code', 'resumed after agent restart: cordon_gpu gpu-r7-n1-0 already succeeded (skipped), nothing left to run.', [call('get_action_status', cordon.command_key, 'succeeded → skip')]);
+  await publish(xidWf, xid.incident_id, 'execute', 'code', 'message to all: example-agent-beta-2 took over the XID workflow after example-agent-alpha-1 stopped heartbeating.', [
+    call('agent_message', 'from=example-agent-beta-2 to=all topic=takeover', 'took over wf-example-xid after the example-agent-alpha-1 lease lapsed; ledger reconciled, nothing re-run.'),
+  ]);
   const resumedAt = (await client.getObservedSnapshot()).clock.sim_time_ms;
-  await gpuWf.stage('verify', { resumed: { by_worker: 'example-agent-2', at_sim_time_ms: resumedAt, action: 'resumed_verify', previous_owner: 'example-agent-1' }, resume_count: 1 });
+  await gpuWf.stage('verify', { resumed: { by_worker: 'example-agent-beta-2', at_sim_time_ms: resumedAt, action: 'resumed_verify', previous_owner: 'example-agent-alpha-1' }, resume_count: 1 });
   const note = 'gpu-r7-n1-0 still cordoned (not repaired), no jobs on it';
   await client.verifyAction(cordon.command_key, { verified: true, note: `Example: ${note}`, gpu_id: 'gpu-r7-n1-0', availability: 'cordoned', repaired: false });
   await publish(xidWf, xid.incident_id, 'verify', 'code', 'verified: 1/1 checks passed.', [call('verify_action', cordon.command_key, 'verified')]);
