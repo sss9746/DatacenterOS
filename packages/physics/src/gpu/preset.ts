@@ -34,6 +34,9 @@ import {
   R6_INLET_OFFSET_C,
   RACK_NUMBERS,
   RACK_THERMAL_MASS_KJ_PER_C,
+  REAL_GPU_ID,
+  REAL_NODE_ID,
+  REAL_PROFILE,
   RESTART_DURATION_MS,
   RUN_START_SIM_MS,
   SHUTDOWN_C,
@@ -131,8 +134,10 @@ function resources(runId: string): ResourceSpec[] {
   out.push(res('fan-sensor-r3', 'fan_sensor', rackId(3), `fd-${rackId(3)}`, 'pico2w_microphone', {
     hardware_sensor_id: 'pico-fan-r3', hardware_backed: true,
   }));
-  // The real Brev GPU (F-NV2): a resource row only; its gpu_current row comes from nvidia-smi ingest. Never allocatable.
-  out.push(res('gpu-real-0', 'gpu', null, 'fd-brev', 'brev_real', { allocatable: false, hardware_backed: true }));
+  // The real Brev GPU (F-NV2, CONTRACTS §0.11 #4): gpu-real-0 on node-real-0, no rack, never allocatable. Resource rows
+  // only: gpu-real-0's gpu_current row comes from nvidia-smi ingest; node-real-0 has no node_current row.
+  out.push(res(REAL_NODE_ID, 'node', null, 'fd-brev', REAL_PROFILE, { allocatable: false, hardware_backed: true, gpu_count: 1 }));
+  out.push(res(REAL_GPU_ID, 'gpu', REAL_NODE_ID, 'fd-brev', REAL_PROFILE, { allocatable: false, hardware_backed: true }));
   return out;
 }
 
@@ -150,6 +155,7 @@ function dependencies(runId: string): DependencyEdge[] {
   }
   out.push(edge('loop-a', 'cooled_by', 'pump-a'), edge('loop-b', 'cooled_by', 'pump-b'));
   out.push(edge(rackId(3), 'monitored_by', 'fan-sensor-r3'));
+  out.push(edge(REAL_GPU_ID, 'hosted_on', REAL_NODE_ID));
   for (const j of DEMO_JOBS) if (j.checkpointed) out.push(edge(j.job_id, 'checkpoint_uses', CHECKPOINT_STORE_ID));
   return out;
 }
@@ -221,10 +227,12 @@ export function buildPreset(presetId: PresetId, runId: string, seed: number): Ph
     schema_version: V, run_id: runId, resource_id: nodeId(r), rack_id: rackId(r), availability: 'ready' as const,
     power_headroom_w: 0, thermal_headroom_c: 0, version: 0,
   }));
-  const coolingSeeds: CoolingCurrent[] = (['pump-a', 'pump-b'] as const).map((p) => {
-    const n = racksOnLoop(p === 'pump-a' ? 'loop-a' : 'loop-b').length;
+  // cooling_current: one row per pump AND one per loop (CONTRACTS §0.11 #9); deriveCooling fills the loop rows from
+  // their pump rows
+  const coolingSeeds: CoolingCurrent[] = (['pump-a', 'pump-b', 'loop-a', 'loop-b'] as const).map((id) => {
+    const n = racksOnLoop(id.endsWith('-a') ? 'loop-a' : 'loop-b').length;
     return {
-      schema_version: V, run_id: runId, resource_id: p, operating_state: 'normal' as const,
+      schema_version: V, run_id: runId, resource_id: id, operating_state: 'normal' as const,
       nominal_capacity_w: n * PUMP_CAPACITY_W_PER_RACK, pump_power_w: n * PUMP_POWER_W_PER_RACK,
       observed_capacity_estimate_w: n * PUMP_CAPACITY_W_PER_RACK, version: 0,
     };

@@ -16,7 +16,7 @@ import {
   type TelemetryEvent,
 } from '../../contracts/src/index.js';
 import {
-  CLOCKS_EVENT_HW_THERMAL,
+  CLOCKS_EVENT_SW_THERMAL,
   SLOWDOWN_C,
   buildPreset,
   dueFaults,
@@ -90,7 +90,7 @@ const at = (tr: Trace, seconds: number): Frame => {
   return f;
 };
 const last = (tr: Trace): Frame => tr.frames[tr.frames.length - 1]!;
-const throttled = (g: GpuCurrent | undefined) => g !== undefined && (g.clocks_event_reasons & CLOCKS_EVENT_HW_THERMAL) !== 0;
+const throttled = (g: GpuCurrent | undefined) => g !== undefined && (g.clocks_event_reasons & CLOCKS_EVENT_SW_THERMAL) !== 0;
 const everThrottled = (tr: Trace, ids: string[]) => tr.frames.some((f) => ids.some((id) => throttled(f.gpus.get(id))));
 const maxTemp = (tr: Trace, ids: string[]) =>
   Math.max(...tr.frames.flatMap((f) => ids.map((id) => f.gpus.get(id)!).filter((g) => g.availability !== 'unreachable').map((g) => g.temp_c)));

@@ -87,6 +87,35 @@ describe('evaluateSafety: demo headline checks', () => {
     expect(loops).toEqual([expect.objectContaining({ loop_id: 'loop-b', rise_c: 0 })]);
   });
 
+  it('loop rows in cooling_current (§0.11 #9) are never double-counted: r6 deny / r7+r8 allow numbers unchanged', () => {
+    const noLoops = clone(DEMO);
+    noLoops.cooling = noLoops.cooling.filter((c) => !c.resource_id.startsWith('loop-'));
+    expect(DEMO.cooling.map((c) => c.resource_id)).toEqual(['pump-a', 'pump-b', 'loop-a', 'loop-b']);
+    const r6 = { destination_node_ids: ['node-r6-n1'] };
+    const r78 = { destination_gpu_ids: R7_R8 };
+    for (const args of [r6, r78]) {
+      const c = move('job-a', args);
+      expect(check(DEMO, c)).toEqual(check(noLoops, c)); // the loop rows change nothing
+    }
+    // the headline numbers, pinned (they were the same before loop rows existed)
+    const deny = check(DEMO, move('job-a', r6));
+    expect(deny.decision).toBe('deny');
+    expect(deny.evidence.available_headroom_c).toBe(2.9);
+    expect(deny.evidence.cooling_loops).toEqual([expect.objectContaining({ loop_id: 'loop-b', heat_after_move_w: 7840, capacity_w: 40_000 })]);
+    const ok = check(DEMO, move('job-a', r78));
+    expect(ok.decision).toBe('allow');
+    expect(ok.evidence.available_headroom_c).toBe(14.7);
+    expect(ok.evidence.cooling_loops).toEqual([expect.objectContaining({ loop_id: 'loop-b', heat_after_move_w: 17_920, capacity_w: 40_000 })]);
+    // capacity comes from the pump row alone: a failed pump-b with a stale 'normal' loop-b row still gives 0 W
+    const failed = clone(DEMO);
+    for (const g of failed.gpus) if (/^gpu-r[15678]-/.test(g.resource_id)) g.temp_c += 5;
+    Object.assign(failed.cooling.find((c) => c.resource_id === 'pump-b')!, { operating_state: 'failed', pump_power_w: 0, observed_capacity_estimate_w: 0 });
+    expect(failed.cooling.find((c) => c.resource_id === 'loop-b')!.operating_state).toBe('normal');
+    const d = check(failed, move('job-a', r78));
+    expect(d.violations).toEqual(['DEST_RACK_THERMAL_HEADROOM_INSUFFICIENT']);
+    expect((d.evidence.cooling_loops as { capacity_w: number }[])[0]!.capacity_w).toBe(0);
+  });
+
   it('works on toObserved(buildPreset(...)) the same way as on the fixture', () => {
     const obs = toObserved(demoWorld());
     expect(check(obs, move('job-a', { destination_gpu_ids: R7_R8 }, {}, obs)).decision).toBe('allow');
@@ -271,6 +300,17 @@ describe('evaluateSafety: one test per §0.7 reason code', () => {
     const d = check(DEMO, move('job-b', { destination_gpu_ids: [...gpusOn(7).slice(0, 7), 'gpu-real-0'] }));
     expect(d.violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
     expect(check(DEMO, cmd('cordon_gpu', 'gpu-real-0')).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
+  });
+
+  it('REAL_GPU_NOT_ALLOCATABLE: node-real-0 (§0.11 #4) as a destination node or a power_cap target', () => {
+    const d = check(DEMO, move('job-b', { destination_node_ids: ['node-real-0'] }));
+    expect(d.decision).toBe('deny');
+    fires(d, 'REAL_GPU_NOT_ALLOCATABLE');
+    expect(d.violations).not.toContain('DEST_NOT_COMPATIBLE');
+    // even when the other node alone has enough free GPUs
+    expect(check(DEMO, move('job-b', { destination_node_ids: ['node-r7-n1', 'node-real-0'] })).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
+    expect(check(DEMO, cmd('power_cap', 'node-real-0')).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
+    expect(check(DEMO, cmd('power_cap', 'gpu-real-0')).violations).toEqual(['REAL_GPU_NOT_ALLOCATABLE']);
   });
 
   it('covers every frozen code exactly once in SAFETY_REASON_CODES', () => {

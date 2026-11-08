@@ -116,6 +116,7 @@ describe('migrate_restart', () => {
   it('rejects unhealthy, cordoned, real, incompatible or wrongly sized destinations, all atomically', () => {
     const cases: [string, Record<string, unknown>, string][] = [
       ['real gpu', { destination_gpu_ids: [...gpusOn(7), ...gpusOn(8).slice(0, 7), 'gpu-real-0'] }, 'REAL_GPU_NOT_ALLOCATABLE'],
+      ['real node', { destination_node_ids: ['node-r7-n1', 'node-r8-n1', 'node-real-0'] }, 'REAL_GPU_NOT_ALLOCATABLE'],
       ['xid gpu', { destination_gpu_ids: [...gpusOn(7), ...gpusOn(8).slice(1), 'gpu-r1-n1-0'] }, 'DEST_GPU_UNHEALTHY'],
       ['too few', { destination_gpu_ids: gpusOn(7) }, 'DEST_GPU_COUNT_INSUFFICIENT'],
       ['no free nodes', { destination_node_ids: ['node-r4-n1', 'node-r6-n1'] }, 'DEST_GPU_COUNT_INSUFFICIENT'],
@@ -241,13 +242,17 @@ describe('cordon_gpu', () => {
     expect([...at(results, 11_000).completed_command_keys].sort()).toEqual([c79.command_key, c48.command_key].sort());
   });
 
-  it('rejects the real GPU and unknown targets', () => {
+  it('rejects the real GPU / node and unknown targets', () => {
     const real = cmd('cordon_gpu', 'gpu-real-0');
     const none = cmd('cordon_gpu', 'gpu-r9-n1-0');
-    const { results } = run(11_000, [[10_000, real], [10_000, none]]);
+    const realNode = cmd('cordon_gpu', 'node-real-0');
+    const capNode = cmd('power_cap', 'node-real-0', { arguments: { power_limit_w: 500 } });
+    const { results } = run(11_000, [[10_000, real], [10_000, none], [10_000, realNode], [10_000, capNode]]);
     const w = at(results, 10_000).world_after;
     expect(commandOutcome(w, real.command_key)?.reason_code).toBe('REAL_GPU_NOT_ALLOCATABLE');
     expect(commandOutcome(w, none.command_key)?.reason_code).toBe('TARGET_NOT_FOUND');
+    expect(commandOutcome(w, realNode.command_key)?.reason_code).toBe('REAL_GPU_NOT_ALLOCATABLE');
+    expect(commandOutcome(w, capNode.command_key)?.reason_code).toBe('REAL_GPU_NOT_ALLOCATABLE');
   });
 });
 

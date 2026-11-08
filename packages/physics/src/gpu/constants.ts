@@ -10,7 +10,7 @@ export const GPU_MODEL_VERSION = 'gpu_v1' as const;
 // ---- §0.4 simulated defaults -----------------------------------------------------------------
 /** Simulated: GPU temp = rack inlet + 35 °C × load (load = power / 700 W, so ≈70 °C healthy at 35 °C inlet). */
 export const GPU_TEMP_RISE_C_PER_LOAD = 35;
-/** Simulated slowdown (throttle) temperature, °C. At or above it: SM clock −30%, HW thermal bit set. */
+/** Simulated slowdown (throttle) temperature, °C. At or above it: SM clock −30%, SW thermal bit (0x20) set. */
 export const SLOWDOWN_C = 85;
 /** Simulated shutdown temperature, °C. At or above it the GPU becomes unavailable; a non-elastic job fails. */
 export const SHUTDOWN_C = 92;
@@ -62,9 +62,12 @@ export const WORK_RATE_PER_GPU_PER_SIM_S = 1;
 export const RUN_START_SIM_MS = 600_000;
 /** Simulated unix-ms of sim t=0: observed_unix_ms = this + sim_time_ms (demo speed 1×). */
 export const RUN_EPOCH_UNIX_MS = 1_794_091_200_000;
-/** DCGM/NVML clocks_event_reasons HW thermal slowdown bit. */
-export const CLOCKS_EVENT_HW_THERMAL = 0x40;
-/** DCGM/NVML clocks_event_reasons SW power cap bit. */
+/**
+ * DCGM/NVML clocks_event_reasons SW thermal slowdown bit (CONTRACTS §0.11 #5): `clocks_event_reasons & 0x20` means the
+ * GPU is throttling because of temperature. (0x40, HW thermal slowdown, is never set by the simulator.)
+ */
+export const CLOCKS_EVENT_SW_THERMAL = 0x20;
+/** DCGM/NVML clocks_event_reasons SW power cap bit (CONTRACTS §0.11 #5), set while a power cap limits the GPU. */
 export const CLOCKS_EVENT_SW_POWER_CAP = 0x4;
 /** Simulated extra GPU temperature for a `gpu_thermal_load` fault at severity 1, °C (scaled by severity). */
 export const THERMAL_LOAD_FAULT_MAX_C = 20;
@@ -89,6 +92,14 @@ export const LOOP_A_RACKS: readonly number[] = [2, 3, 4];
 export const CHECKPOINT_STORE_ID = 'ckpt-store-1';
 export const POWER_DOMAIN_ID = 'power-main';
 export const GPU_PROFILE = 'demo_gpu';
+/**
+ * The real Brev GPU (F-NV2, CONTRACTS §0.3 / §0.11 #4): gpu-real-0 on node node-real-0, both profile brev_real, no
+ * rack (parent_id null), never allocatable. They are resources only: their gpu_current row comes from nvidia-smi ingest
+ * and node-real-0 has no node_current row (NodeCurrent.rack_id is required). Physics never derives, places or heats them.
+ */
+export const REAL_GPU_ID = 'gpu-real-0';
+export const REAL_NODE_ID = 'node-real-0';
+export const REAL_PROFILE = 'brev_real';
 
 export const rackId = (r: number): string => `rack-r${r}`;
 export const nodeId = (r: number): string => `node-r${r}-n1`;

@@ -268,6 +268,23 @@ describe('reactivePolicy', () => {
     expect(cmds[1]).toMatchObject({ operation: 'escalate', job_id: 'job-a', arguments: { reason: 'no_destination' } });
   });
 
+  it('never places a job on node-real-0 / gpu-real-0 (§0.11 #4), even if a snapshot lists them as ready and compatible', () => {
+    const obs = structuredClone(toObserved(advance(SC04, 60_000)));
+    // adversarial: only r1 + r3 + the real node are compatible; r1 has 8 free GPUs, r3 7, the real node 1 → exactly 16
+    obs.job_specs.find((s) => s.job_id === 'job-a')!.compatible_node_ids = ['node-real-0', 'node-r1-n1', 'node-r3-n1'];
+    obs.gpus.push({ ...obs.gpus.find((g) => g.resource_id === 'gpu-r1-n1-0')!, resource_id: 'gpu-real-0', node_id: 'node-real-0' });
+    obs.nodes.push({ ...obs.nodes.find((n) => n.resource_id === 'node-r1-n1')!, resource_id: 'node-real-0' });
+    for (const p of [reactivePolicy, thresholdPolicy]) {
+      const cmds = p(obs);
+      expectValid(cmds);
+      for (const c of cmds) {
+        expect(dest(c)).not.toContain('gpu-real-0');
+        expect(JSON.stringify(c.arguments)).not.toContain('node-real-0');
+      }
+      expect(cmds.map((c) => c.operation)).toEqual(['cordon_gpu', 'escalate']); // 15 simulated GPUs < 16: no move
+    }
+  });
+
   it('an XID on the real GPU escalates instead of cordoning; already-cordoned GPUs are not re-cordoned', () => {
     const obs = structuredClone(DEMO);
     obs.gpus.push({ ...obs.gpus[0]!, resource_id: 'gpu-real-0', node_id: 'node-r1-n1', last_xid_code: 79, availability: 'unreachable' });

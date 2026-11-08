@@ -23,6 +23,7 @@ import {
   faultConditions,
   gpuAvailability,
   hiddenOf,
+  isRealResource,
   specOf,
   type CommandOutcome,
   type HiddenState,
@@ -95,6 +96,7 @@ function stringList(v: unknown): string[] | null {
 function targetGpus(world: PhysicsWorld, topo: Topology, c: ActionCommand): string[] {
   if (c.job_id) return jobOf(world, c).allocated_gpu_ids;
   const t = c.target_resource_id;
+  if (isRealResource(topo.resources.get(t))) return reject('REAL_GPU_NOT_ALLOCATABLE'); // gpu-real-0 / node-real-0
   if (world.observable.gpus.some((g) => g.resource_id === t)) return [t];
   if (topo.nodeGpus.has(t)) return topo.nodeGpus.get(t)!;
   if (topo.resources.get(t)?.kind === 'gpu') return reject('REAL_GPU_NOT_ALLOCATABLE');
@@ -116,6 +118,7 @@ function destinationGpus(world: PhysicsWorld, h: HiddenState, topo: Topology, c:
   if (explicit) return explicit;
   const nodes = stringList(c.arguments.destination_node_ids);
   if (!nodes) return reject('DEST_GPU_COUNT_INSUFFICIENT');
+  if (nodes.some((n) => isRealResource(topo.resources.get(n)))) return reject('REAL_GPU_NOT_ALLOCATABLE'); // node-real-0
   const taken = new Set(world.observable.allocations.filter((a) => a.job_id !== job.job_id).map((a) => a.gpu_id));
   const free = nodes.flatMap((n) => topo.nodeGpus.get(n) ?? [])
     .filter((g) => !taken.has(g) && gpuAvailability(g, h) === 'ready');
@@ -204,6 +207,7 @@ function startCommand(world: PhysicsWorld, h: HiddenState, topo: Topology, ctx: 
     }
     case 'cordon_gpu':
     case 'uncordon_gpu':
+      if (isRealResource(topo.resources.get(c.target_resource_id))) reject('REAL_GPU_NOT_ALLOCATABLE');
       if (!world.observable.gpus.some((g) => g.resource_id === c.target_resource_id)) {
         reject(topo.resources.get(c.target_resource_id)?.kind === 'gpu' ? 'REAL_GPU_NOT_ALLOCATABLE' : 'TARGET_NOT_FOUND');
       }

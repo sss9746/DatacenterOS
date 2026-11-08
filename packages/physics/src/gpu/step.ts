@@ -10,7 +10,7 @@
 //   3. Commands (actions.ts): in-flight commands due by t1 complete (revalidated after the faults), then newly
 //      requested commands start. A command never completes on the tick it starts.
 //   4. Derive the observed rows at t1: GPU temp = rack inlet + 35 °C × load; ≥ 85 °C throttles (SM clock −30%,
-//      clocks_event_reasons HW thermal bit 0x40); ≥ 92 °C latches a thermal shutdown (GPU unavailable, job fails).
+//      clocks_event_reasons SW thermal bit 0x20, CONTRACTS §0.11 #5); ≥ 92 °C latches a thermal shutdown (GPU unavailable, job fails).
 //   5. Versions and material_change from observable, safety-relevant fields only; material_change bumps
 //      decision_epoch by one.
 //   6. Telemetry (≤ 1 sample per (resource, metric)) and signals, then the clock advances.
@@ -35,6 +35,7 @@ import {
   gpuLoad,
   hiddenOf,
   isShutdownTemp,
+  isSimulatedGpu,
   jobMaterialKey,
   loopCapacityW,
   loopHeatW,
@@ -91,6 +92,7 @@ export function step(input: SimulationTickInput): PhysicsTickResult {
   const jobs0 = gpuJobMap(obs.job_states);
   const phys0 = new Map<string, GpuPhysics>();
   for (const g of obs.gpus) {
+    if (!isSimulatedGpu(g.resource_id, topo)) continue; // the real Brev GPU, if a DB snapshot carries its row
     const f = h.gpu_failure[g.resource_id];
     if (f && UNREACHABLE_FAILURES.has(f)) continue;
     phys0.set(g.resource_id, gpuPhysics(g, gpuLoad(g.resource_id, jobs0), h, topo, cond0));

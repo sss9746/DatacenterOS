@@ -147,7 +147,8 @@ export function estimateWorld(obs: ObservedSnapshot, seed = 0): PhysicsWorld {
   const now = observable.clock.sim_time_ms;
   const topo = buildTopology(observable.resources, observable.gpus);
 
-  // pumps: observed capacity estimate becomes the capacity
+  // pumps: observed capacity estimate becomes the capacity (pump rows only; a loop row mirrors its pump and is never
+  // added: CONTRACTS §0.11 #9)
   const coolingById = new Map(observable.cooling.map((c) => [c.resource_id, c]));
   for (const r of observable.resources) {
     if (r.kind !== 'cooling_pump') continue;
@@ -260,7 +261,9 @@ function describeEstimate(obs: ObservedSnapshot, world: PhysicsWorld, horizonS: 
     `Estimated world built from the ObservedSnapshot at sim t=${obs.clock.sim_time_ms} ms; no private fault truth used.`,
     'No new faults during the horizon; observed degradation persists.',
   ];
+  const kindOf = new Map(obs.resources.map((r) => [r.resource_id, r.kind]));
   for (const c of obs.cooling) {
+    if (kindOf.get(c.resource_id) !== 'cooling_pump') continue; // loop rows mirror their pump (CONTRACTS §0.11 #9)
     if (c.observed_capacity_estimate_w !== null && c.observed_capacity_estimate_w !== c.nominal_capacity_w) {
       out.push(`${c.resource_id} stays at its observed capacity estimate ${c.observed_capacity_estimate_w} W (nominal ${c.nominal_capacity_w} W).`);
     }

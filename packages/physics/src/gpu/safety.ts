@@ -43,8 +43,9 @@
 //   - Loop coolant now ≈ max over its racks of (inferred inlet − inlet_offset_c), never below the supply setpoint.
 //   - Heat into the loop AFTER the move = Σ projected GPU power: destination GPUs at full load
 //     (min(700 W, power_limit_w)), the job's old GPUs idle (70 W; 0 W if unreachable), every other GPU at its
-//     observed power_w. Capacity = Σ the loop's pumps' observed_capacity_estimate_w (0 if failed / maintenance;
-//     nominal if the estimate is missing and the pump is normal, else 0).
+//     observed power_w. Capacity = Σ the loop's PUMP rows' observed_capacity_estimate_w (0 if failed / maintenance;
+//     nominal if the estimate is missing and the pump is normal, else 0). The loop's own cooling_current row
+//     (CONTRACTS §0.11 #9) mirrors its pump and is never added, so capacity is not double-counted.
 //   - Same Euler step as step(): loop(+120 s) = max(supply, now + 120 × (heat − capacity) / (1000 × Σ rack mass kJ/°C)).
 //     The model is linear, so the worst point of the window is max(now, +120 s): rise = max(0, loop(+120) − now).
 //   - Projected rack GPU temps: destination GPUs = inlet + rise + 35 × min(700, limit)/700; the job's old GPUs on the
@@ -60,7 +61,7 @@
 // the thermal step mirrors step.ts. buildTopology (world.ts) is imported: it only indexes observable resources.
 import type { ActionCommand, CoolingCurrent, GpuCurrent, JobSpec, JobState, ObservedSnapshot, SafetyDecision } from '@dcos/contracts';
 import { GPU_TEMP_RISE_C_PER_LOAD, IDLE_LOAD, LOOP_SUPPLY_C, POWER_LIMIT_W, SLOWDOWN_C, WIRE_SCHEMA_VERSION, round1 } from './constants.js';
-import { buildTopology, type Topology } from './world.js';
+import { buildTopology, isRealResource, type Topology } from './world.js';
 
 // ---- safety constants (all SIMULATED, configurable) -----------------------------------------------
 
@@ -155,6 +156,12 @@ function pumpCapacityW(c: CoolingCurrent | undefined): number {
   return c.operating_state === 'normal' ? c.nominal_capacity_w : 0;
 }
 
+/** The cooling_current row of a pump (resource kind cooling_pump), never a loop row. */
+function pumpRow(e: Eval, pumpId: string): CoolingCurrent | undefined {
+  if (e.topo.resources.get(pumpId)?.kind !== 'cooling_pump') return undefined;
+  return e.obs.cooling.find((c) => c.resource_id === pumpId);
+}
+
 function storeAccessible(e: Eval, storeId: string): boolean {
   const res = e.topo.resources.get(storeId);
   if (!res || res.kind !== 'checkpoint_store' || !res.enabled) return false;
@@ -243,10 +250,17 @@ function resolveJob(e: Eval): { job: JobState; spec: JobSpec } | null {
   return { job, spec };
 }
 
-/** Is the target a GPU resource that is not an allocatable simulated GPU (e.g. gpu-real-0)? */
+/**
+ * Is the id the real Brev GPU / node (CONTRACTS §0.11 #4: gpu-real-0 on node-real-0, brev_real, never allocatable), or
+ * any GPU / node resource that is not a simulated, allocatable one (a GPU with no gpu_current row, a node with no
+ * node_current row)?
+ */
 function isRealGpu(e: Eval, id: string): boolean {
   const res = e.topo.resources.get(id);
-  return res?.kind === 'gpu' && (!e.gpu.has(id) || res.config.allocatable === false);
+  if (!res) return false;
+  if (res.kind === 'gpu') return !e.gpu.has(id) || isRealResource(res);
+  if (res.kind === 'node') return isRealResource(res) || !e.obs.nodes.some((n) => n.resource_id === id);
+  return false;
 }
 
 function staleIds(e: Eval, gpus: GpuCurrent[]): string[] {
@@ -376,7 +390,8 @@ function resolveDestinations(e: Eval, job: JobState, need: number): string[] {
   e.evidence.destination_mode = 'destination_node_ids';
   for (const n of uniq(nodes)) {
     see(e, n);
-    if (!e.topo.nodeGpus.has(n)) add(e, 'DEST_NOT_COMPATIBLE');
+    if (isRealGpu(e, n)) add(e, 'REAL_GPU_NOT_ALLOCATABLE'); // node-real-0
+    else if (!e.topo.nodeGpus.has(n)) add(e, 'DEST_NOT_COMPATIBLE');
   }
   const onNodes = uniq(nodes.flatMap((n) => e.topo.nodeGpus.get(n) ?? []));
   const isFree = (g: string) => {
@@ -420,7 +435,8 @@ function projectLoop(e: Eval, loop: string, dest: Set<string>, oldGpus: Set<stri
     .filter((g) => rackSet.has(t.gpuRack.get(g.resource_id) ?? ''))
     .reduce((s, g) => s + projectedPowerW(g, dest, oldGpus), 0);
   const pumps = t.loopPumps.get(loop) ?? [];
-  const capacity = pumps.reduce((s, p) => s + pumpCapacityW(e.obs.cooling.find((c) => c.resource_id === p)), 0);
+  // pump rows only: the loop's own cooling_current row (CONTRACTS §0.11 #9) mirrors its pump and must not be added
+  const capacity = pumps.reduce((s, p) => s + pumpCapacityW(pumpRow(e, p)), 0);
   const massKj = racks.reduce((s, r) => s + (t.rackMassKjPerC.get(r) ?? 0), 0);
   const after = massKj > 0 ? Math.max(supply, now + (SAFETY_LOOKAHEAD_S * (heat - capacity)) / 1000 / massKj) : now;
   see(e, loop, ...pumps);

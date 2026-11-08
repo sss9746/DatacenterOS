@@ -49,7 +49,7 @@
 //   same keys again, and only a completed move lets a still-hot job start a new cycle. restarting → nothing.
 //   Someone else's checkpoint in flight → nothing (never interfere).
 import type { ActionCommand, Checkpoint, GpuCurrent, JobSpec, JobState, ObservedSnapshot, ResourceSpec } from '@dcos/contracts';
-import { WIRE_SCHEMA_VERSION } from './constants.js';
+import { REAL_PROFILE, WIRE_SCHEMA_VERSION } from './constants.js';
 import { evaluateSafety } from './safety.js';
 
 /** Simulated, configurable: thresholdPolicy's preventive trigger, °C (2 °C under the 85 °C simulated slowdown). */
@@ -108,15 +108,23 @@ function index(obs: ObservedSnapshot): Index {
 
 const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Not the real Brev GPU / node (CONTRACTS §0.11 #4: profile brev_real, never allocatable) and enabled. */
+const placeable = (r: ResourceSpec | undefined): boolean =>
+  !!r && r.enabled && r.profile !== REAL_PROFILE && r.config.allocatable !== false;
+
 /** A simulated GPU a job may be placed on (the real Brev GPU and disabled resources never are). */
 function allocatable(ix: Index, g: GpuCurrent): boolean {
   const r = ix.res.get(g.resource_id);
-  return !!r && r.kind === 'gpu' && r.enabled && r.config.allocatable !== false;
+  return !!r && r.kind === 'gpu' && placeable(r);
 }
 
-/** Free, ready, allocatable GPUs of a node for this job, in snapshot order. */
+/**
+ * Free, ready, allocatable GPUs of a node for this job, in snapshot order. The node must be a simulated node with a
+ * node_current row reading ready: node-real-0 has none and is never placeable, even if a job spec listed it.
+ */
 function freeGpus(ix: Index, node: string, spec: JobSpec): string[] {
-  if ((ix.nodeAvail.get(node) ?? 'ready') !== 'ready') return [];
+  const res = ix.res.get(node);
+  if (!res || res.kind !== 'node' || !placeable(res) || ix.nodeAvail.get(node) !== 'ready') return [];
   return (ix.nodeGpus.get(node) ?? [])
     .filter((g) => g.availability === 'ready' && allocatable(ix, g) && ix.res.get(g.resource_id)!.profile === spec.gpu_profile)
     .filter((g) => {

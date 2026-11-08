@@ -29,7 +29,8 @@ describe('Gate 1 physics: pump-a degradation at start + 10 s (610 000)', () => {
     onTick: (r) => {
       const s = r.world_after.observable;
       for (const g of s.gpus) {
-        if ((g.clocks_event_reasons & 0x40) !== 0 && !firstThrottleMs.has(g.resource_id)) firstThrottleMs.set(g.resource_id, s.clock.sim_time_ms);
+        expect(g.clocks_event_reasons & 0x40).toBe(0); // HW thermal is never simulated (§0.11 #5)
+        if ((g.clocks_event_reasons & 0x20) !== 0 && !firstThrottleMs.has(g.resource_id)) firstThrottleMs.set(g.resource_id, s.clock.sim_time_ms);
       }
       for (const id of gpusOn(1, 5, 6, 7, 8)) maxCoolRackTemp = Math.max(maxCoolRackTemp, gpu(s, id).temp_c);
       if (s.clock.sim_time_ms % 50_000 === 0 || r.material_change) {
@@ -52,10 +53,10 @@ describe('Gate 1 physics: pump-a degradation at start + 10 s (610 000)', () => {
     expect(maxCoolRackTemp).toBeLessThan(85);
   });
 
-  it('a throttled GPU runs at 1980 × 0.7 MHz and its job loses 30% of that GPU`s rate', () => {
+  it('a throttled GPU runs at 1980 × 0.7 MHz with the SW thermal bit 0x20 (§0.11 #5)', () => {
     const t = firstThrottleMs.get('gpu-r4-n1-0')!;
     const r = results.find((x) => x.world_after.observable.clock.sim_time_ms === t)!;
-    expect(gpu(r.world_after.observable, 'gpu-r4-n1-0')).toMatchObject({ sm_clock_mhz: 1386, clocks_event_reasons: 0x40 });
+    expect(gpu(r.world_after.observable, 'gpu-r4-n1-0')).toMatchObject({ sm_clock_mhz: 1386, clocks_event_reasons: 0x20 });
     expect(r.material_change).toBe(true);
   });
 

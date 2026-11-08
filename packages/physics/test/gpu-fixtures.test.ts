@@ -71,7 +71,7 @@ describe('GPU fixtures: §0.3 IDs and topology', () => {
       for (const id of [`rack-r${r}`, `node-r${r}-n1`, `link-r${r}`]) expect(ids.has(id), id).toBe(true);
     }
     for (const id of ALL_GPU_IDS) expect(kindOf.get(id), id).toBe('gpu');
-    for (const id of ['pump-a', 'pump-b', 'loop-a', 'loop-b', 'power-main', 'ckpt-store-1', 'fan-sensor-r3', 'gpu-real-0']) {
+    for (const id of ['pump-a', 'pump-b', 'loop-a', 'loop-b', 'power-main', 'ckpt-store-1', 'fan-sensor-r3', 'gpu-real-0', 'node-real-0']) {
       expect(ids.has(id), id).toBe(true);
     }
     expect(demo.run_id).toBe('run-demo-1');
@@ -84,6 +84,40 @@ describe('GPU fixtures: §0.3 IDs and topology', () => {
     expect(real?.profile).toBe('brev_real');
     expect(real?.config.allocatable).toBe(false);
     expect(demo.allocations.some((a) => a.gpu_id === 'gpu-real-0')).toBe(false);
+  });
+
+  it('gpu-real-0 sits on node-real-0 (§0.11 #4): node kind, brev_real, no rack, never allocatable, no current rows', () => {
+    const node = demo.resources.find((r) => r.resource_id === 'node-real-0')!;
+    expect(node).toMatchObject({ kind: 'node', profile: 'brev_real', parent_id: null });
+    expect(node.config.allocatable).toBe(false);
+    expect(demo.resources.find((r) => r.resource_id === 'gpu-real-0')).toMatchObject({ kind: 'gpu', parent_id: 'node-real-0' });
+    expect(demo.dependencies).toContainEqual(expect.objectContaining({
+      consumer_id: 'gpu-real-0', relation: 'hosted_on', provider_id: 'node-real-0',
+    }));
+    // node-real-0 is on no rack: no hosted_on edge from it
+    expect(demo.dependencies.some((e) => e.consumer_id === 'node-real-0')).toBe(false);
+    // their rows come from nvidia-smi ingest, never from physics (NodeCurrent.rack_id is required)
+    for (const s of [demo, degraded, tick.world_after.observable]) {
+      expect(s.gpus.some((g) => g.resource_id === 'gpu-real-0' || g.node_id === 'node-real-0')).toBe(false);
+      expect(s.nodes.some((n) => n.resource_id === 'node-real-0')).toBe(false);
+    }
+    for (const spec of demo.job_specs) expect(spec.compatible_node_ids).not.toContain('node-real-0');
+  });
+
+  it('cooling_current has one row per pump AND one per loop (§0.11 #9); a loop row mirrors its pump', () => {
+    for (const s of [demo, degraded]) {
+      expect(s.cooling.map((c) => c.resource_id)).toEqual(['pump-a', 'pump-b', 'loop-a', 'loop-b']);
+      for (const [loop, pump] of [['loop-a', 'pump-a'], ['loop-b', 'pump-b']] as const) {
+        const l = s.cooling.find((c) => c.resource_id === loop)!;
+        const p = s.cooling.find((c) => c.resource_id === pump)!;
+        expect({ ...l, resource_id: pump }).toEqual(p);
+      }
+    }
+    expect(degraded.cooling.find((c) => c.resource_id === 'loop-a')).toMatchObject({
+      operating_state: 'degraded', nominal_capacity_w: 24_000, pump_power_w: 600, observed_capacity_estimate_w: 9600, version: 1,
+    });
+    // telemetry: pump.power_w only for the two pumps
+    expect(tick.telemetry.filter((e) => e.metric === 'pump.power_w').map((e) => e.resource_id)).toEqual(['pump-a', 'pump-b']);
   });
 
   it('dependency edges go consumer → provider with the §0.3 cooling split', () => {

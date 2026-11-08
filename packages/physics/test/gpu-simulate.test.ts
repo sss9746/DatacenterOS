@@ -228,6 +228,24 @@ describe('simulatePlan', () => {
     expect(simulatePlan(degraded, { commands: [ck, noDep] }).violations).toEqual(['JOB_STATE_INVALID']);
   });
 
+  it('loop rows (§0.11 #9) are not double-counted, and a gpu-real-0 row from nvidia-smi is passed through untouched', () => {
+    const noLoops: ObservedSnapshot = JSON.parse(JSON.stringify(degraded));
+    noLoops.cooling = noLoops.cooling.filter((c) => !c.resource_id.startsWith('loop-'));
+    expect(degraded.cooling.find((c) => c.resource_id === 'loop-a')!.observed_capacity_estimate_w).toBe(9600);
+    for (const commands of [[], jobAMove()]) {
+      expect(simulatePlan(degraded, { commands })).toEqual(simulatePlan(noLoops, { commands }));
+    }
+    expect(estimateWorld(degraded).observable.resources.find((r) => r.resource_id === 'pump-a')!.config.nominal_capacity_w).toBe(9600);
+    // the DB snapshot may carry the real GPU's ingested row: it never gets simulated heat, telemetry or a placement
+    const withReal: ObservedSnapshot = JSON.parse(JSON.stringify(degraded));
+    const real = { ...withReal.gpus[0]!, resource_id: 'gpu-real-0', node_id: 'node-real-0', temp_c: 41.5, power_w: 120, last_seen_sim_ms: withReal.clock.sim_time_ms };
+    withReal.gpus.push(real);
+    const r = step(tickInput(estimateWorld(withReal)));
+    expect(r.world_after.observable.gpus.find((g) => g.resource_id === 'gpu-real-0')).toEqual(real);
+    expect(r.telemetry.some((e) => e.resource_id === 'gpu-real-0')).toBe(false);
+    expect(simulatePlan(withReal, { commands: jobAMove() })).toEqual(simulatePlan(degraded, { commands: jobAMove() }));
+  });
+
   it('honours horizon_s and reports unfinished commands', () => {
     const short = simulatePlan(degraded, { commands: jobAMove() }, { horizon_s: 60 });
     // job-a runs on tick 1 (the checkpoint starts at its end), then makes no progress while checkpointing / restarting
