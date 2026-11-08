@@ -118,7 +118,7 @@ export class FakeDb implements DbPort {
   private readonly defaultOpDurationMs: number;
   private readonly claimLeaseMs: number;
   private readonly applyCordon: boolean;
-  /** Jobs whose migrate_restart completed: tick() accrues progress for them while running. */
+  /** Jobs whose migrate_restart / power_cap / keep_running completed: tick() accrues progress for them while running. */
   private readonly progressingJobs = new Set<string>();
   private readonly nowFn: () => number;
   private wallMs = 1_794_091_200_000;
@@ -329,9 +329,40 @@ export class FakeDb implements DbPort {
       result.destination_gpu_ids = (cmd.arguments.destination_gpu_ids as string[] | undefined) ?? [];
       this.progressingJobs.add(job.job_id);
     }
+    if (cmd.operation === 'power_cap') this.applyPowerCap(cmd, job);
+    if (cmd.operation === 'pause_job' && job) {
+      // physics: the job is paused (no checkpoint is written, durable work untouched); it stops accruing progress
+      job.status = 'paused';
+      this.progressingJobs.delete(job.job_id);
+      this.bumpJob(job);
+    }
+    if (cmd.operation === 'keep_running' && job) {
+      if (job.status === 'paused') job.status = 'running'; // physics: keep_running on a paused job resumes it
+      this.progressingJobs.add(job.job_id);
+    }
     if (this.applyCordon && cmd.operation === 'cordon_gpu') this.setGpuAvailability(cmd.target_resource_id, 'cordoned');
     if (this.applyCordon && cmd.operation === 'uncordon_gpu') this.setGpuAvailability(cmd.target_resource_id, 'ready');
     this.transition(rec, 'succeeded', { result });
+  }
+
+  /**
+   * What physics does when a power_cap completes (world.ts): the limit lands on the targeted GPUs (the job's, else the
+   * target GPU / node), modeled draw is clamped to it, the DCGM SW power-cap flag (0x04) is set and the SM clock drops by
+   * the cap factor (0.85). The capped job keeps running and keeps accruing progress. Versions are not bumped.
+   */
+  private applyPowerCap(cmd: ActionCommand, job: ObservedSnapshot['job_states'][number] | undefined): void {
+    const limit = typeof cmd.arguments.power_limit_w === 'number' ? cmd.arguments.power_limit_w : 500;
+    const t = cmd.target_resource_id;
+    const ids = new Set(job ? job.allocated_gpu_ids : this.snap.gpus.some((g) => g.resource_id === t) ? [t] : this.snap.gpus.filter((g) => g.node_id === t).map((g) => g.resource_id));
+    for (const g of this.snap.gpus) {
+      if (!ids.has(g.resource_id)) continue;
+      const wasCapped = (g.clocks_event_reasons & 0x04) !== 0;
+      g.power_limit_w = limit;
+      if (g.power_w > limit) g.power_w = limit;
+      g.clocks_event_reasons |= 0x04;
+      if (!wasCapped) g.sm_clock_mhz = Math.round(g.sm_clock_mhz * 0.85);
+    }
+    if (job) this.progressingJobs.add(job.job_id);
   }
 
   private durationFor(cmd: ActionCommand): number {
@@ -543,7 +574,9 @@ export class FakeDb implements DbPort {
     if (rec.status.status !== 'succeeded') {
       throw new DbError('INVALID_TRANSITION', `cannot verify ${commandKey} in ${rec.status.status}`);
     }
-    return this.transition(rec, 'succeeded', { result: { ...rec.status.result, verified: true, verification: clone(evidence) } });
+    // Like the real verify_action reducer (apps/db actions.ts): the evidence is attached under `result.verification`;
+    // whether the action is actually verified is the verifier's `evidence.verified`, never implied by the call itself.
+    return this.transition(rec, 'succeeded', { result: { ...rec.status.result, verification: clone(evidence) } });
   }
 
   async claimWorkflow(workflowId: string, workerId: string, expectedVersion: number, leaseMs: number): Promise<WorkflowLease> {
