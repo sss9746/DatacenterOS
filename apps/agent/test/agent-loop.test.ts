@@ -283,8 +283,12 @@ describe('createAgentLoop.runOnce', () => {
     expect(r.escalated).toBe(false);
     const h = await readHandoff(db, r.workflow_id!);
     expect(handoffMissingFields(h)).toEqual([]);
-    expect(h).toMatchObject({ outcome: 'recovered', verified: true });
-    expect(h!.handoff).toMatch(/^No recovery action needed/);
+    // SCOPE §4: nothing executed and no observed window -> not a verified recovery; monitoring, not an escalation
+    expect(h).toMatchObject({ outcome: 'monitoring', verified: false, escalate: false, source: 'code' });
+    expect(h!.verification_interval_sim_ms[0]).toBe(h!.verification_interval_sim_ms[1]);
+    expect(h!.handoff).toMatch(/^No recovery action executed/);
+    expect(h!.handoff).toContain('not verified');
+    expect(h!.next_human_action).toContain('keep monitoring');
     expect(h!.unresolved_infrastructure.some((u) => u.includes('XID 79') && u.endsWith('needs hardware service'))).toBe(true);
     expect(db.listActions()).toHaveLength(0);
     expect((await db.getWorkflow(r.workflow_id!))?.stage).toBe('done');

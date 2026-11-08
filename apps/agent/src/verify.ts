@@ -14,6 +14,7 @@
 import type { ActionCommand, Incident, ObservedSnapshot } from '@dcos/contracts';
 import type { CommandOutcome, ExecutablePlan, ExecutionResult } from './coordinator.js';
 import type { EventPublisher } from './events.js';
+import { POWER_CAP_W as DEFAULT_POWER_CAP_W } from './planner.js';
 import { CLOCKS_EVENT_SW_POWER_CAP, type DbPort, type PhysicsPort, type ToolCallSummary, type WorkflowStage } from './ports.js';
 
 export const MAX_HANDOFF_CHARS = 600;
@@ -78,7 +79,12 @@ export interface CommandCheck {
   evidence: Record<string, unknown>;
 }
 
-export type HandoffOutcome = 'recovered' | 'handed_off' | 'operator_review';
+/**
+ * `recovered`: read back and verified. `handed_off`: an acknowledged escalation, not a recovered job. `operator_review`:
+ * unverified or blocked actions. `monitoring`: closed without executing anything and without an observed window, so
+ * nothing was verified (SCOPE §4: no advancing time and no read-back postcondition is never reported as recovered).
+ */
+export type HandoffOutcome = 'recovered' | 'handed_off' | 'operator_review' | 'monitoring';
 
 /**
  * Durable operator handoff persisted as `workflow.state.verification` (SCOPE §5 "Durable handoff"). Readable by a fresh
@@ -368,16 +374,17 @@ function cappedGpus(cmd: ActionCommand, snap: ObservedSnapshot): string[] {
 
 /** Power cap: limit applied on every targeted GPU (fresh), a modeled draw/clock effect, and continued progress. */
 function checkPowerCap(cmd: ActionCommand, s1: ObservedSnapshot, s2: ObservedSnapshot, ctx: CheckCtx): CommandCheck {
-  const limit = typeof cmd.arguments.power_limit_w === 'number' ? cmd.arguments.power_limit_w : null;
+  // SCOPE §4: a power_cap without an explicit power_limit_w applies the 500 W default, so that is what is read back.
+  const explicit = typeof cmd.arguments.power_limit_w === 'number' ? cmd.arguments.power_limit_w : null;
+  const limit = explicit ?? DEFAULT_POWER_CAP_W;
   const gpus = cappedGpus(cmd, s2);
   const problems: string[] = [];
-  if (limit === null) problems.push('no power_limit_w in command');
   if (gpus.length === 0) problems.push('no targeted GPUs');
   problems.push(...staleProblems(s2, gpus, ctx.maxAgeMs, 'sample 2'));
   const readings: Array<{ gpu_id: string; power_limit_w: number; power_w: number; sm_clock_mhz: number; cap_bit: boolean }> = [];
   for (const id of gpus) {
     const g = gpuOf(s2, id);
-    if (!g || limit === null) continue;
+    if (!g) continue;
     const capBit = (g.clocks_event_reasons & CLOCKS_EVENT_SW_POWER_CAP) !== 0;
     readings.push({ gpu_id: id, power_limit_w: g.power_limit_w, power_w: g.power_w, sm_clock_mhz: g.sm_clock_mhz, cap_bit: capBit });
     if (g.power_limit_w > limit) problems.push(`limit not applied on ${id} (${g.power_limit_w} W > ${limit} W)`);
@@ -391,6 +398,7 @@ function checkPowerCap(cmd: ActionCommand, s1: ObservedSnapshot, s2: ObservedSna
   const note = `${subjectOf(cmd)} capped at ${limit} W on ${gpus.length} GPUs (limit applied, draw ≤${maxDraw} W)${cmd.job_id ? `; progress ${fmtProgress(j1, j2)}` : ''}; cooling fault unchanged`;
   return check(cmd, problems, note, {
     power_limit_w: limit,
+    power_limit_source: explicit === null ? 'default' : 'command',
     gpus: readings.slice(0, MAX_HANDOFF_LIST),
     job_status: j2?.status ?? null,
     progress_work_units: [j1?.progress_work_units ?? null, j2?.progress_work_units ?? null],
@@ -559,7 +567,8 @@ function remainingRisk(snap: ObservedSnapshot, jobIds: readonly string[], checks
 
 function nextHumanAction(outcome: HandoffOutcome, infra: InfraState, checks: readonly CommandCheck[], notOk: readonly CommandOutcome[], reason?: string): string {
   const parts: string[] = [];
-  if (outcome !== 'recovered') {
+  if (outcome === 'monitoring') parts.push('keep monitoring the affected work; no recovery was verified');
+  else if (outcome !== 'recovered') {
     const items = [...checks.filter((c) => !c.ok).map((c) => c.command_key), ...notOk.map((o) => o.command_key)];
     parts.push(items.length ? `review ${items.length} unverified/blocked action(s): ${capList(items).join(', ')}` : (reason ?? 'review the escalation'));
   }
@@ -591,6 +600,7 @@ const HEADLINES: Record<HandoffOutcome, string> = {
   recovered: 'Recovery verified.',
   handed_off: 'Handed off to operator (not a recovered job).',
   operator_review: 'Needs operator review.',
+  monitoring: 'No action executed; not verified as recovered, incident stays under monitoring.',
 };
 
 /** Pure builder of the durable handoff; also used by the agent loop for no-action and escalation closes. */
@@ -600,7 +610,8 @@ export function buildOperatorHandoff(input: HandoffBuildInput): OperatorHandoff 
   const infra = infraState(snap);
   const unresolved = infra.lines;
   const verified = outcome === 'recovered';
-  const escalate = !verified;
+  // A no-action close is unverified but is not an escalation: the incident stays open under monitoring.
+  const escalate = !verified && outcome !== 'monitoring';
 
   const parts: string[] = [];
   for (const c of checks) parts.push(`${c.note} [${c.command_key}]`);

@@ -326,6 +326,22 @@ describe('R3 verification rejects false positives', () => {
     expect(rep.persisted.next_human_action).toContain('service pump-a');
   });
 
+  it('power_cap without an explicit power_limit_w is read back against the 500 W default (SCOPE §4), not left unverified', async () => {
+    const a = setup();
+    // the agent's own builder and the safety path always carry the limit; the verifier still must not treat a
+    // missing argument (e.g. a plan persisted by another producer) as unverifiable when the 500 W default applies
+    const built = cmd(a.snap, { operation: 'power_cap', target_resource_id: 'job-b', job_id: 'job-b', arguments: { power_limit_w: 500 } });
+    const result = await a.coord.execute(WF, planOf(a.snap, [built]));
+    expect(result.outcomes.map((o) => o.status)).toEqual(['succeeded']);
+    const p = planOf(a.snap, [{ ...built, arguments: {} }]);
+    const rep = await verifyWith(a, p, result, async (ms) => a.tick(ms));
+    const cap = rep.checks[0]!;
+    expect(cap.problems).toEqual([]);
+    expect(cap.ok).toBe(true);
+    expect(cap.evidence).toMatchObject({ power_limit_w: 500, power_limit_source: 'default' });
+    for (const g of cap.evidence.gpus as Array<{ power_limit_w: number }>) expect(g.power_limit_w).toBe(500);
+  });
+
   it('power_cap on a job that stopped progressing is unverified', async () => {
     const a = setup();
     const p = planOf(a.snap, [cmd(a.snap, { operation: 'power_cap', target_resource_id: 'job-b', job_id: 'job-b', arguments: { power_limit_w: 500 } })]);

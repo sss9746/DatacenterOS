@@ -347,7 +347,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
    * Durable handoff for a workflow closed WITHOUT a verified execution (no-action plan, or an escalation before/instead
    * of executing). Same persisted shape as verify's, so a fresh connection reads every close the same way (R3).
    */
-  async function closingHandoff(ids: string[], outcome: 'recovered' | 'operator_review', reason: string, jobIds: string[], headline?: string) {
+  async function closingHandoff(ids: string[], outcome: 'monitoring' | 'operator_review', reason: string, jobIds: string[], headline?: string) {
     const [snapshot, incidents] = await Promise.all([db.getObservedSnapshot(), db.listIncidents().catch(() => [] as Incident[])]);
     const sim = snapshot.clock.sim_time_ms;
     return buildOperatorHandoff({
@@ -373,9 +373,13 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     report.escalated = true;
   }
 
+  /**
+   * No-action close: nothing was executed and no second sample was read back, so this is NOT a verified recovery
+   * (SCOPE §4: no observed window means unverified). The incident stays open under monitoring, not escalated.
+   */
   async function closeNoAction(wfId: string, coord: Coordinator, ids: string[], report: LoopTickReport): Promise<void> {
-    const headline = 'No recovery action needed: affected jobs keep running; incident stays under monitoring.';
-    const verification = await closingHandoff(ids, 'recovered', 'no command executed', jobsOf(report), headline);
+    const headline = 'No recovery action executed: affected jobs are expected to keep running, not verified; incident stays under monitoring.';
+    const verification = await closingHandoff(ids, 'monitoring', 'no command executed, no observed window', jobsOf(report), headline);
     await coord.updateStage('done', { verification });
     await safeEmit('verify', { workflowId: wfId, incidentId: ids[0], actor: 'code', summary: verification.handoff });
     await setIncidentState(ids, 'monitoring');
