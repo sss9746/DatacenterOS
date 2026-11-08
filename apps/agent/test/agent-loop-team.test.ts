@@ -276,6 +276,22 @@ describe('new-incident watch (team mode)', () => {
     expect(r.verification?.verified).toBe(true);
   });
 
+  it('a resolved incident on the same resource does not hide a new fault there', async () => {
+    const w = world();
+    yieldToWatch(w);
+    const history = { schema_version: '1.1.0', run_id: RUN_ID, incident_id: `inc-compute-${R7_GPU}-b0`, state: 'resolved', version: 1, title: 'old', hypothesis: null, confidence: 0.7, severity: 'high', opened_sim_time_ms: 0, updated_sim_time_ms: 0 };
+    await w.db.upsertIncident(history as unknown as Parameters<typeof w.db.upsertIncident>[0], []);
+    const { chooser } = fakeChooser();
+    let injected = false;
+    w.hooks.push(() => {
+      if (injected || !w.db.listActions().some((a) => a.status === 'running')) return;
+      injected = true;
+      w.db.injectSignal(xidOn(w, R7_GPU));
+    });
+    const r = await makeLoop(w, { chooser, incidentWatchMs: 1 }).runOnce();
+    expect(r.replans.map((x) => x.reason).join()).toContain('new incident during execution');
+  });
+
   it('a fault during the last command is caught before verify, without waiting for a timer tick', async () => {
     const w = world();
     const { chooser } = fakeChooser();

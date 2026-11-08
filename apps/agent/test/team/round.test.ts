@@ -2,6 +2,7 @@ import type { Incident, IncidentLink, SignalEvent } from '@dcos/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { planIncidents, type ChooserResult, type PlanResult } from '../../src/planner.js';
 import type { LlmChatRequest, LlmChatResponse } from '../../src/ports.js';
+import { LlmUnavailableError } from '../../src/llm.js';
 import { CHOOSE_OPTIONS_TOOL_NAME } from '../../src/prompts/planner.js';
 import { TEAM_LIMITS, boundMessage, boundTrace, teamFeedEvents, type TeamMessage, type TeamTrace } from '../../src/team/protocol.js';
 import { ROLE_EVIDENCE_MAX_BYTES } from '../../src/team/roles.js';
@@ -339,6 +340,15 @@ describe('failure and deadlines', () => {
     expect(r.team!.calls_used).toBe(3);
     expect(r.team!.wall_ms).toBe(2 * TEAM_BUDGET.callTimeoutMs);
     expect(r.team!.wall_ms).toBeLessThanOrEqual(TEAM_BUDGET.roundMs);
+  });
+
+  it('does not mark findings consumed when the breaker rejects the Lead before it reaches the model', async () => {
+    const llm = teamLlm({ [LEAD]: () => Promise.reject(new LlmUnavailableError('circuit open', [])) });
+    const r = await plan(llm);
+    expect(r.team!.outcome).toBe('deterministic');
+    const findings = messagesOf(r, 'finding');
+    expect(findings.length).toBeGreaterThan(0);
+    for (const m of findings) expect(m.consumed_by).not.toContain('lead');
   });
 
   it('ignores a specialist reply that arrives after its call timed out', async () => {

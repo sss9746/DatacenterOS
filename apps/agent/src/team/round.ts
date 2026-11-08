@@ -298,7 +298,8 @@ class TeamRound {
   private call(req: LlmChatRequest, limit: number, role: TeamRole, consumes: readonly TeamMessage[]): Promise<LlmChatResponse | null> {
     if (this.closed) return Promise.resolve(null);
     this.calls += 1;
-    for (const m of consumes) if (!m.consumed_by.includes(role)) m.consumed_by.push(role);
+    const newlyConsumed = consumes.filter((m) => !m.consumed_by.includes(role));
+    for (const m of newlyConsumed) m.consumed_by.push(role);
     return new Promise((resolve) => {
       let done = false;
       let timer: ReturnType<typeof setTimeout>;
@@ -326,8 +327,11 @@ class TeamRound {
           finish(res);
         },
         (err: unknown) => {
-          // An open circuit breaker never reached the endpoint, so it is not a model call.
-          if (err instanceof LlmUnavailableError && err.attempts.length === 0 && !done && !this.closed) this.calls -= 1;
+          // An open circuit breaker never reached the endpoint: not a model call, and nothing was consumed.
+          if (err instanceof LlmUnavailableError && err.attempts.length === 0 && !done && !this.closed) {
+            this.calls -= 1;
+            for (const m of newlyConsumed) m.consumed_by.splice(m.consumed_by.indexOf(role), 1);
+          }
           finish(null);
         },
       );

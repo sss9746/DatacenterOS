@@ -1,13 +1,13 @@
 // WP-B2: waiting recovery (plan §0.6). Fake DB + fake OptionChooser; nothing here calls a model.
 import type { ActionCommand, ObservedSnapshot } from '@dcos/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createAgentLoop, MAX_RECOVERY_ATTEMPTS, RECOVERY_DEADLINE_MS, type AgentLoop, type AgentLoopDeps } from '../src/agent-loop.js';
+import { createAgentLoop, MAX_RECOVERY_ATTEMPTS, RECOVERY_DEADLINE_MS, withRecoveryState, type AgentLoop, type AgentLoopDeps } from '../src/agent-loop.js';
 import { createEventPublisher } from '../src/events.js';
 import { planIncidents, type ChooserInput, type OptionChooser } from '../src/planner.js';
 import type { TeamTrace } from '../src/team/protocol.js';
 import { runTriage } from '../src/triage.js';
 import { FakeDb, FakeLlm, FakePhysics } from './fakes/index.js';
-import { RUN_ID, loadDemoSnapshot } from './fixtures/index.js';
+import { RUN_ID, loadDemoSnapshot, loadPumpDegradedSnapshot } from './fixtures/index.js';
 
 const POLL_MS = 2_000;
 
@@ -175,6 +175,41 @@ describe('waiting recovery in the agent loop', () => {
     const wf = await w.db.getWorkflow(r.workflow_id!);
     expect(wf?.stage).toBe('done');
     expect(recovery(wf?.state)).toMatchObject({ status: 'resumed', attempts: 2 });
+  });
+
+  it('a plan restored after a crash does not go back to waiting for a job it already restarts', () => {
+    const plan = { plan: {} as never, commands: [{ job_id: 'job-a' } as ActionCommand], job_plans: [], tool_calls: [], used_llm: false };
+    const restored = withRecoveryState(plan, { recovery: { status: 'waiting', job_ids: ['job-a', 'job-b'] } });
+    expect(restored.waiting_jobs?.map((j) => j.job_id)).toEqual(['job-b']);
+    expect(withRecoveryState(plan, { recovery: { status: 'waiting', job_ids: ['job-a'] } }).waiting_jobs).toBeUndefined();
+  });
+
+  it('capacity returning during a team round still wakes the job left waiting', async () => {
+    const w = world(outage({ keepNode: 'node-r1-n1' })); // job-a needs 16 GPUs and waits; job-b fits on the one live node
+    const { chooser } = restartChooser();
+    const during: OptionChooser = async (input) => {
+      w.restoreAll();
+      return chooser(input);
+    };
+    const r = await makeLoop(w, { chooser: during }).runOnce();
+    expect(restartedJobs(w)).toEqual(['job-a', 'job-b']);
+    expect(r.escalated).toBe(false);
+  });
+
+  it('a finishing job releasing healthy GPUs wakes the wait, with no change in availability', async () => {
+    const s = loadDemoSnapshot();
+    dropJob(s, 'job-a');
+    failJob(s, 'job-b');
+    setAvailability(s, 'unreachable', 'node-r6-n1'); // the only live node is fully held by running job-c
+    const w = world(s);
+    const { chooser } = restartChooser();
+    w.onPoll.push((n) => {
+      if (n === 3) w.db.mutateSnapshot((x) => dropJob(x, 'job-c'));
+    });
+    const r = await makeLoop(w, { chooser }).runOnce();
+    // The second plan is the wake-up. Hot rack r6 stays unplaceable in this fixture, so job-b still ends up handed off.
+    expect(r.plans).toHaveLength(2);
+    expect(r.plans[1]!.waiting_jobs?.map((j) => j.job_id)).toEqual(['job-b']);
   });
 
   it('a job with no completed checkpoint is never restarted, is named for an operator, and blocks nobody', async () => {
@@ -472,6 +507,25 @@ describe('planner: waitForCapacity', () => {
     const r = await planIncidents({ ...deps(w), chooser }, { incidents: w.incidents });
     expect(r.commands.map((c) => c.job_id)).toEqual(['job-a']);
     expect(r.waiting_jobs?.map((j) => j.job_id)).toEqual(['job-b']);
+  });
+
+  it('a held job is reconsidered when the Lead’s choice frees the placement it was held against', async () => {
+    const s = loadPumpDegradedSnapshot();
+    failJob(s, 'job-b'); // needs 8 GPUs; job-a's assumed move takes the only 16 free ones
+    const live = new Set(['node-r1-n1', 'node-r2-n1', 'node-r3-n1', 'node-r5-n1', 'node-r6-n1']);
+    for (const n of s.nodes) if (!live.has(n.resource_id)) n.availability = 'unreachable';
+    for (const g of s.gpus) if (!live.has(g.node_id)) g.availability = 'unreachable';
+    const w = await setup(s);
+    let offered: string[] = [];
+    const chooser: OptionChooser = async (input) => {
+      offered = [...input.ranked.keys()];
+      const keep = input.ranked.get('job-a')!.find((o) => o.commands.length === 0)!;
+      return { choices: [{ job_id: 'job-a', option_id: keep.option_id, needs_approval: false, explanation: 'keep it where it is' }], team: trace('r') };
+    };
+    const r = await planIncidents({ ...deps(w), chooser }, { incidents: w.incidents });
+    expect(offered).toEqual(['job-a']);
+    expect(r.commands.filter((c) => c.operation === 'migrate_restart').map((c) => c.job_id)).toEqual(['job-b']);
+    expect(r.waiting_jobs).toEqual([]);
   });
 
   it('both jobs choosing the same GPUs: the loser becomes waiting, with no escalate', async () => {

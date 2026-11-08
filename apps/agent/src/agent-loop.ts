@@ -254,6 +254,8 @@ interface RecoveryRecord {
   first_wait_unix_ms: number;
   attempts: number;
   fingerprint: string;
+  /** Lowest count of ready, unallocated GPUs seen in this wait. A rise means capacity was released. */
+  free_gpus?: number;
 }
 
 const recoveryOf = (state: Record<string, unknown>): RecoveryRecord | null => (state.recovery as RecoveryRecord | undefined) ?? null;
@@ -269,10 +271,20 @@ function capacityFingerprint(snap: ObservedSnapshot, jobIds: readonly string[]):
   return createHash('sha256').update(parts.sort().join('|')).digest('hex').slice(0, 16);
 }
 
-/** A plan rebuilt from persisted state has no planner output: restore who is still waiting or needs an operator. */
-function withRecoveryState(r: PlanResult, state: Record<string, unknown>): PlanResult {
+/** Ready GPUs no job holds. Availability is in the fingerprint; this catches a finishing job releasing healthy GPUs. */
+function freeGpuCount(snap: ObservedSnapshot): number {
+  const held = new Set(snap.job_states.flatMap((j) => j.allocated_gpu_ids));
+  return snap.gpus.filter((g) => g.availability === 'ready' && !held.has(g.resource_id)).length;
+}
+
+/**
+ * A plan rebuilt from persisted state has no planner output: restore who is still waiting or needs an operator. A job
+ * this plan restarts is not waiting, even if a crash left it in the previous episode's record.
+ */
+export function withRecoveryState(r: PlanResult, state: Record<string, unknown>): PlanResult {
   const rec = recoveryOf(state);
-  const waiting = rec?.status === 'waiting' ? rec.job_ids.map((job_id) => ({ job_id, reason: 'waiting for capacity' })) : [];
+  const restarting = new Set(r.commands.map((c) => c.job_id));
+  const waiting = rec?.status === 'waiting' ? rec.job_ids.filter((id) => !restarting.has(id)).map((job_id) => ({ job_id, reason: 'waiting for capacity' })) : [];
   const operator = Array.isArray(state.operator_jobs) ? (state.operator_jobs as NonNullable<PlanResult['operator_jobs']>) : [];
   return waiting.length > 0 || operator.length > 0 ? { ...r, waiting_jobs: waiting, operator_jobs: operator } : r;
 }
@@ -425,13 +437,16 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const open = prior?.status === 'waiting' ? prior : null;
     const jobIds = (r.waiting_jobs ?? []).map((j) => j.job_id).sort();
     const sameJobs = open !== null && open.job_ids.join() === jobIds.join();
+    // The holds were decided on this snapshot: capacity that returned during a team round must still count as a change.
+    const baseline = r.planning_snapshot ?? snap;
     const rec: RecoveryRecord = {
       status: 'waiting',
       job_ids: jobIds,
       blocked_reason: (r.waiting_jobs ?? []).map((j) => `${j.job_id}: ${j.reason}`).join('; '),
       first_wait_unix_ms: open?.first_wait_unix_ms ?? now(),
       attempts: open?.attempts ?? 1,
-      fingerprint: sameJobs ? open.fingerprint : capacityFingerprint(snap, jobIds),
+      fingerprint: sameJobs ? open.fingerprint : capacityFingerprint(baseline, jobIds),
+      free_gpus: sameJobs && open.free_gpus !== undefined ? open.free_gpus : freeGpuCount(baseline),
     };
     return (await coord.updateStage('plan', { recovery: rec })) ? rec : null;
   }
@@ -476,8 +491,11 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
         await safeEmit('plan', { workflowId: wfId, incidentId: r.plan.incident_ids[0], actor: 'code', summary: paused ? `simulator paused, not recovered: ${baseReason}` : `simulator running again: ${baseReason}` });
       }
       const fingerprint = capacityFingerprint(snap, rec.job_ids);
-      if (!paused && fingerprint !== rec.fingerprint) {
-        await coord.updateStage('plan', { recovery: { ...rec, attempts: rec.attempts + 1, fingerprint } });
+      const free = freeGpuCount(snap);
+      // A drop (our own restart, say) is not new capacity, so it only lowers the bar for spotting a later release.
+      if (free < (rec.free_gpus ?? free)) rec = { ...rec, free_gpus: free };
+      if (!paused && (fingerprint !== rec.fingerprint || free > (rec.free_gpus ?? free))) {
+        await coord.updateStage('plan', { recovery: { ...rec, attempts: rec.attempts + 1, fingerprint, free_gpus: free } });
         if (coord.isOwner()) return true;
         continue; // the check at the top of the loop reports the lost lease
       }
@@ -555,7 +573,8 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const read = async (gen: number): Promise<void> => {
       const gate = await precheck();
       if (gen !== generation || !gate.needed) return;
-      const known = new Set([...gate.handled].map(incidentIdentity));
+      // A resolved incident is history: a fresh fault on the same resource is new, whatever its bucket.
+      const known = new Set([...gate.handled].filter((id) => !gate.resolved.has(id)).map(incidentIdentity));
       const news = gate.candidates.filter((c) => !known.has(incidentIdentity(c.candidate_id)) && !fired.has(incidentIdentity(c.candidate_id)) && !causedByPlan(c));
       if (news.length === 0) return;
       for (const c of news) fired.add(incidentIdentity(c.candidate_id));
@@ -998,7 +1017,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
   // ------------------------------------------------------------------ tick
 
   /** Cheap deterministic gate: could triage produce an incident nobody handles? Returns a fingerprint or null. */
-  async function precheck(): Promise<{ needed: boolean; fingerprint: string; openWorkflows: WorkflowRecord[]; candidates: Candidate[]; handled: Set<string> }> {
+  async function precheck(): Promise<{ needed: boolean; fingerprint: string; openWorkflows: WorkflowRecord[]; candidates: Candidate[]; handled: Set<string>; resolved: Set<string> }> {
     const [obs, evidence, incidents, openWorkflows] = await Promise.all([
       db.getObservedSnapshot(),
       db.getEvidence([], DEFAULT_TRIAGE_WINDOW_MS),
@@ -1011,7 +1030,7 @@ export function createAgentLoop(deps: AgentLoopDeps): AgentLoop {
     const fingerprint = candidates.map((c) => c.candidate_id).sort().join('|');
     const unhandledOpen = incidents.some((i) => i.state === 'open' && !handled.has(i.incident_id));
     const needed = unhandledOpen || (candidates.some((c) => !handled.has(c.candidate_id)) && fingerprint !== lastSkippedFingerprint);
-    return { needed, fingerprint, openWorkflows, candidates, handled };
+    return { needed, fingerprint, openWorkflows, candidates, handled, resolved: new Set(incidents.filter((i) => i.state === 'resolved').map((i) => i.incident_id)) };
   }
 
   async function tick(): Promise<LoopTickReport> {

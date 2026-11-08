@@ -25,6 +25,7 @@ import { buildCommand, commandKey, type PartialCommand } from './tools/command.j
 import { placementCandidates } from './tools/placement-tool.js';
 import { GPU_THROTTLE_TEMP_C, indexSnapshot, type SnapshotIndex } from './tools/snapshot-index.js';
 import { CLOCKS_EVENT_SW_THERMAL } from './ports.js';
+import type { ObservedSnapshot } from '@dcos/contracts';
 import type { TeamTrace } from './team/protocol.js';
 
 // ---------------------------------------------------------------------------------------------- public API
@@ -82,6 +83,8 @@ export interface PlanResult {
   /** Set when a job's mitigation was deferred (rule (b)): the caller must re-plan within this many sim seconds. */
   recheck_after_s?: number;
   team?: TeamTrace;
+  /** `waitForCapacity` only, in memory: the snapshot the holds were decided on, so a wait's baseline is not newer than them. */
+  planning_snapshot?: ObservedSnapshot;
   /** `waitForCapacity` only: failed, checkpoint-backed jobs with no eligible restart yet. Zero commands. */
   waiting_jobs?: JobHold[];
   /** `waitForCapacity` only: failed jobs that are never restarted automatically (no usable checkpoint). Zero commands. */
@@ -935,7 +938,16 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
   let finalCtx = EMPTY_CONTEXT;
   let diverged = false;
   for (const job of jobs) {
-    if (!ranked.has(job.job_id)) continue; // held above
+    if (!ranked.has(job.job_id)) {
+      // Held against the assumed placements. A different final choice may have freed what this job needs.
+      const heldAt = holds.findIndex((b) => b.job_id === job.job_id && b.kind === 'waiting');
+      if (!diverged || heldAt < 0) continue;
+      const reopened = rankJobInContext(physics, ix, job, finalCtx, enumCtx, toolCalls, deps.recheckAfterS);
+      if (restartBlock(ix, job.job_id, reopened)) continue;
+      holds.splice(heldAt, 1);
+      held.splice(held.findIndex((p) => p.job_id === job.job_id), 1);
+      ranked.set(job.job_id, restartsOnly(ix, job.job_id, reopened));
+    }
     let opts = ranked.get(job.job_id)!;
     if (diverged) {
       opts = rankJobInContext(physics, ix, job, finalCtx, enumCtx, toolCalls, deps.recheckAfterS);
@@ -975,6 +987,7 @@ export async function planIncidents(deps: PlannerDeps, input: { incidents: Incid
     ...(teamResult ? { team: teamResult.team } : {}),
     ...(waitForCapacity
       ? {
+          planning_snapshot: snap,
           waiting_jobs: holds.filter((b) => b.kind === 'waiting').map(({ job_id, reason }) => ({ job_id, reason })),
           operator_jobs: holds.filter((b) => b.kind === 'operator').map(({ job_id, reason }) => ({ job_id, reason })),
         }
