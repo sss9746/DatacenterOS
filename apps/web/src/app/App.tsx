@@ -16,7 +16,6 @@ import { JobsPage } from '../pages/JobsPage';
 import { RecoveryPage } from '../pages/RecoveryPage';
 import { WorkflowsPage } from '../pages/WorkflowsPage';
 import { BenchmarksPage } from '../pages/BenchmarksPage';
-import { RealGpuPage } from '../pages/RealGpuPage';
 
 /** `?presenter=1` opens the Demo controls drawer on load; judges' default view keeps it closed under the story. */
 const presenterRequested = () => { try { return new URLSearchParams(window.location.search).get('presenter') === '1'; } catch { return false; } };
@@ -24,7 +23,7 @@ const readHash = () => { try { return window.location.hash; } catch { return '';
 /** Data older than this (wall ms) while the clock runs is reported as stale. */
 const STALE_AFTER_MS = 5000;
 
-const PAGES: Record<RouteId, (props: PageProps) => ReactElement> = { cluster: ClusterPage, jobs: JobsPage, recovery: RecoveryPage, workflows: WorkflowsPage, benchmarks: BenchmarksPage, 'real-gpu': RealGpuPage };
+const PAGES: Record<RouteId, (props: PageProps) => ReactElement> = { cluster: ClusterPage, jobs: JobsPage, recovery: RecoveryPage, workflows: WorkflowsPage, benchmarks: BenchmarksPage };
 
 /** Hash router: the page id comes from `#/…`; legacy anchors are normalised to their page. */
 function useRoute() {
@@ -33,8 +32,8 @@ function useRoute() {
   const route = routeFromHash(hash);
   const anchor = anchorFromHash(hash);
   const navigate = useCallback((next: RouteId, nextAnchor?: string) => { window.location.hash = nextAnchor ? `${hrefOf(next)}/${nextAnchor}` : hrefOf(next); }, []);
-  // Legacy `#jobs` → `#/jobs` so the address bar shows the canonical deep link.
-  useEffect(() => { if (hash && !hash.startsWith('#/')) window.history.replaceState(null, '', hrefOf(route)); }, [hash, route]);
+  // Legacy `#jobs` → `#/jobs` and retired `#/real-gpu` → `#/cluster`, so the address bar shows the canonical deep link.
+  useEffect(() => { if (hash && !hash.startsWith(hrefOf(route))) window.history.replaceState(null, '', hrefOf(route)); }, [hash, route]);
   useEffect(() => { if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0); }, [route, anchor]);
   return { route, anchor, navigate };
 }

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, Fan, X } from 'lucide-react';
+import { Activity, Fan } from 'lucide-react';
 import type { GpuCurrent, ObservedSnapshot, TelemetryEvent } from '@dcos/contracts';
 import type { ActionDetail } from '@dcos/db-client';
 import { number } from '../../lib/utils';
 import { Badge } from '../ui/panel';
 import type { PumpId } from '../controls/fault-form';
 import {
-  capacityLoss, coolingLoops, degradedPumps, detectMoves, formatDeltaC, inletRiseC, isPumpId, jobRacks, loopOfRack, loopPath,
+  capacityLoss, coolingLoops, degradedPumps, detectMoves, formatDeltaC, inletRiseC, isPumpId, jobRacks, loopOfRack,
   moveArcPath, pumpLabel, rackAnchor, rackColumnsFor, rackRanges, type CoolingLoop, type JobMove, type RackGridGeometry,
 } from './topology';
 import './simulation-view.css';
@@ -20,8 +20,8 @@ type Props = {
 type State = 'normal' | 'warm' | 'hot' | 'fault';
 const RACKS = Array.from({ length: 8 }, (_, i) => i + 1);
 const SLOTS = Array.from({ length: 8 }, (_, i) => i);
-/** Mirrors `--sim-rack-gap` and the band height in simulation-view.css. */
-const RACK_GAP = 8; const BAND_HEIGHT = 46; const LANE_Y: Record<string, number> = { 'pump-a': 14, 'pump-b': 32 };
+/** Mirrors `--sim-rack-gap` in simulation-view.css. */
+const RACK_GAP = 9;
 const FAIL_MS = 1500; const MOVE_MS = 1600;
 const ACTIVE = new Set(['requested', 'claimed', 'running']);
 export const stateOf = (gpu: GpuCurrent): State => gpu.availability !== 'ready' || gpu.last_xid_code !== null ? 'fault' : gpu.temp_c >= 85 ? 'hot' : gpu.temp_c >= 80 ? 'warm' : 'normal';
@@ -66,7 +66,7 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
   baseline.current.simMs = snapshot.clock.sim_time_ms;
   for (const n of RACKS) { const t = hottestOf(n); if (t !== null && !degraded.has(pumpOf(n))) baseline.current.temps.set(n, t); }
 
-  // Geometry of the rack field, measured once per resize, drives the SVG overlay (coolant loops, move arcs).
+  // Geometry of the rack field, measured once per resize, drives the SVG overlay that draws job-move arcs.
   const rootRef = useRef<HTMLElement>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -76,8 +76,7 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
     ro.observe(el); return () => ro.disconnect();
   }, []);
   const cols = rackColumnsFor(size.width);
-  const band = cols === 8 ? BAND_HEIGHT : 0;
-  const geometry: RackGridGeometry = { width: size.width, height: size.height + band, cols, gap: RACK_GAP, bandHeight: band };
+  const geometry: RackGridGeometry = { width: size.width, height: size.height, cols, gap: RACK_GAP, bandHeight: 0 };
 
   // XID failure flourish: only on a transition of real store data, never on first paint, never across a run reset.
   const prevStates = useRef<{ runKey: string; states: Map<string, State> } | null>(null);
@@ -121,13 +120,14 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
   const choosePump = (id: PumpId) => { setSelectedPump(id); const first = firstRackOf(id); setChosenRack(first); onSelectPump(id); onSelect(`gpu-r${first}-n1-0`); };
   const chooseRack = (n: number) => { const pump = pumpOf(n); setChosenRack(n); setSelectedPump(pump); onSelectPump(pump); onSelect(`gpu-r${n}-n1-0`); };
 
-  /** What a rack on a degraded loop shows beside its label: a measured delta when one exists, otherwise nothing. */
+  // Delta shown on a rack whose pump is degraded: measured inlet rise when P1 publishes it, else the GPU-temperature rise
+  // over this session's pre-fault baseline. Neither exists → nothing (never a hard-coded number).
   const degradedDelta = (n: number, loop: CoolingLoop | undefined): string | null => {
     const inlet = inletRiseC(n, loop, snapshot, telemetry);
-    if (inlet !== null) return `inlet ${formatDeltaC(inlet)} vs nominal`;
+    if (inlet !== null) return `${formatDeltaC(inlet)} inlet`;
     const before = baseline.current.temps.get(n); const nowT = hottestOf(n);
     if (before === undefined || nowT === null) return null;
-    const delta = Math.round((nowT - before) * 10) / 10;
+    const delta = nowT - before;
     return Math.abs(delta) >= 0.1 ? `${formatDeltaC(delta)} since fault` : null;
   };
 
@@ -140,7 +140,7 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
     <header className="sim-view-header">
       <div className="sim-view-title"><h2 id="sim-view-title">Simulated cluster</h2><Badge tone="simulated">Simulated</Badge><span className="sim-ready" title={`${ready} of ${simGpus.length} simulated GPUs are ready`}>{ready} of {simGpus.length || 64} GPUs ready</span></div>
       <div className="sim-legend" aria-label="Legend">
-        <span><i className="sim-key sim-key-normal"/>cool</span><span><i className="sim-key sim-key-warm"/>warm</span><span><i className="sim-key sim-key-hot"/>hot</span><span><i className="sim-key sim-key-fault"><X size={9} aria-hidden="true"/></i>failed</span><span><i className="sim-key-line"/>coolant</span><span><i className="sim-key-line is-degraded"/>loop failing</span>
+        <span><i className="sim-key sim-key-normal"/>cool</span><span><i className="sim-key sim-key-warm"/>warm or hot</span><span><i className="sim-key sim-key-fault"/>failed</span><span><i className="sim-key-line"/>coolant loop</span><span><i className="sim-key-line is-degraded"/>loop degraded</span>
       </div>
     </header>
     <div className="sim-explore">
@@ -148,9 +148,9 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
         const pump = pumpRow(id); const isDegraded = degraded.has(id); const loss = lossText(id); const racks = rackRanges(racksOfPump(id));
         const detail = pump ? isDegraded ? `${pump.operating_state}${loss ? ` · ${loss}` : ''}` : 'normal' : 'no reading';
         return <button type="button" key={id} className={`sim-cooling-route ${loopClass(id)} ${isDegraded ? 'is-degraded' : ''} ${focusedPump === id ? 'is-selected' : ''}`} aria-pressed={focusedPump === id} aria-label={`${pumpLabel(id)} Cools ${racks} · ${isDegraded ? `failing · ${detail}` : detail}`} title={`${pumpLabel(id)} · ${racks} · ${detail}`} onClick={() => choosePump(id)}>
-          <Fan size={18} aria-hidden="true" className="sim-fan"/>
-          <span className="sim-pump-copy" aria-hidden="true"><strong>{pumpLabel(id)}</strong><span>{racks}</span></span>
-          <b aria-hidden="true">{pump ? isDegraded ? `failing${loss ? ` · ${loss}` : ''}` : 'normal' : 'no reading'}</b>
+          <Fan size={19} aria-hidden="true" className="sim-fan"/>
+          <span className="sim-pump-copy" aria-hidden="true"><strong>{pumpLabel(id)}</strong><span>Cools {racks}</span></span>
+          <b aria-hidden="true">{pump ? isDegraded ? `Needs attention · ${pump.operating_state}${loss ? ` · ${loss}` : ''}` : 'Working normally' : 'No reading'}</b>
         </button>;
       })}</div>
 
@@ -165,35 +165,35 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
           const temp = hottest === null ? 'no temperature' : `${number(hottest, 0)} degrees Celsius`;
           const label = `Rack ${n}, ${temp}, ${stateText(state)}, ${readyHere} of 8 GPUs ready${rackJobs.length ? `, ${rackJobs.join(' and ')}` : ''}${onDegradedLoop ? `, on degraded ${pumpLabel(pump)} loop${delta ? `, ${delta}` : ''}` : ''}${moving.length ? `, ${moving.join(', ')} moving` : ''}`;
           return <button type="button" key={n} data-sim-rack={n} className={`sim-rack sim-rack-${state} ${loopClass(pump)} ${rack === n ? 'is-selected' : ''} ${pump === focusedPump ? 'is-on-route' : ''} ${onDegradedLoop ? 'is-on-degraded-loop' : ''}`} aria-label={label} title={label} aria-pressed={rack === n} onClick={() => chooseRack(n)}>
-            <span className="sim-rack-top" aria-hidden="true"><span className="sim-rack-name">R{n}</span>{moving.length > 0 ? <span className="sim-rack-flag">moving</span> : <span className="sim-rack-temp">{hottest === null ? '—' : `${number(hottest, 0)}°`}</span>}</span>
-            <span className="sim-rack-tiles" aria-hidden="true">{gpus.map((gpu, slot) => {
+            <span className="sim-rack-top" aria-hidden="true"><span className="sim-rack-name">Rack {n}</span><strong>{hottest === null ? '—' : `${number(hottest, 0)} °C`}</strong></span>
+            <span className="sim-rack-cabinet" aria-hidden="true"><span className="sim-rack-rail"/><span className="sim-rack-modules">{gpus.map((gpu, slot) => {
               const id = `gpu-r${n}-n1-${slot}`;
-              if (!gpu) return <span key={slot} className="sim-tile sim-tile-missing"/>;
+              if (!gpu) return <span key={slot} className="sim-rack-module sim-rack-module-missing"><i/><b/><em/></span>;
               const s = stateOf(gpu);
-              return <span key={slot} data-sim-gpu={id} title={tileTitle(gpu, id)} className={`sim-tile sim-tile-${s} ${jobClass(jobByGpu.get(id))} ${isThrottled(gpu) || s === 'hot' ? 'is-throttled' : ''} ${selected === id ? 'is-selected' : ''}`}>{s === 'fault' ? <X size={10} aria-hidden="true"/> : null}</span>;
-            })}</span>
+              return <span key={slot} data-sim-gpu={id} title={tileTitle(gpu, id)} className={`sim-rack-module sim-rack-module-${s} ${selected === id ? 'is-selected' : ''}`}><i/><b/><em/></span>;
+            })}</span><span className="sim-rack-rail"/></span>
+            <span className="sim-rack-bottom" aria-hidden="true">
+              {onDegradedLoop && <span className="sim-rack-loop-note">On degraded {pumpLabel(pump)}{delta ? <em>{delta}</em> : null}</span>}
+              {moving.length > 0 && <span className="sim-rack-flag">{moving.join(', ')} moving</span>}
+              <span className="sim-rack-description">{stateText(state)}</span><span className="sim-rack-ready">{readyHere}/8 ready</span>
+            </span>
           </button>;
         })}</div>
-        {size.width > 0 && <svg className="sim-overlay" aria-hidden="true" width={size.width} height={size.height + band} viewBox={`0 0 ${size.width} ${size.height + band}`}>
-          {cols === 8 && loops.map((loop) => <path key={loop.loopId} className={`sim-loop-path ${loopClass(loop.pumpId)} ${degraded.has(loop.pumpId) ? 'is-degraded' : ''}`} d={loopPath(loop.racks, LANE_Y[loop.pumpId] ?? 24, geometry)}/>)}
+        {size.width > 0 && arcs.length > 0 && <svg className="sim-overlay" aria-hidden="true" width={size.width} height={size.height} viewBox={`0 0 ${size.width} ${size.height}`}>
           {arcs.map(({ key, move }) => <path key={key} className={`sim-move-arc ${jobClass(move.jobId)}`} d={moveArcPath(move, geometry)}/>)}
           {arcs.map(({ key, move }) => { const to = rackAnchor(move.to[0]!, geometry); return <circle key={`${key}-dot`} className={`sim-move-dot ${jobClass(move.jobId)}`} cx={to.x} cy={to.top + 6} r={5}/>; })}
         </svg>}
-        {cols === 8 && size.width > 0 && loops.map((loop) => {
-          const racks = loop.racks; if (!racks.length) return null;
-          const mid = (rackAnchor(racks[0]!, geometry).x + rackAnchor(racks.at(-1)!, geometry).x) / 2;
-          const isDegraded = degraded.has(loop.pumpId);
-          return <span key={loop.loopId} className={`sim-loop-chip ${loopClass(loop.pumpId)} ${isDegraded ? 'is-degraded' : ''}`} style={{ left: mid, top: size.height + (LANE_Y[loop.pumpId] ?? 24) }} title={`${pumpLabel(loop.pumpId)} loop${isDegraded ? ` · degraded${lossText(loop.pumpId) ? ` · ${lossText(loop.pumpId)}` : ''}` : ''}`} aria-hidden="true">{pumpLabel(loop.pumpId)}{isDegraded ? ' · failing' : ''}</span>;
-        })}
       </div>
+      {loops.length > 0 && <div className="sim-loop-band" aria-hidden="true">{loopSegments(loops).map((segment) => <span key={`${segment.pumpId}-${segment.start}`} className={`sim-loop-segment ${loopClass(segment.pumpId)} ${degraded.has(segment.pumpId) ? 'is-degraded' : ''}`} style={{ gridColumn: `${segment.start} / ${segment.end + 1}` }}><i/><span>{pumpLabel(segment.pumpId)} loop{degraded.has(segment.pumpId) ? ` · degraded${lossText(segment.pumpId) ? ` · ${lossText(segment.pumpId)}` : ''}` : ''}</span></span>)}</div>}
 
       <div className="sim-detail">
         <div className="sim-gpu-list" role="group" aria-label={`GPUs in rack ${rack}`}>{rackGpus.map((gpu, slot) => {
           const id = `gpu-r${rack}-n1-${slot}`;
-          if (!gpu) return <span className="sim-gpu sim-gpu-missing" key={id} title={`${id} · no data`}/>;
+          if (!gpu) return <span className="sim-gpu sim-gpu-missing" key={id} title={`${id} · no data`}>GPU {slot}<small>No data</small></span>;
           const state = stateOf(gpu); const isSelected = selectedGpu?.resource_id === id; const job = jobByGpu.get(id);
           return <button type="button" key={id} data-gpu={id} data-sim-gpu={id} title={tileTitle(gpu, id)} className={`sim-gpu sim-gpu-${state} ${jobClass(job)} ${isThrottled(gpu) || state === 'hot' ? 'is-throttled' : ''} ${isSelected ? 'is-selected' : ''}`} aria-label={`GPU ${slot}, ${number(gpu.temp_c, 1)} degrees Celsius, ${gpu.availability}${gpu.last_xid_code ? `, XID ${gpu.last_xid_code}` : ''}, ${job ?? 'free'}`} aria-pressed={isSelected} onClick={() => onSelect(id)}>
-            {state === 'fault' ? <X size={14} aria-hidden="true"/> : <span aria-hidden="true">{slot}</span>}
+            <span className="sim-gpu-card" aria-hidden="true"><span className="sim-gpu-connector"/><span className="sim-gpu-board"><span className="sim-gpu-fan"/><span className="sim-gpu-vents"/><span className="sim-gpu-led"/></span></span>
+            <span className="sim-gpu-caption" aria-hidden="true"><span>GPU {slot}<small>{state === 'fault' ? 'Unavailable' : job ?? 'Free'}</small></span><strong>{number(gpu.temp_c, 0)} °C</strong></span>
           </button>;
         })}</div>
         <div className="sim-inspector" aria-live="polite">
@@ -211,12 +211,11 @@ export function SimulationView({ snapshot, selected, onSelect, onSelectPump, tel
   </section>;
 }
 
-/** Contiguous runs of racks (1–8) that share a pump (kept for callers and tests that describe the loop band). */
+/** Contiguous runs of racks (1–8) that share a pump, for the band drawn under the cabinets. */
 export function loopSegments(loops: CoolingLoop[]): Array<{ pumpId: string; start: number; end: number }> {
   const out: Array<{ pumpId: string; start: number; end: number }> = [];
   for (const n of RACKS) {
-    const pumpId = loopOfRack(loops, n)?.pumpId;
-    if (!pumpId) continue;
+    const pumpId = loopOfRack(loops, n)?.pumpId; if (!pumpId) continue;
     const last = out.at(-1);
     if (last && last.pumpId === pumpId && last.end === n - 1) last.end = n; else out.push({ pumpId, start: n, end: n });
   }

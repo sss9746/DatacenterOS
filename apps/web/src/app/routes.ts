@@ -1,7 +1,8 @@
 /**
  * Hash routes for the multi-page dashboard. No router dependency: `#/cluster`, `#/jobs`, … are read from
  * `window.location.hash`, so deep links and the browser back button work. Legacy single-page anchors
- * (`#overview`, `#jobs`, `#activity`, `#scoreboard`, `#ledger`, `#real-gpu`, `#workflows`) redirect to their page.
+ * (`#overview`, `#jobs`, `#activity`, `#scoreboard`, `#ledger`, `#workflows`) redirect to their page; the retired
+ * `#/real-gpu` page redirects to the cluster overview, which now hosts the real GPU tile.
  */
 export const ROUTES = [
   { id: 'cluster', label: 'Cluster overview', question: 'Is the cluster healthy right now?' },
@@ -9,7 +10,6 @@ export const ROUTES = [
   { id: 'recovery', label: 'Recovery activity', question: 'What did the agents see, decide and do?' },
   { id: 'workflows', label: 'Workflows', question: 'Where is each recovery, and what was blocked?' },
   { id: 'benchmarks', label: 'Benchmarks', question: 'Did the Nemotron planner lose less work than the baselines?' },
-  { id: 'real-gpu', label: 'Real GPU', question: 'What is the one real L40S doing?' },
 ] as const;
 
 export type RouteId = (typeof ROUTES)[number]['id'];
@@ -22,7 +22,7 @@ export const hrefOf = (id: RouteId): string => `#/${id}`;
 const LEGACY_ANCHORS: Record<string, RouteId> = {
   overview: 'cluster', topology: 'cluster', jobs: 'jobs', activity: 'recovery', incidents: 'recovery', 'agent-room': 'recovery',
   workflows: 'workflows', ledger: 'workflows', model: 'workflows', 'model-assumptions': 'workflows', signals: 'workflows', details: 'workflows',
-  scoreboard: 'benchmarks', 'real-gpu': 'real-gpu', presenter: 'cluster',
+  scoreboard: 'benchmarks', 'real-gpu': 'cluster', presenter: 'cluster',
 };
 
 /** `#/jobs`, `#/jobs/anchor`, `#jobs` and `` all resolve to a page id; unknown hashes fall back to the default route. */

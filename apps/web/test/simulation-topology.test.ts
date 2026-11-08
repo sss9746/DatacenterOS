@@ -70,9 +70,9 @@ describe('cooling topology read from the snapshot', () => {
       expect(html).toContain('on degraded Pump A loop'); // rack accessible name / tooltip
       expect(html).toContain('Pump A Cools racks 2–4 · failing · degraded · −60 % capacity'); // pump accessible name carries the loss
       expect(situation(after)).toMatch(/^Pump A is failing — racks 2–4/); // the one page-level sentence
-      expect(html).not.toMatch(/sim-tile sim-tile-\w+[^>]*>\d/); // rack tiles carry colour, not numbers
+      expect(html).not.toMatch(/sim-rack-module sim-rack-module-\w+[^>]*>\d/); // rack modules carry LEDs, not numbers
       expect(html).toContain('data-gpu="gpu-r7-n1-0"'); // the chosen rack's eight interactive tiles
-      expect(html.match(/data-sim-gpu="gpu-r\d-n1-\d"/g)?.length).toBe(64 + 8); // 64 rack tiles + 8 detail tiles
+      expect(html.match(/data-sim-gpu="gpu-r\d-n1-\d"/g)?.length).toBe(64 + 8); // 64 rack modules + 8 accelerator cards
       expect(html).not.toContain('gpu-real-0'); // the real GPU is never drawn in the simulated grid
       expect(html).not.toContain('since fault'); // no pre-fault reading in a fresh render: no delta is invented
       expect(html).not.toContain('is-failing'); // first paint never plays the failure flourish

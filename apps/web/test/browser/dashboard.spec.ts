@@ -14,7 +14,7 @@ async function expectAccessibleAndContained(page: Page) {
 
 const go = (page: Page, route: string) => page.getByRole('navigation', { name: 'Dashboard pages' }).getByRole('link', { name: route }).click();
 
-test('shell: six pages via the sidebar, deep links, legacy anchors and the browser back button', async ({ page }) => {
+test('shell: five pages via the sidebar, deep links, legacy anchors and the browser back button', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/#/workflows');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Workflows');
@@ -153,11 +153,22 @@ test('benchmarks: deterministic rehearsal batch is labelled by provenance, never
   expect(errors).toEqual([]);
 });
 
-test('real GPU page renders its honesty labels without a live feed', async ({ page }) => {
+test('real GPU tile sits on the cluster overview with its honesty labels; the retired #/real-gpu link redirects there', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/#/real-gpu');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Real GPU');
-  await expect(page.locator('.real-gpu')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Cluster overview');
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/cluster');
+  await expect(page.getByRole('navigation', { name: 'Dashboard pages' }).getByRole('link', { name: 'Real GPU' })).toHaveCount(0);
+  const tile = page.locator('.real-gpu');
+  await expect(tile).toBeVisible();
+  await expect(tile).toContainText('collector offline');
+  await expect(tile).toContainText('observation only');
+  // The tile sits directly above the safety tile in the right column.
+  const side = page.locator('.cluster-side');
+  await expect(side.locator('.real-gpu')).toBeVisible();
+  await expect(side.locator('.cluster-impact-side .stat')).toContainText(/unsafe moves? blocked/);
+  await page.locator('.real-gpu-how > summary').click();
+  await expect(page.locator('.real-gpu-legend')).toContainText('REPLAY');
   await expectAccessibleAndContained(page);
   expect(errors).toEqual([]);
 });

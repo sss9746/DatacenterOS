@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_ROUTE, ROUTES, anchorFromHash, hrefOf, isRouteId, routeFromHash } from '../src/app/routes';
 
 describe('hash routes', () => {
-  it('lists six pages, each with a label and the question it answers', () => {
-    expect(ROUTES.map((row) => row.id)).toEqual(['cluster', 'jobs', 'recovery', 'workflows', 'benchmarks', 'real-gpu']);
+  it('lists five pages, each with a label and the question it answers', () => {
+    expect(ROUTES.map((row) => row.id)).toEqual(['cluster', 'jobs', 'recovery', 'workflows', 'benchmarks']);
     for (const row of ROUTES) { expect(row.label.length).toBeGreaterThan(0); expect(row.question).toMatch(/\?$/); }
   });
 
   it('builds canonical hrefs and recognises route ids', () => {
     expect(hrefOf('jobs')).toBe('#/jobs');
-    expect(hrefOf('real-gpu')).toBe('#/real-gpu');
+    expect(hrefOf('benchmarks')).toBe('#/benchmarks');
     expect(isRouteId('benchmarks')).toBe(true);
     expect(isRouteId('ledger')).toBe(false);
   });
@@ -18,14 +18,14 @@ describe('hash routes', () => {
     expect(routeFromHash('#/workflows')).toBe('workflows');
     expect(routeFromHash('#/workflows/ledger')).toBe('workflows');
     expect(routeFromHash('#/benchmarks?x=1')).toBe('benchmarks');
-    expect(routeFromHash('#/real-gpu')).toBe('real-gpu');
+    expect(routeFromHash('#/real-gpu')).toBe('cluster'); // retired page: its deep link lands on the cluster overview
   });
 
   it('maps legacy single-page anchors to the page that now owns them', () => {
     const legacy: Record<string, string> = {
       overview: 'cluster', topology: 'cluster', presenter: 'cluster', jobs: 'jobs', activity: 'recovery', incidents: 'recovery', 'agent-room': 'recovery',
       workflows: 'workflows', ledger: 'workflows', model: 'workflows', 'model-assumptions': 'workflows', signals: 'workflows', details: 'workflows',
-      scoreboard: 'benchmarks', 'real-gpu': 'real-gpu',
+      scoreboard: 'benchmarks', 'real-gpu': 'cluster',
     };
     for (const [anchor, route] of Object.entries(legacy)) expect(routeFromHash(`#${anchor}`), anchor).toBe(route);
   });

@@ -63,7 +63,7 @@ describe('XID 79 in the rendered cluster', () => {
       expect(stateOf(gpu)).toBe('fault');
       const html = renderToStaticMarkup(createElement(SimulationView, { snapshot: after, selected: 'gpu-r3-n1-0', onSelect: () => {}, onSelectPump: () => {} }));
       expect(html).toMatch(/data-gpu="gpu-r3-n1-0"[^>]*aria-label="GPU 0, [^"]*XID 79/);
-      expect(html.match(/sim-tile-fault/g)?.length).toBe(1);
+      expect(html.match(/sim-rack-module-fault/g)?.length).toBe(1);
       expect(situation(after)).toMatch(/^1 GPU failed/);
       expect(situationTone(after)).toBe('danger');
       const impact = clusterImpact(after);
