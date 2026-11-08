@@ -1,5 +1,5 @@
 # P2-2: `@dcos/db-client` wrapper + mock ‖
-**Due:** 9:00 PM · **Gate:** 0 · **Status:** ☐
+**Due:** 9:00 PM · **Gate:** 0 · **Status:** ☑
 **Owns:** `packages/db-client/src/**` except `generated/`, `packages/db-client/package.json`, tests
 **Can run in parallel with P2-1** (separate worktree).
 
@@ -22,7 +22,7 @@ P3 and P4 can `import { createMockClient } from '@dcos/db-client'` and build aga
 ## Done when
 - [x] `import { createMockClient } from '@dcos/db-client'` works from another workspace package
 - [x] Unit test: mock returns a valid `ObservedSnapshot`, records calls, `requestAction` twice with the same key → one action
-- [ ] P3 and P4 pinged
+- [x] P3 and P4 pinged (both build on it; their bug reports were fixed 2026-11-08, see follow-up below)
 
 ## Architect notes (Codex)
 Spec turned out to be `apps/agent/src/ports.ts` on `origin/lane/p3-agent` (CONTRACTS §0.11 #7). Codex review (read-only):

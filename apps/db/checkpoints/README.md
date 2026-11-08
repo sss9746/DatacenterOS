@@ -5,16 +5,18 @@ The P2 lane split into one file per task. Source of truth for scope: [`plans/LAN
 ## Board
 | # | Checkpoint | Due | Gate | Depends on | Status |
 |---|---|---|---|---|---|
-| 0 | [Setup + booth questions](P2-0-setup.md) | 8:15 PM | — | — | ◐ booth Qs |
+| 0 | [Setup + booth questions](P2-0-setup.md) | 8:15 PM | — | — | ☑ (booth Qs never asked; not blocking) |
 | 1 | [Scaffold module + publish + bindings](P2-1-scaffold.md) | 9:00 PM | **Gate 0** | P2-0 | ☑ |
-| 2 | [db-client wrapper + mock](P2-2-db-client-mock.md) ‖ | 9:00 PM | Gate 0 | P1 fixtures (or local stand-ins) | ☑ (ping P3/P4) |
-| 3 | [Tier 1 tables + `create_run`](P2-3-tables-create-run.md) | 10:45 PM | — | P2-1, P1 `buildPreset` | ☐ |
-| 4 | [`advance_tick` + `inject_fault`](P2-4-tick-faults.md) | 11:30 PM | **Gate 1** | P2-3, P1 `step` | ☐ |
-| 5 | [Action ledger](P2-5-action-ledger.md) | 1:00 AM | — | P2-4, P1 `evaluateSafety` | ☐ |
-| 6 | [Workflow + incidents](P2-6-workflow-incidents.md) ‖ | 1:15 AM | — | P2-3 | ☐ |
-| 7 | [Gate 2 script](P2-7-gate2-script.md) | 1:30 AM | **Gate 2** | P2-5, P2-6 | ☐ |
-| 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ◐ (prod live; P3/P4 smoke) |
-| 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ☐ |
+| 2 | [db-client wrapper + mock](P2-2-db-client-mock.md) ‖ | 9:00 PM | Gate 0 | P1 fixtures (or local stand-ins) | ☑ (+ P3/P4 mock fixes, `onActionDetails`) |
+| 3 | [Tier 1 tables + `create_run`](P2-3-tables-create-run.md) | 10:45 PM | — | P2-1, P1 `buildPreset` | ☑ (`gpu-real-0` row → P2-9) |
+| 4 | [`advance_tick` + `inject_fault`](P2-4-tick-faults.md) | 11:30 PM | **Gate 1** | P2-3, P1 `step` | ◐ (P4 live view unconfirmed) |
+| 5 | [Action ledger](P2-5-action-ledger.md) | 1:00 AM | — | P2-4, P1 `evaluateSafety` | ☑ |
+| 6 | [Workflow + incidents](P2-6-workflow-incidents.md) ‖ | 1:15 AM | — | P2-3 | ☑ |
+| 7 | [Gate 2 script](P2-7-gate2-script.md) | 1:30 AM | **Gate 2** | P2-5, P2-6 | ☑ (dev + prod; integrator ticks plans/README) |
+| 8 | [Prod publish + tokens](P2-8-prod-tokens.md) | 4:30 AM | Gate 3 | P2-7 | ◐ (prod live, P3 verified; P4 open) |
+| 9 | [`ingest_observations`](P2-9-ingest.md) | 8:00 AM | Gate 5 (optional) | P2-8 | ☐ next |
+
+**Where things stand (2026-11-08 ~00:40):** all of P2 is merged to `main` (`08f39d3`; full suite 697 tests green). Prod `dcos` is live on Maincloud with role tokens. P3's agent + real Nemotron handled the pump-a incident end to end on both `dcos-dev` and `dcos`. Open: P4 dashboard live check, P2-9.
 
 Status key: ☐ not started · ◐ in progress · ☑ done (all "Done when" boxes ticked) · ⛔ blocked (say why in the file).
 

@@ -1,5 +1,5 @@
 # P2-5: Durable action ledger
-**Due:** 1:00 AM · **Status:** ☐ · **Owns:** `apps/db/src/actions.ts` (+ tests)
+**Due:** 1:00 AM · **Status:** ☑ · **Owns:** `apps/db/src/actions.ts` (+ tests)
 **Read first:** ARCHITECTURE §6, CONTRACTS §C "Reducer implementation invariants".
 
 ## Lifecycle
@@ -22,7 +22,7 @@
 
 ## Done when
 - [x] Unit/integration tests for each rule above (`apps/db/scripts/ledger-smoke.mjs`, live on `dcos-dev`, all pass)
-- [ ] P2-7 Gate 2 script passes (P2-7; needs the live db-client `connect()`)
+- [x] P2-7 Gate 2 script passes (ALL PASS on `dcos-dev`, offline local and prod `dcos`)
 
 ## Blocked by
 P1's `evaluateSafety` (P1-6, 12:30 AM) and actions inside `step()` (P1-5, 11:45 PM).

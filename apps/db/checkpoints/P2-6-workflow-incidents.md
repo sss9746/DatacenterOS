@@ -1,5 +1,5 @@
 # P2-6: Workflow + incidents ‖
-**Due:** 1:15 AM · **Status:** ☐ · **Owns:** `apps/db/src/workflow.ts`, `apps/db/src/incidents.ts` (+ tests)
+**Due:** 1:15 AM · **Status:** ☑ · **Owns:** `apps/db/src/workflow.ts`, `apps/db/src/incidents.ts` (+ tests)
 **Can run in parallel with P2-5** (separate worktree; different files).
 
 ## Goal

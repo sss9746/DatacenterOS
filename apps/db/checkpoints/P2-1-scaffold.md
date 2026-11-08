@@ -1,5 +1,5 @@
 # P2-1: Scaffold module, publish `dcos-dev`, generate bindings
-**Due:** 9:00 PM · **Gate:** 0 · **Status:** ☐
+**Due:** 9:00 PM · **Gate:** 0 · **Status:** ☑
 **Owns:** `apps/db/**`, `packages/db-client/src/generated/**`
 
 ## Goal

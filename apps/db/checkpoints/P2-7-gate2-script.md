@@ -1,5 +1,5 @@
 # P2-7: Gate 2 script
-**Due:** 1:30 AM · **Gate:** 2 · **Status:** ☐ · **Owns:** `apps/db/scripts/**`
+**Due:** 1:30 AM · **Gate:** 2 · **Status:** ☑ · **Owns:** `apps/db/scripts/**`
 
 ## Goal
 `apps/db/scripts/gate2.ts` (run with `tsx`, uses `@dcos/db-client` `connect()`) proves the ledger end to end against `dcos-dev` and prints PASS/FAIL per check.
@@ -14,7 +14,7 @@
 7. **Crash:** a child process requests + claims + starts a checkpoint, then is killed (`SIGKILL`); the parent watches the checkpoint still reach `succeeded` and leases release afterwards.
 
 ## Done when
-- [x] Script prints all PASS twice in a row on `dcos-dev`
+- [x] Script prints all PASS twice in a row on `dcos-dev` (also ALL PASS offline on a local server and on prod `dcos`, 2026-11-08)
 - [ ] Integrator ticks Gate 2 in `plans/README.md`
 
 ## Architect notes (Codex)

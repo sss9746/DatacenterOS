@@ -12,9 +12,9 @@ P3 and P4 run against the real `dcos` database with their own tokens, and we can
 5. `/cso` security pass over role checks and private tables before tokens go out.
 
 ## Done when
-- [ ] P3's agent and P4's dashboard work against `dcos` with real tokens
-- [ ] Offline local run works end to end
-- [ ] `git grep` finds no token in the repo
+- [ ] P3's agent and P4's dashboard work against `dcos` with real tokens (**P3 done**: agent verified on `dcos`; **P4 open**)
+- [x] Offline local run works end to end (local publish + bootstrap + Gate 2 ALL PASS)
+- [x] `git grep` finds no token in the repo (no JWT, no `STDB_*_TOKEN=` value, no `nvapi-` key; checked 2026-11-08 after the main merge)
 
 ## Architect notes (Codex)
 
