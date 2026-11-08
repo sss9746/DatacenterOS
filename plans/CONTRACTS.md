@@ -187,6 +187,20 @@ The browser can read public tables without a token. **Tokens are handed out by P
 11. **Incident severity** maps from symptom severity: critical → `critical`, warning → `high`, info → `medium`.
 12. **The triage tool `submit_incident_assessment`** may return `split_symptom_ids` (a proper subset of a candidate's symptoms) for a `split`. This is internal to P3, not a wire type.
 13. **`cancel_action(command_key, reason_code, fencing_token)`** accepts **either** the action's own lease fencing token **or** the fencing token of the workflow that owns the action, when the caller holds that workflow's lease. Replan cancels superseded actions this way. Only `requested` and `claimed` actions can be cancelled; `running` ones never can.
+14. **DB errors are recognized by `code`, not by class.**
+    - Every rejection from `@dcos/db-client` is an `Error` with a string `code` from this set: `COMMAND_KEY_COLLISION`, `VERSION_CONFLICT`, `STALE_FENCING_TOKEN`, `LEASE_HELD`, `LEASE_EXPIRED`, `INVALID_TRANSITION`, `NOT_FOUND`, `INVALID_PAYLOAD`, `UNAUTHORIZED`.
+    - It also carries an optional `violations: string[]`.
+    - The reducer's error string starts with the code (e.g. `"LEASE_HELD: …"`), and the client parses it into `.code`.
+    - Consumers must check `e.code` and never use `instanceof`.
+15. **`onChange(cb): unsubscribe` is a frozen db-client function.** It fires a `DbChange` for each of these:
+    - `{ kind: "decision_epoch", decision_epoch, sim_time_ms }` when `run.decision_epoch` changes
+    - `{ kind: "resource_version", resource_id, version, sim_time_ms }` when a `resource.version` or `gpu_current.version` row changes
+    - `{ kind: "signal", signal: SignalEvent }` when a `signal_event` row is inserted
+    - `{ kind: "action_status", status: ActionStatus }` when an `action` row changes
+
+    It's built on table subscriptions. The shapes match `apps/agent/src/ports.ts`.
+16. **`heartbeat_workflow` does not bump `workflow.version`.** It only extends `lease_expires_unix_ms` with the same fencing token. `update_workflow` bumps the version.
+17. **When the model is unavailable,** the agent still runs its **deterministic, safety-checked** plan. Events are tagged `actor: "code"` and the summary starts with "deterministic:". Plans are flagged `needs_approval` for the UI but not held back, because hackathon demo resilience outweighs approval gating. `requireApproval=true` turns the gating on.
 
 ---
 
